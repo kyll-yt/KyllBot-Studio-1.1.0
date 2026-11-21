@@ -104,6 +104,11 @@ const ICONS = {
   save: '<path d="M4 3.5h8.5L16.5 7v9.5H4V3.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M7 3.5v4h5v-4M7 16.5v-4.5h6v4.5" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>',
   duplicate: '<rect x="6.5" y="6.5" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M13.5 6.5V5.2c0-.9-.8-1.7-1.7-1.7H5.2c-.9 0-1.7.8-1.7 1.7v6.6c0 .9.8 1.7 1.7 1.7h1.3" stroke="currentColor" stroke-width="1.4"/>',
   up: '<path d="M10 15.5V5M5.5 9.5 10 5l4.5 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
+  pin: '<path d="M7 3.5h6l-.7 3.4 2.7 2.6H5l2.7-2.6L7 3.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M10 9.5v7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>',
+  keyboard: '<rect x="2.5" y="5.5" width="15" height="9" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M5.5 8.5h1M8.5 8.5h1M11.5 8.5h1M14 8.5h.5M6.5 11.5h7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>',
+  calc: '<rect x="4.5" y="2.5" width="11" height="15" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M7 6h6M7 9.5h1.5M11 9.5h1.5M7 13h1.5M11 13h1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>',
+  plug: '<path d="M7 3v4M13 3v4M5 7h10v3a5 5 0 0 1-10 0V7ZM10 15v2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>',
+  hashtag: '<path d="M7.5 3 6 17M14 3l-1.5 14M3.5 7.5h13M3 12.5h13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>',
   down: '<path d="M10 4.5V15M5.5 10.5 10 15l4.5-4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
 };
 
