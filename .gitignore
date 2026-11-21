@@ -3,3 +3,4 @@ data/
 server.log
 .env
 .DS_Store
+public/previews/
