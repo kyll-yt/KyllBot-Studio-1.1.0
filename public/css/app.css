@@ -1429,3 +1429,5 @@ input[type='color'].input { width: 56px; max-width: 56px; height: 42px; padding:
 .node .variants { display: flex; flex-direction: column; gap: 5px; }
 .node .variant-row { display: grid; grid-template-columns: 16px minmax(0, 1fr) 38px 20px; gap: 4px; }
 .node .fld-row { gap: 6px; }
+.flow-layout .flow-side > .panel,
+.flow-layout .flow-test > .panel { flex: 0 0 auto; }
