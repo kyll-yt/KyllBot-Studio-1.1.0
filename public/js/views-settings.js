@@ -328,9 +328,23 @@ function bindChrome() {
   });
 
   const search = document.getElementById('globalSearch');
+  const searchBox = document.getElementById('searchResults');
+
   search?.addEventListener('input', () => {
     state.search = search.value.trim();
-    render();
+    renderSearchResults();
+    if (['bots', 'courses'].includes(state.route.name)) render();
+  });
+
+  searchBox?.addEventListener('click', (event) => {
+    if (!event.target.closest('a')) return;
+    state.search = '';
+    if (search) search.value = '';
+    searchBox.hidden = true;
+  });
+
+  document.addEventListener('click', (event) => {
+    if (searchBox && !event.target.closest('.search')) searchBox.hidden = true;
   });
 
   document.addEventListener('keydown', (event) => {
@@ -338,7 +352,47 @@ function bindChrome() {
       event.preventDefault();
       search?.focus();
     }
+    if (event.key === 'Escape' && searchBox) searchBox.hidden = true;
   });
+}
+
+function renderSearchResults() {
+  const box = document.getElementById('searchResults');
+  const input = document.getElementById('globalSearch');
+  if (!box || !input) return;
+  const query = state.search.toLowerCase();
+  if (!query) {
+    box.hidden = true;
+    box.innerHTML = '';
+    return;
+  }
+
+  const matches = [
+    ...state.ws.bots
+      .filter((bot) => `${bot.name} ${bot.description}`.toLowerCase().includes(query))
+      .map((bot) => ({ href: `#/bots/${bot.id}`, icon: 'bot', title: bot.name, sub: 'Bot Discord' })),
+    ...state.ws.courses
+      .filter((course) => `${course.title} ${course.description}`.toLowerCase().includes(query))
+      .map((course) => ({ href: `#/courses/${course.id}`, icon: 'book', title: course.title, sub: 'Formation' })),
+    ...state.ws.learners
+      .filter((learner) => `${learner.name} ${learner.email}`.toLowerCase().includes(query))
+      .map((learner) => ({ href: '#/learners', icon: 'users', title: learner.name, sub: 'Apprenant' })),
+  ].slice(0, 8);
+
+  box.hidden = false;
+  box.innerHTML = matches.length
+    ? matches
+        .map(
+          (item) => `<a class="sh-item" href="${item.href}">
+            <span class="sh-ic">${icon(item.icon)}</span>
+            <span class="sh-main">
+              <span class="sh-title">${esc(item.title)}</span>
+              <span class="sh-sub">${esc(item.sub)}</span>
+            </span>
+          </a>`,
+        )
+        .join('')
+    : '<div class="sh-empty">Aucun résultat pour cette recherche.</div>';
 }
 
 async function bootstrap() {
@@ -362,6 +416,8 @@ async function bootstrap() {
     state.search = '';
     const search = document.getElementById('globalSearch');
     if (search) search.value = '';
+    const results = document.getElementById('searchResults');
+    if (results) results.hidden = true;
     state.botTab = 'commands';
     render();
     updateChrome();
