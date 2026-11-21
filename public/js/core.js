@@ -89,6 +89,22 @@ const ICONS = {
   link: '<path d="M8 12 12 8M7 6.5 8.7 4.8a3 3 0 0 1 4.2 4.2L11.2 10.7M13 13.5l-1.7 1.7a3 3 0 0 1-4.2-4.2L8.8 9.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
   globe: '<circle cx="10" cy="10" r="7.2" stroke="currentColor" stroke-width="1.5"/><path d="M2.8 10h14.4M10 2.8c2 2 3 4.5 3 7.2s-1 5.2-3 7.2c-2-2-3-4.5-3-7.2s1-5.2 3-7.2Z" stroke="currentColor" stroke-width="1.3"/>',
   logout: '<path d="M12.5 6.5V4.8c0-.7-.6-1.3-1.3-1.3H4.8c-.7 0-1.3.6-1.3 1.3v10.4c0 .7.6 1.3 1.3 1.3h6.4c.7 0 1.3-.6 1.3-1.3v-1.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M8.5 10h8m-2.5-2.5L16.5 10 14 12.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  message: '<path d="M3 5.5h14v8H9.5L5 16.5v-3H3v-8Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>',
+  layers: '<path d="M10 3 3 6.4l7 3.4 7-3.4L10 3Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="m3 10 7 3.4 7-3.4M3 13.6 10 17l7-3.4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>',
+  branch: '<circle cx="5" cy="5" r="2.1" stroke="currentColor" stroke-width="1.5"/><circle cx="5" cy="15" r="2.1" stroke="currentColor" stroke-width="1.5"/><circle cx="15" cy="10" r="2.1" stroke="currentColor" stroke-width="1.5"/><path d="M5 7.1v5.8M7.1 5h4.4c1.4 0 2.4 1 2.4 2.4v.5M7.1 15H11c1.4 0 2.4-1 2.4-2.4v-.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>',
+  variable: '<path d="M4 5.5c2 0 3 1.2 3 3v3c0 1.8 1 3 3 3M16 5.5c-2 0-3 1.2-3 3v3c0 1.8-1 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
+  shuffle: '<path d="M3 6h3l7 8h4M3 14h3l2.2-2.5M14 6h3M14 6l2.5-2.5M14 6l2.5 2.5M14 14l2.5-2.5M14 14l2.5 2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>',
+  terminal: '<rect x="2.5" y="4" width="15" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="m6 8.5 2 2-2 2M10.5 12.5h3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>',
+  smile: '<circle cx="10" cy="10" r="7.2" stroke="currentColor" stroke-width="1.5"/><path d="M7 11.5c.7 1.4 1.7 2 3 2s2.3-.6 3-2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="7.6" cy="8" r=".9" fill="currentColor"/><circle cx="12.4" cy="8" r=".9" fill="currentColor"/>',
+  cursor: '<path d="M5 3.5 15.5 9l-4.4 1.3L9.6 15 5 3.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>',
+  userPlus: '<circle cx="7.5" cy="7" r="2.7" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 16.4c0-2.6 2.2-4.6 5-4.6 1 0 2 .3 2.7.8M14 9.5v4M12 11.5h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
+  userMinus: '<circle cx="7.5" cy="7" r="2.7" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 16.4c0-2.6 2.2-4.6 5-4.6 1 0 2 .3 2.7.8M12 11.5h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
+  slash: '<path d="M12.5 3 7.5 17" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
+  flow: '<circle cx="4.5" cy="5" r="1.8" stroke="currentColor" stroke-width="1.4"/><circle cx="4.5" cy="15" r="1.8" stroke="currentColor" stroke-width="1.4"/><circle cx="15.5" cy="10" r="1.8" stroke="currentColor" stroke-width="1.4"/><path d="M6.3 5h3.2c1.5 0 2.5 1 2.5 2.5v0M6.3 15h3.2c1.5 0 2.5-1 2.5-2.5v0" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>',
+  save: '<path d="M4 3.5h8.5L16.5 7v9.5H4V3.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M7 3.5v4h5v-4M7 16.5v-4.5h6v4.5" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>',
+  duplicate: '<rect x="6.5" y="6.5" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M13.5 6.5V5.2c0-.9-.8-1.7-1.7-1.7H5.2c-.9 0-1.7.8-1.7 1.7v6.6c0 .9.8 1.7 1.7 1.7h1.3" stroke="currentColor" stroke-width="1.4"/>',
+  up: '<path d="M10 15.5V5M5.5 9.5 10 5l4.5 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
+  down: '<path d="M10 4.5V15M5.5 10.5 10 15l4.5-4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
 };
 
 const icon = (name, cls = '') => `<svg class="${cls}" viewBox="0 0 20 20" fill="none" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -244,7 +260,7 @@ function updateChrome() {
   document.getElementById('planName').textContent = ws.plan;
   document.getElementById('userMenuHead').textContent = user.email;
 
-  const navName = state.route.name === 'bot' ? 'bots' : state.route.name === 'course' ? 'courses' : state.route.name;
+  const navName = ['bot', 'flow'].includes(state.route.name) ? 'bots' : state.route.name === 'course' ? 'courses' : state.route.name;
   document.querySelectorAll('.nav-link').forEach((link) => {
     link.classList.toggle('active', link.dataset.nav === navName);
   });
@@ -253,6 +269,7 @@ function updateChrome() {
     dashboard: "Vue d'ensemble",
     bots: 'Mes bots',
     bot: 'Détail du bot',
+    flow: 'Éditeur de flux',
     courses: 'Formations',
     course: 'Éditeur de formation',
     learners: 'Apprenants',
@@ -286,11 +303,11 @@ function updateChrome() {
 
 function parseHash() {
   const raw = window.location.hash.replace(/^#\/?/, '');
-  const [base, id] = raw.split('/');
+  const [base, id, sub, subId] = raw.split('/');
   let name = base || 'dashboard';
-  if (id && name === 'bots') name = 'bot';
+  if (id && name === 'bots') name = sub === 'flows' && subId ? 'flow' : 'bot';
   if (id && name === 'courses') name = 'course';
-  return { name, id: id || null };
+  return { name, id: id || null, sub: sub || null, subId: subId || null };
 }
 
 function render() {
@@ -300,6 +317,7 @@ function render() {
     dashboard: viewDashboard,
     bots: viewBots,
     bot: () => viewBotDetail(id),
+    flow: () => viewFlowEditor(id, state.route.subId),
     courses: viewCourses,
     course: () => viewCourseDetail(id),
     learners: viewLearners,

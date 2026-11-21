@@ -20,6 +20,7 @@ import {
   verifyLoginCode,
 } from './auth.js';
 import { seedWorkspace } from './seed.js';
+import { describeTrigger, ensureBotFlows, flowTemplate, runFlow, sanitizeFlow } from './flows.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 12000);
@@ -54,6 +55,7 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 /* ------------------------------------------------------------------ */
 
 const str = (value, max = 200) => String(value ?? '').trim().slice(0, max);
+const describeFlowTrigger = (trigger) => describeTrigger(trigger);
 
 function getWorkspace(userId) {
   if (!db.workspaces[userId]) {
@@ -128,6 +130,7 @@ function computeStats(ws) {
 
 function workspacePayload(user) {
   const ws = getWorkspace(user.id);
+  for (const bot of ws.bots) ensureBotFlows(bot);
   return {
     user: publicUser(user),
     workspace: ws,
@@ -293,6 +296,7 @@ app.post(
         { id: newId(), type: 'welcome', label: "Message d'accueil", enabled: false, config: {} },
         { id: newId(), type: 'moderation', label: 'Modération automatique', enabled: false, config: {} },
       ],
+      flows: [],
     };
     ws.bots.unshift(bot);
     pushActivity(ws, 'bot', `Le bot « ${bot.name} » a été créé`);
@@ -425,6 +429,78 @@ app.patch(
     }
     persist();
     res.json({ automation });
+  }),
+);
+
+app.post(
+  '/api/bots/:id/flows',
+  requireAuth,
+  wrap(async (req, res) => {
+    const ws = getWorkspace(req.user.id);
+    const bot = findOr404(ws.bots, req.params.id, 'Bot');
+    const flows = ensureBotFlows(bot);
+    if (flows.length >= 40) throw bad('Limite de 40 flux atteinte pour ce bot.');
+    const template = str(req.body?.template, 20);
+    const flow = template ? flowTemplate(template, bot.name) : sanitizeFlow({ name: str(req.body?.name, 60) || 'Nouveau flux' });
+    flow.name = str(req.body?.name, 60) || flow.name;
+    flow.description = describeFlowTrigger(flow.trigger);
+    flows.push(flow);
+    pushActivity(ws, 'bot', `Le flux « ${flow.name} » a été créé sur ${bot.name}`);
+    persist();
+    res.status(201).json({ flow });
+  }),
+);
+
+app.patch(
+  '/api/bots/:id/flows/:flowId',
+  requireAuth,
+  wrap(async (req, res) => {
+    const ws = getWorkspace(req.user.id);
+    const bot = findOr404(ws.bots, req.params.id, 'Bot');
+    const flows = ensureBotFlows(bot);
+    const index = flows.findIndex((flow) => flow.id === req.params.flowId);
+    if (index === -1) throw Object.assign(new Error('Flux introuvable.'), { status: 404 });
+    const body = req.body || {};
+    const previous = flows[index];
+    const next = sanitizeFlow({ ...previous, ...body }, previous);
+    if (body.name === undefined) next.name = previous.name;
+    if (body.trigger) next.description = describeFlowTrigger(next.trigger);
+    flows[index] = next;
+    persist();
+    res.json({ flow: next });
+  }),
+);
+
+app.delete(
+  '/api/bots/:id/flows/:flowId',
+  requireAuth,
+  wrap(async (req, res) => {
+    const ws = getWorkspace(req.user.id);
+    const bot = findOr404(ws.bots, req.params.id, 'Bot');
+    const flows = ensureBotFlows(bot);
+    const flow = findOr404(flows, req.params.flowId, 'Flux');
+    bot.flows = flows.filter((entry) => entry.id !== flow.id);
+    pushActivity(ws, 'bot', `Le flux « ${flow.name} » a été supprimé`);
+    persist();
+    res.json({ ok: true });
+  }),
+);
+
+app.post(
+  '/api/bots/:id/flows/:flowId/run',
+  requireAuth,
+  wrap(async (req, res) => {
+    const ws = getWorkspace(req.user.id);
+    const bot = findOr404(ws.bots, req.params.id, 'Bot');
+    const flows = ensureBotFlows(bot);
+    const flow = findOr404(flows, req.params.flowId, 'Flux');
+    const result = runFlow(flow, { ...req.body, bot: bot.name });
+    if (req.body?.live) {
+      flow.runs = (flow.runs || 0) + 1;
+      flow.lastRunAt = new Date().toISOString();
+      persist();
+    }
+    res.json(result);
   }),
 );
 

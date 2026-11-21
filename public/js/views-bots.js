@@ -179,6 +179,7 @@ function viewBotDetail(id) {
 
   const tabs = [
     ['commands', `Commandes (${bot.commands.length})`],
+    ['flows', `Flux (${(bot.flows || []).length})`],
     ['automations', `Automatisations (${bot.automations.length})`],
     ['settings', 'Paramètres'],
   ];
@@ -215,6 +216,8 @@ function viewBotDetail(id) {
         }
       </div>
     </div>`;
+  } else if (state.botTab === 'flows') {
+    body = viewBotFlows(bot);
   } else if (state.botTab === 'automations') {
     body = `<div class="panel">
       <div class="panel-head"><h3>Automatisations</h3><div class="ph-actions"><span class="pill violet">${bot.automations.filter((a) => a.enabled).length} active(s)</span></div></div>

@@ -1,4 +1,5 @@
 import { newId } from './db.js';
+import { flowTemplate } from './flows.js';
 
 const iso = (daysAgo = 0, hoursAgo = 0) =>
   new Date(Date.now() - daysAgo * 864e5 - hoursAgo * 36e5).toISOString();
@@ -60,6 +61,7 @@ export function seedWorkspace(user) {
         automation('ticketPanel', 'Panneau de tickets', false, { category: 'Support' }),
         automation('moderation', 'Modération automatique', true, { antiSpam: true }),
       ],
+      flows: [flowTemplate('welcome', 'KyllBot Communauté'), flowTemplate('ticket', 'KyllBot Communauté'), flowTemplate('quiz', 'KyllBot Communauté')],
     },
     {
       id: newId(),
@@ -83,6 +85,7 @@ export function seedWorkspace(user) {
         automation('autoMod', 'Auto-modération', true, { blockLinks: false }),
         automation('logs', 'Journal des sanctions', true, { channel: '#logs' }),
       ],
+      flows: [flowTemplate('moderation', 'Modération Pro')],
     },
     {
       id: newId(),
@@ -100,6 +103,7 @@ export function seedWorkspace(user) {
         command('certificat', 'Génère un certificat', 'Certificat disponible pour **{course}**.', 12),
       ],
       automations: [automation('reminders', 'Rappels de cours', true, { cron: 'lundi 09:00' })],
+      flows: [flowTemplate('quiz', 'Kyll Learning Assistant')],
     },
   ];
 
