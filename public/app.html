@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Studio — KyllBot Studio Officiel</title>
+  <meta name="theme-color" content="#07060d" />
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/site.css" />
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <div class="app-shell" id="appShell">
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+    <aside class="sidebar" aria-label="Navigation du studio">
+      <a class="brand" href="#/dashboard">
+        <img src="/assets/logo.svg" alt="" width="32" height="32" />
+        KyllBot Studio
+        <span class="brand-suffix">Officiel</span>
+      </a>
+
+      <nav>
+        <div class="nav-group">
+          <span class="nav-label">Studio</span>
+          <a class="nav-link" href="#/dashboard" data-nav="dashboard">
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="2.5" width="6" height="6" rx="1.6" stroke="currentColor" stroke-width="1.5"/><rect x="11.5" y="2.5" width="6" height="6" rx="1.6" stroke="currentColor" stroke-width="1.5"/><rect x="2.5" y="11.5" width="6" height="6" rx="1.6" stroke="currentColor" stroke-width="1.5"/><rect x="11.5" y="11.5" width="6" height="6" rx="1.6" stroke="currentColor" stroke-width="1.5"/></svg>
+            Vue d'ensemble
+          </a>
+          <a class="nav-link" href="#/bots" data-nav="bots">
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="3" y="5" width="14" height="11" rx="3.4" stroke="currentColor" stroke-width="1.5"/><circle cx="7.6" cy="10.5" r="1.2" fill="currentColor"/><circle cx="12.4" cy="10.5" r="1.2" fill="currentColor"/><path d="M10 5V2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            Mes bots <span class="nav-count" id="navBotCount">0</span>
+          </a>
+          <a class="nav-link" href="#/courses" data-nav="courses">
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 4.5 2.8 7.6 10 10.7l7.2-3.1L10 4.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M5.2 9.4v4.1c0 1.2 2.1 2.4 4.8 2.4s4.8-1.2 4.8-2.4V9.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            Formations
+          </a>
+          <a class="nav-link" href="#/learners" data-nav="learners">
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="7.5" cy="7" r="2.8" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 16.5c0-2.7 2.2-4.8 5-4.8s5 2.1 5 4.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M13.4 6.2a2.4 2.4 0 0 1 0 4.7M15.4 16c0-1.9-.8-3.2-2-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            Apprenants
+          </a>
+          <a class="nav-link" href="#/templates" data-nav="templates">
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="3" width="15" height="14" rx="2.4" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 7.5h15M7 7.5V17" stroke="currentColor" stroke-width="1.5"/></svg>
+            Modèles
+          </a>
+          <a class="nav-link" href="#/stats" data-nav="stats">
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 16.5V10M7.7 16.5V5M12.3 16.5v-4.5M17 16.5V7.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+            Statistiques
+          </a>
+        </div>
+
+        <div class="nav-group">
+          <span class="nav-label">Organisation</span>
+          <a class="nav-link" href="#/team" data-nav="team">
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="7" cy="7.5" r="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 16c0-2.5 2-4.4 4.5-4.4S11.5 13.5 11.5 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="14" cy="7" r="2" stroke="currentColor" stroke-width="1.5"/></svg>
+            Équipe
+          </a>
+          <a class="nav-link" href="#/api" data-nav="api">
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M7.5 6 3.5 10l4 4M12.5 6l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            API &amp; webhooks
+          </a>
+          <a class="nav-link" href="#/billing" data-nav="billing">
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2" y="5" width="16" height="11" rx="2.4" stroke="currentColor" stroke-width="1.5"/><path d="M2 9h16" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 13h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            Facturation
+          </a>
+          <a class="nav-link" href="#/settings" data-nav="settings">
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            Paramètres
+          </a>
+        </div>
+      </nav>
+
+      <div class="sidebar-card">
+        <div class="sc-top">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1.5 9.8 6l4.7.4-3.6 3.1 1.1 4.6L8 11.6l-4 2.5 1.1-4.6L1.5 6.4 6.2 6 8 1.5Z" fill="currentColor"/></svg>
+          Plan <span id="planName">Pro</span>
+        </div>
+        <p id="planHint">Bots illimités, certificats et exports inclus.</p>
+        <a class="btn btn-primary" href="#/billing">Gérer l'abonnement</a>
+      </div>
+
+      <div class="sidebar-user">
+        <span class="avatar" id="sideAvatar" style="width:32px;height:32px;font-size:12px">K</span>
+        <div class="su-meta">
+          <b id="sideName">—</b>
+          <span id="sideEmail">—</span>
+        </div>
+        <button class="icon-btn" id="logoutBtn" title="Se déconnecter" aria-label="Se déconnecter" style="width:30px;height:30px">
+          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M12.5 6.5V4.8c0-.7-.6-1.3-1.3-1.3H4.8c-.7 0-1.3.6-1.3 1.3v10.4c0 .7.6 1.3 1.3 1.3h6.4c.7 0 1.3-.6 1.3-1.3v-1.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M8.5 10h8m-2.5-2.5L16.5 10 14 12.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="icon-btn menu-btn" id="menuBtn" aria-label="Ouvrir le menu">
+          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 5.5h14M3 10h14M3 14.5h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </button>
+        <div class="crumbs" id="crumbs">
+          <span>Studio</span>
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <b id="crumbCurrent">Vue d'ensemble</b>
+        </div>
+
+        <div class="search">
+          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6"/><path d="m13.2 13.2 3.3 3.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <input type="search" id="globalSearch" placeholder="Rechercher…" aria-label="Rechercher" />
+        </div>
+
+        <div class="dropdown">
+          <button class="icon-btn" id="bellBtn" aria-label="Notifications" aria-haspopup="true" aria-expanded="false">
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M5.5 8.2a4.5 4.5 0 1 1 9 0c0 3.4 1.2 4.6 1.2 4.6H4.3s1.2-1.2 1.2-4.6Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8.4 15.6a1.8 1.8 0 0 0 3.2 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <span class="dot-badge"></span>
+          </button>
+          <div class="dropdown-menu" id="bellMenu">
+            <div class="dm-head">Activité récente</div>
+            <div class="notif-list" id="notifList"></div>
+          </div>
+        </div>
+
+        <div class="dropdown">
+          <button class="user-chip" id="userBtn" aria-haspopup="true" aria-expanded="false">
+            <span class="avatar" id="topAvatar" style="width:26px;height:26px;font-size:10px">K</span>
+            <span class="uc-name" id="topName">Compte</span>
+            <svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="dropdown-menu" id="userMenu">
+            <div class="dm-head" id="userMenuHead">Mon compte</div>
+            <a class="dm-item" href="#/settings">
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+              Paramètres
+            </a>
+            <a class="dm-item" href="#/billing">
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2" y="5" width="16" height="11" rx="2.4" stroke="currentColor" stroke-width="1.5"/><path d="M2 9h16" stroke="currentColor" stroke-width="1.5"/></svg>
+              Facturation
+            </a>
+            <button class="dm-item danger" id="logoutBtn2" type="button">
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M12.5 6.5V4.8c0-.7-.6-1.3-1.3-1.3H4.8c-.7 0-1.3.6-1.3 1.3v10.4c0 .7.6 1.3 1.3 1.3h6.4c.7 0 1.3-.6 1.3-1.3v-1.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M8.5 10h8m-2.5-2.5L16.5 10 14 12.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Se déconnecter
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main class="content" id="view" tabindex="-1"></main>
+    </div>
+  </div>
+
+  <div class="toast-root" id="toastRoot" aria-live="polite"></div>
+  <div id="modalRoot"></div>
+
+  <script src="/js/core.js"></script>
+  <script src="/js/views-bots.js"></script>
+  <script src="/js/views-courses.js"></script>
+  <script src="/js/views-more.js"></script>
+  <script src="/js/views-settings.js"></script>
+</body>
+</html>

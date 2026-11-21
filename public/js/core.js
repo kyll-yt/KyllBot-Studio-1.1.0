@@ -1,0 +1,494 @@
+'use strict';
+
+/* ------------------------------------------------------------------ */
+/* état & utilitaires                                                  */
+/* ------------------------------------------------------------------ */
+
+const state = {
+  user: null,
+  ws: null,
+  stats: null,
+  config: {},
+  route: { name: 'dashboard', id: null },
+  botTab: 'commands',
+  search: '',
+};
+
+const esc = (value) =>
+  String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const fmt = (n) => new Intl.NumberFormat('fr-FR').format(Number(n) || 0);
+
+const initials = (name) => {
+  const words = String(name || '')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  const value = words
+    .map((word) => word[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+  return value || 'K';
+};
+
+function avatarHtml(user, size = 34, radius = 10) {
+  if (user?.avatar) {
+    return `<span class="avatar" style="width:${size}px;height:${size}px;border-radius:${radius}px"><img src="${esc(user.avatar)}" alt=""></span>`;
+  }
+  return `<span class="avatar" style="width:${size}px;height:${size}px;border-radius:${radius}px;font-size:${Math.round(size * 0.38)}px">${esc(initials(user?.name))}</span>`;
+}
+
+function timeAgo(iso) {
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (!Number.isFinite(diff)) return '';
+  if (diff < 90) return "à l'instant";
+  if (diff < 3600) return `il y a ${Math.floor(diff / 60)} min`;
+  if (diff < 86400) return `il y a ${Math.floor(diff / 3600)} h`;
+  const days = Math.floor(diff / 86400);
+  if (days === 1) return 'hier';
+  if (days < 30) return `il y a ${days} j`;
+  return new Date(iso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+}
+
+const ICONS = {
+  grid: '<rect x="2.5" y="2.5" width="6" height="6" rx="1.6" stroke="currentColor" stroke-width="1.5"/><rect x="11.5" y="2.5" width="6" height="6" rx="1.6" stroke="currentColor" stroke-width="1.5"/><rect x="2.5" y="11.5" width="6" height="6" rx="1.6" stroke="currentColor" stroke-width="1.5"/><rect x="11.5" y="11.5" width="6" height="6" rx="1.6" stroke="currentColor" stroke-width="1.5"/>',
+  bot: '<rect x="3" y="5" width="14" height="11" rx="3.4" stroke="currentColor" stroke-width="1.5"/><circle cx="7.6" cy="10.5" r="1.2" fill="currentColor"/><circle cx="12.4" cy="10.5" r="1.2" fill="currentColor"/><path d="M10 5V2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
+  book: '<path d="M10 4.5 2.8 7.6 10 10.7l7.2-3.1L10 4.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M5.2 9.4v4.1c0 1.2 2.1 2.4 4.8 2.4s4.8-1.2 4.8-2.4V9.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
+  users: '<circle cx="7.5" cy="7" r="2.8" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 16.5c0-2.7 2.2-4.8 5-4.8s5 2.1 5 4.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M13.4 6.2a2.4 2.4 0 0 1 0 4.7M15.4 16c0-1.9-.8-3.2-2-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
+  chart: '<path d="M3 16.5V10M7.7 16.5V5M12.3 16.5v-4.5M17 16.5V7.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>',
+  template: '<rect x="2.5" y="3" width="15" height="14" rx="2.4" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 7.5h15M7 7.5V17" stroke="currentColor" stroke-width="1.5"/>',
+  team: '<circle cx="7" cy="7.5" r="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 16c0-2.5 2-4.4 4.5-4.4S11.5 13.5 11.5 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="14" cy="7" r="2" stroke="currentColor" stroke-width="1.5"/>',
+  code: '<path d="M7.5 6 3.5 10l4 4M12.5 6l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
+  card: '<rect x="2" y="5" width="16" height="11" rx="2.4" stroke="currentColor" stroke-width="1.5"/><path d="M2 9h16" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 13h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
+  gear: '<circle cx="10" cy="10" r="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
+  plus: '<path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
+  trash: '<path d="M4 6h12M8 6V4.5c0-.6.4-1 1-1h2c.6 0 1 .4 1 1V6M6 6l.7 10c0 .6.5 1 1 1h4.6c.5 0 1-.4 1-1L14 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>',
+  edit: '<path d="M12.6 3.9a1.6 1.6 0 0 1 2.3 2.3l-8 8-3 .7.7-3 8-8Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>',
+  play: '<path d="M6 4.5 14.5 10 6 15.5v-11Z" fill="currentColor"/>',
+  check: '<path d="M3.5 10.5 7.5 14.5l9-9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
+  x: '<path d="M5 5l10 10M15 5 5 15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
+  clock: '<circle cx="10" cy="10" r="7.2" stroke="currentColor" stroke-width="1.5"/><path d="M10 6v4.3l2.8 1.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  video: '<rect x="2.5" y="5" width="11" height="10" rx="2.2" stroke="currentColor" stroke-width="1.5"/><path d="M13.5 8.5 17.5 6v8l-4-2.5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>',
+  file: '<path d="M5 2.5h6l4 4v11H5v-15Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M11 2.5v4h4M7.5 10.5h5M7.5 13.5h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
+  quiz: '<circle cx="10" cy="10" r="7.2" stroke="currentColor" stroke-width="1.5"/><path d="M8 8a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6 1v.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="14" r=".9" fill="currentColor"/>',
+  key: '<circle cx="7" cy="10" r="3.2" stroke="currentColor" stroke-width="1.5"/><path d="M10 10h7M14 10v2.5M16.5 10v2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
+  copy: '<rect x="7" y="7" width="9.5" height="9.5" rx="1.8" stroke="currentColor" stroke-width="1.4"/><path d="M12.5 7V4.8c0-.7-.6-1.3-1.3-1.3H4.8c-.7 0-1.3.6-1.3 1.3v6.4c0 .7.6 1.3 1.3 1.3H7" stroke="currentColor" stroke-width="1.4"/>',
+  download: '<path d="M10 3v9m0 0 3.5-3.5M10 12 6.5 8.5M3.5 15.5h13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  shield: '<path d="M10 2.5 16 5v5c0 3.8-2.5 6.5-6 7.5-3.5-1-6-3.7-6-7.5V5l6-2.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>',
+  zap: '<path d="M11 2 4 11h5l-1 7 8-9.5h-5L11 2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>',
+  arrow: '<path d="M3.5 10h12M11 5.5 15.5 10 11 14.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
+  arrowLeft: '<path d="M16.5 10h-12M9 5.5 4.5 10 9 14.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
+  spark: '<path d="M8 1.5 9.8 6l4.7.4-3.6 3.1 1.1 4.6L8 11.6l-4 2.5 1.1-4.6L1.5 6.4 6.2 6 8 1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>',
+  mail: '<rect x="2.5" y="4.5" width="15" height="11" rx="2.2" stroke="currentColor" stroke-width="1.5"/><path d="m3.5 6 6.5 4.7L16.5 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  ticket: '<path d="M3 7.5V5.5h14v2a2.5 2.5 0 0 0 0 5v2H3v-2a2.5 2.5 0 0 0 0-5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 5.5v9" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 2"/>',
+  award: '<circle cx="10" cy="8" r="4.5" stroke="currentColor" stroke-width="1.5"/><path d="M7 11.8 6 17.5l4-2 4 2-1-5.7" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>',
+  external: '<path d="M11 4h5v5M16 4l-7 7M8 5H4.5v10.5H15V12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  alert: '<path d="M10 3 18 17H2L10 3Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M10 8v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="10" cy="14.6" r=".9" fill="currentColor"/>',
+  link: '<path d="M8 12 12 8M7 6.5 8.7 4.8a3 3 0 0 1 4.2 4.2L11.2 10.7M13 13.5l-1.7 1.7a3 3 0 0 1-4.2-4.2L8.8 9.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
+  globe: '<circle cx="10" cy="10" r="7.2" stroke="currentColor" stroke-width="1.5"/><path d="M2.8 10h14.4M10 2.8c2 2 3 4.5 3 7.2s-1 5.2-3 7.2c-2-2-3-4.5-3-7.2s1-5.2 3-7.2Z" stroke="currentColor" stroke-width="1.3"/>',
+  logout: '<path d="M12.5 6.5V4.8c0-.7-.6-1.3-1.3-1.3H4.8c-.7 0-1.3.6-1.3 1.3v10.4c0 .7.6 1.3 1.3 1.3h6.4c.7 0 1.3-.6 1.3-1.3v-1.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M8.5 10h8m-2.5-2.5L16.5 10 14 12.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+};
+
+const icon = (name, cls = '') => `<svg class="${cls}" viewBox="0 0 20 20" fill="none" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+
+/* ------------------------------------------------------------------ */
+/* API                                                                 */
+/* ------------------------------------------------------------------ */
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  });
+  if (response.status === 401) {
+    window.location.href = '/login';
+    throw new Error('Session expirée.');
+  }
+  let data = {};
+  try {
+    data = await response.json();
+  } catch {
+    /* réponse vide */
+  }
+  if (!response.ok) throw new Error(data.error || 'Une erreur est survenue.');
+  return data;
+}
+
+async function refresh() {
+  const data = await api('/api/workspace');
+  state.user = data.user;
+  state.ws = data.workspace;
+  state.stats = data.stats;
+  updateChrome();
+  render();
+}
+
+/* ------------------------------------------------------------------ */
+/* toasts & modales                                                    */
+/* ------------------------------------------------------------------ */
+
+function toast(message, type = 'success') {
+  const root = document.getElementById('toastRoot');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  const glyph = type === 'error' ? icon('alert') : type === 'info' ? icon('spark') : icon('check');
+  el.innerHTML = `<span class="t-ic">${glyph}</span><span>${esc(message)}</span>`;
+  root.appendChild(el);
+  setTimeout(() => {
+    el.classList.add('leaving');
+    setTimeout(() => el.remove(), 250);
+  }, 3600);
+}
+
+function closeModal() {
+  document.getElementById('modalRoot').innerHTML = '';
+  document.body.style.overflow = '';
+}
+
+function openModal({ title, subtitle = '', body, submitLabel = 'Enregistrer', wide = false, danger = false, onSubmit, hideFooter = false }) {
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = `
+    <div class="modal-backdrop">
+      <div class="modal ${wide ? 'wide' : ''}" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <form id="modalForm" novalidate>
+          <div class="modal-head">
+            <div>
+              <h2 id="modalTitle">${esc(title)}</h2>
+              ${subtitle ? `<p>${esc(subtitle)}</p>` : ''}
+            </div>
+            <button type="button" class="icon-btn" data-close aria-label="Fermer">${icon('x')}</button>
+          </div>
+          <div class="modal-body">${body}</div>
+          ${
+            hideFooter
+              ? ''
+              : `<div class="modal-foot">
+                  <button type="button" class="btn btn-ghost" data-close>Annuler</button>
+                  <button type="submit" class="btn ${danger ? 'btn-danger' : 'btn-primary'}" id="modalSubmit">${esc(submitLabel)}</button>
+                </div>`
+          }
+        </form>
+      </div>
+    </div>`;
+
+  const backdrop = root.querySelector('.modal-backdrop');
+  backdrop.addEventListener('mousedown', (event) => {
+    if (event.target === backdrop) closeModal();
+  });
+  root.querySelectorAll('[data-close]').forEach((button) => button.addEventListener('click', closeModal));
+
+  const form = root.querySelector('#modalForm');
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const button = form.querySelector('#modalSubmit');
+    const label = button?.textContent;
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Enregistrement…';
+    }
+    try {
+      const result = await onSubmit?.(new FormData(form), form);
+      if (result !== false) closeModal();
+    } catch (error) {
+      toast(error.message, 'error');
+      if (button) {
+        button.disabled = false;
+        button.textContent = label;
+      }
+    }
+  });
+
+  const first = form.querySelector('input:not([type=hidden]), textarea, select');
+  setTimeout(() => first?.focus(), 60);
+  return form;
+}
+
+function confirmDialog({ title, message, confirmLabel = 'Confirmer', onConfirm }) {
+  openModal({
+    title,
+    body: `<p style="font-size:13px;color:var(--muted);line-height:1.65">${esc(message)}</p>`,
+    submitLabel: confirmLabel,
+    danger: true,
+    onSubmit: async () => {
+      await onConfirm();
+    },
+  });
+}
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    closeModal();
+    document.querySelectorAll('.dropdown-menu.open').forEach((menu) => menu.classList.remove('open'));
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* chrome (sidebar, topbar)                                            */
+/* ------------------------------------------------------------------ */
+
+function activityIcon(type) {
+  return { bot: 'bot', learner: 'users', course: 'book', team: 'team', certificate: 'award' }[type] || 'spark';
+}
+
+function updateChrome() {
+  const { user, ws } = state;
+  if (!user || !ws) return;
+  document.getElementById('sideName').textContent = user.name;
+  document.getElementById('sideEmail').textContent = user.email;
+  document.getElementById('sideAvatar').outerHTML = avatarHtml(user, 32, 9).replace('class="avatar"', 'class="avatar" id="sideAvatar"');
+  document.getElementById('topName').textContent = user.name.split(' ')[0];
+  document.getElementById('topAvatar').outerHTML = avatarHtml(user, 26, 8).replace('class="avatar"', 'class="avatar" id="topAvatar"');
+  document.getElementById('navBotCount').textContent = String(ws.bots.length);
+  document.getElementById('planName').textContent = ws.plan;
+  document.getElementById('userMenuHead').textContent = user.email;
+
+  const navName = state.route.name === 'bot' ? 'bots' : state.route.name === 'course' ? 'courses' : state.route.name;
+  document.querySelectorAll('.nav-link').forEach((link) => {
+    link.classList.toggle('active', link.dataset.nav === navName);
+  });
+
+  const labels = {
+    dashboard: "Vue d'ensemble",
+    bots: 'Mes bots',
+    bot: 'Détail du bot',
+    courses: 'Formations',
+    course: 'Éditeur de formation',
+    learners: 'Apprenants',
+    templates: 'Modèles',
+    stats: 'Statistiques',
+    team: 'Équipe',
+    api: 'API & webhooks',
+    billing: 'Facturation',
+    settings: 'Paramètres',
+  };
+  const crumb = labels[state.route.name] || "Vue d'ensemble";
+  document.getElementById('crumbCurrent').textContent = crumb;
+  document.title = `${crumb} — KyllBot Studio`;
+
+  const notifList = document.getElementById('notifList');
+  notifList.innerHTML =
+    ws.activity
+      .slice(0, 6)
+      .map(
+        (item) => `<div class="notif">
+          <span class="n-ic">${icon(activityIcon(item.type))}</span>
+          <div>${esc(item.message)}<time>${esc(timeAgo(item.at))}</time></div>
+        </div>`,
+      )
+      .join('') || '<div class="notif">Aucune activité pour le moment.</div>';
+}
+
+/* ------------------------------------------------------------------ */
+/* routeur                                                             */
+/* ------------------------------------------------------------------ */
+
+function parseHash() {
+  const raw = window.location.hash.replace(/^#\/?/, '');
+  const [base, id] = raw.split('/');
+  let name = base || 'dashboard';
+  if (id && name === 'bots') name = 'bot';
+  if (id && name === 'courses') name = 'course';
+  return { name, id: id || null };
+}
+
+function render() {
+  const view = document.getElementById('view');
+  const { name, id } = state.route;
+  const routes = {
+    dashboard: viewDashboard,
+    bots: viewBots,
+    bot: () => viewBotDetail(id),
+    courses: viewCourses,
+    course: () => viewCourseDetail(id),
+    learners: viewLearners,
+    templates: viewTemplates,
+    stats: viewStats,
+    team: viewTeam,
+    api: viewApi,
+    billing: viewBilling,
+    settings: viewSettings,
+  };
+  const renderer = routes[name] || viewDashboard;
+  view.innerHTML = renderer();
+  view.classList.remove('view');
+  void view.offsetWidth;
+  view.classList.add('view');
+}
+
+/* ------------------------------------------------------------------ */
+/* actions déléguées                                                   */
+/* ------------------------------------------------------------------ */
+
+const ACTIONS = {};
+const onAction = (name, handler) => {
+  ACTIONS[name] = handler;
+};
+
+document.addEventListener('click', async (event) => {
+  const el = event.target.closest('[data-action]');
+  if (!el) return;
+  const handler = ACTIONS[el.dataset.action];
+  if (!handler) return;
+  event.preventDefault();
+  try {
+    await handler(el, event);
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* composants                                                          */
+/* ------------------------------------------------------------------ */
+
+function statCard(label, value, hint, iconName) {
+  return `<div class="stat-card">
+    <span class="sl">${esc(label)}</span>
+    <b>${esc(value)}</b>
+    <div class="sx">${hint}</div>
+    <span class="stat-ic">${icon(iconName)}</span>
+  </div>`;
+}
+
+function areaChart(series) {
+  const width = 620;
+  const height = 230;
+  const padding = { top: 18, right: 14, bottom: 26, left: 34 };
+  const innerW = width - padding.left - padding.right;
+  const innerH = height - padding.top - padding.bottom;
+  const commands = series.map((point) => point.commands);
+  const learners = series.map((point) => point.learners);
+  const maxC = Math.max(...commands, 1) * 1.12;
+  const maxL = Math.max(...learners, 1) * 1.12;
+
+  const point = (value, max, index) => {
+    const x = padding.left + (index * innerW) / Math.max(series.length - 1, 1);
+    const y = padding.top + innerH - (value / max) * innerH;
+    return [x, y];
+  };
+
+  const line = (values, max) =>
+    values.map((value, index) => point(value, max, index).map((n) => n.toFixed(1)).join(',')).join(' ');
+
+  const area = (values, max) => {
+    const pts = values.map((value, index) => point(value, max, index));
+    return `M${pts[0][0].toFixed(1)},${(padding.top + innerH).toFixed(1)} L${pts
+      .map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`)
+      .join(' L')} L${pts[pts.length - 1][0].toFixed(1)},${(padding.top + innerH).toFixed(1)} Z`;
+  };
+
+  const gridLines = [0, 0.25, 0.5, 0.75, 1]
+    .map((ratio) => {
+      const y = padding.top + innerH - ratio * innerH;
+      return `<line x1="${padding.left}" y1="${y.toFixed(1)}" x2="${width - padding.right}" y2="${y.toFixed(1)}"/>`;
+    })
+    .join('');
+
+  const xLabels = series
+    .map((pointData, index) => {
+      if (index % 3 !== 0 && index !== series.length - 1) return '';
+      const [x] = point(0, 1, index);
+      const label = new Date(`${pointData.date}T12:00:00`).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+      return `<text class="chart-label" x="${x.toFixed(1)}" y="${height - 8}" text-anchor="middle">${esc(label)}</text>`;
+    })
+    .join('');
+
+  const yLabels = [0, 0.5, 1]
+    .map((ratio) => {
+      const y = padding.top + innerH - ratio * innerH;
+      return `<text class="chart-label" x="${padding.left - 8}" y="${(y + 3).toFixed(1)}" text-anchor="end">${fmt(Math.round(maxC * ratio))}</text>`;
+    })
+    .join('');
+
+  return `<div class="chart-wrap">
+    <svg class="chart-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Graphique d'activité sur 14 jours">
+      <defs>
+        <linearGradient id="gradC" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#7c5cff" stop-opacity=".38"/>
+          <stop offset="1" stop-color="#7c5cff" stop-opacity="0"/>
+        </linearGradient>
+        <linearGradient id="gradL" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#22d3ee" stop-opacity=".26"/>
+          <stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <g class="chart-grid">${gridLines}</g>
+      <path d="${area(learners, maxL)}" fill="url(#gradL)"/>
+      <path d="${area(commands, maxC)}" fill="url(#gradC)"/>
+      <polyline points="${line(learners, maxL)}" fill="none" stroke="#22d3ee" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" opacity=".85"/>
+      <polyline points="${line(commands, maxC)}" fill="none" stroke="#8f74ff" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+      ${yLabels}${xLabels}
+    </svg>
+  </div>`;
+}
+
+function perBotBars(perBot) {
+  if (!perBot.length) return '<p style="font-size:12.5px;color:var(--muted-2)">Aucun bot pour le moment.</p>';
+  const max = Math.max(...perBot.map((bot) => bot.uses), 1);
+  return perBot
+    .map(
+      (bot) => `<div style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:6px">
+          <span style="display:flex;align-items:center;gap:7px"><i style="width:7px;height:7px;border-radius:2px;background:${esc(bot.color)}"></i>${esc(bot.name)}</span>
+          <b style="color:var(--muted)">${fmt(bot.uses)}</b>
+        </div>
+        <div class="progress"><i style="width:${Math.max(4, (bot.uses / max) * 100)}%;background:${esc(bot.color)}"></i></div>
+      </div>`,
+    )
+    .join('');
+}
+
+function statusPill(status) {
+  const map = {
+    online: ['green', 'En ligne'],
+    offline: ['gray', 'Hors ligne'],
+    draft: ['amber', 'Brouillon'],
+    published: ['green', 'Publiée'],
+  };
+  const [cls, label] = map[status] || ['gray', status];
+  return `<span class="pill ${cls}">${esc(label)}</span>`;
+}
+
+function emptyState(title, text, actionLabel, action) {
+  return `<div class="empty">
+    <div class="ic">${icon('spark')}</div>
+    <h3>${esc(title)}</h3>
+    <p>${esc(text)}</p>
+    ${actionLabel ? `<button class="btn btn-primary" data-action="${action}">${esc(actionLabel)}</button>` : ''}
+  </div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* formulaires inline                                                  */
+/* ------------------------------------------------------------------ */
+
+const FORM_HANDLERS = {};
+const onForm = (name, handler) => {
+  FORM_HANDLERS[name] = handler;
+};
+
+document.addEventListener('submit', async (event) => {
+  const form = event.target.closest('form[data-form]');
+  if (!form) return;
+  event.preventDefault();
+  const handler = FORM_HANDLERS[form.dataset.form];
+  if (!handler) return;
+  const button = form.querySelector('button[type="submit"]');
+  const label = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Enregistrement…';
+  }
+  try {
+    await handler(form, new FormData(form));
+  } catch (error) {
+    toast(error.message, 'error');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = label;
+    }
+  }
+});
