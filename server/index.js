@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
-import { db, findUserByEmail, findUserById, newId, persist } from './db.js';
+import { db, findUserByEmail, findUserById, flushPersistence, newId, persist } from './db.js';
 import {
   clearCookie,
   createSession,
@@ -1986,6 +1986,7 @@ process.on('exit', removePidFile);
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, async () => {
     await shutdownBots();
+    await flushPersistence();
     removePidFile();
     process.exit(0);
   });
