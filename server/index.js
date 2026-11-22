@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
-import { db, findUserByEmail, findUserById, flushPersistence, newId, persist } from './db.js';
+import { db, findUserByEmail, findUserById, flushPersistence, newId, persist, storageMode } from './db.js';
 import {
   clearCookie,
   createSession,
@@ -105,7 +105,7 @@ app.use((req, res, next) => {
 
 app.get('/healthz', (req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json({ ok: true, pid: process.pid, uptime: Math.round(process.uptime()) });
+  res.json({ ok: true, pid: process.pid, uptime: Math.round(process.uptime()), storage: storageMode });
 });
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);

@@ -44,6 +44,7 @@ if (remoteStoreEnabled) {
 }
 
 export const db = initialState;
+export const storageMode = remoteWritesEnabled ? 'supabase' : 'local';
 
 let timer = null;
 let remoteQueue = Promise.resolve();
