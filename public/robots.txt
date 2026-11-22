@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /app
+Disallow: /studio
+
+Sitemap: https://kyllbot-studio-1-1-0.onrender.com/sitemap.xml
