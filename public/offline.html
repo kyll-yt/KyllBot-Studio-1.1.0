@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hors ligne — KyllBot Studio</title>
+  <meta name="theme-color" content="#07060d" />
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background:
+        radial-gradient(60% 70% at 50% 0%, rgba(124, 92, 255, 0.24), transparent 70%),
+        #07060d;
+      color: #f4f1ff;
+      font-family: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+      text-align: center;
+    }
+    .card {
+      width: min(440px, 100%);
+      padding: 34px 28px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 22px;
+      background: rgba(18, 15, 34, 0.88);
+      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+    }
+    img { width: 54px; height: 54px; margin-bottom: 16px; }
+    h1 { margin: 0 0 8px; font-size: 24px; letter-spacing: -0.03em; }
+    p { margin: 0 0 22px; color: #a9a1c4; font-size: 14px; line-height: 1.65; }
+    button {
+      border: 0;
+      border-radius: 11px;
+      padding: 12px 18px;
+      font: inherit;
+      font-weight: 700;
+      color: #fff;
+      cursor: pointer;
+      background: linear-gradient(135deg, #7c5cff, #b45cff 55%, #22d3ee);
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <img src="/assets/logo.svg" alt="" />
+    <h1>Tu es hors ligne</h1>
+    <p>KyllBot Studio a besoin d’une connexion pour charger tes bots, tes formations et tes données. Vérifie ton réseau puis réessaie.</p>
+    <button type="button" onclick="location.reload()">Réessayer</button>
+  </main>
+</body>
+</html>

@@ -7,6 +7,12 @@
   <meta name="description" content="Connectez-vous à KyllBot Studio avec Google ou un code envoyé par email." />
   <meta name="theme-color" content="#07060d" />
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/assets/icon-180.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="KyllBot" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -40,10 +46,10 @@
       </div>
 
       <div class="auth-quote">
-        <p>« On gérait notre bot sur un outil et nos formations sur un autre. Depuis KyllBot Studio, tout est au même endroit — et notre taux de complétion a grimpé de 31 %. »</p>
+        <p>Un seul studio pour créer vos bots Discord, automatiser votre communauté et suivre vos formations.</p>
         <div class="who">
-          <span class="avatar-sm">CR</span>
-          <div><b>Camille R.</b><span>Communauté de 24 000 membres</span></div>
+          <span class="avatar-sm">KB</span>
+          <div><b>KyllBot Studio</b><span>Bots · Automatisations · Formations</span></div>
         </div>
       </div>
     </aside>
@@ -85,10 +91,11 @@
             </div>
             <button class="btn btn-primary btn-block" type="submit" id="emailSubmit">Recevoir mon code</button>
           </form>
+          <p class="auth-mail-note" id="mailNote" hidden></p>
 
           <p class="auth-legal">
             Pas de mot de passe : un code à usage unique vaut connexion.<br />
-            En continuant, vous acceptez les <a href="#">conditions</a> et la <a href="#">politique de confidentialité</a>.
+            En continuant, vous acceptez les <a href="/legal#terms">conditions</a> et la <a href="/legal#privacy">politique de confidentialité</a>.
           </p>
         </section>
 
@@ -123,10 +130,28 @@
         <p class="auth-legal" style="margin-top:26px">
           Vous découvrez ? <a href="#" id="demoLink">Ouvrir un compte de démonstration</a>
         </p>
+
+        <button class="auth-install" type="button" data-install-app>
+          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 3v9M6.5 8.5 10 12l3.5-3.5M4 14.5V16h12v-1.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Installer KyllBot Studio
+        </button>
+
+        <details class="owner-unlock">
+          <summary>Accès propriétaire</summary>
+          <p>Réservé au propriétaire du studio. Saisissez le code généré dans Équipe → Accès propriétaire.</p>
+          <form id="ownerForm" novalidate>
+            <div class="field">
+              <label for="ownerCode">Code d’accès</label>
+              <input class="input" id="ownerCode" name="code" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="one-time-code" spellcheck="false" required />
+            </div>
+            <button class="btn btn-primary btn-block" type="submit" id="ownerSubmit">Déverrouiller l’accès</button>
+          </form>
+        </details>
       </div>
     </main>
   </div>
 
+  <script src="/js/pwa.js"></script>
   <script src="/js/auth.js"></script>
 </body>
 </html>

@@ -1,5 +1,7 @@
 import { newId } from './db.js';
 import { flowTemplate } from './flows.js';
+import { defaultAddons } from './plans.js';
+import { defaultDiscordServer } from './discord.js';
 
 const iso = (daysAgo = 0, hoursAgo = 0) =>
   new Date(Date.now() - daysAgo * 864e5 - hoursAgo * 36e5).toISOString();
@@ -8,7 +10,7 @@ function lesson(title, type, duration, content = '') {
   return { id: newId(), title, type, duration, content };
 }
 
-function command(name, description, response, uses = 0, embed = null) {
+function command(name, description, response, embed = null) {
   return {
     id: newId(),
     name,
@@ -16,7 +18,7 @@ function command(name, description, response, uses = 0, embed = null) {
     response,
     embed: embed || { title: '', description: '', color: '#6d5efc', footer: 'KyllBot Studio' },
     enabled: true,
-    uses,
+    uses: 0,
     cooldown: 3,
   };
 }
@@ -39,20 +41,21 @@ export function seedWorkspace(user) {
       status: 'online',
       color: '#6d5efc',
       tags: ['Communauté', 'Niveaux', 'Tickets'],
+      discord: defaultDiscordServer({ name: 'KyllBot Communauté', tags: ['Communauté', 'Niveaux', 'Tickets'] }),
       tokenHint: '••••••••3f9a',
       createdAt: iso(42),
       commands: [
-        command('bienvenue', "Affiche le message d'accueil", "Bienvenue {user} sur **{server}** !", 4821, {
+        command('bienvenue', "Affiche le message d'accueil", "Bienvenue {user} sur **{server}** !", {
           title: 'Bienvenue chez nous ',
           description: 'Passe lire les règles, puis présente-toi dans #présentations !',
           color: '#6d5efc',
           footer: 'KyllBot Studio',
         }),
-        command('rank', 'Affiche le niveau et l’XP', '{user} est niveau **{level}** avec **{xp} XP**.', 3102),
-        command('ticket', 'Ouvre un ticket de support', 'Ticket ouvert : un membre du staff arrive.', 874),
-        command('giveaway', 'Lance un concours', 'Concours lancé ! Réagis avec pour participer.', 231),
-        command('ping', 'Affiche la latence du bot', 'Pong ! Latence : **{latency} ms**.', 1893),
-        command('play', 'Joue une musique', 'Lecture de **{query}**.', 640),
+        command('rank', 'Affiche le niveau et l’XP', '{user} est niveau **{level}** avec **{xp} XP**.'),
+        command('ticket', 'Ouvre un ticket de support', 'Ticket ouvert : un membre du staff arrive.'),
+        command('giveaway', 'Lance un concours', 'Concours lancé ! Réagis avec pour participer.'),
+        command('ping', 'Affiche la latence du bot', 'Pong ! Latence : **{latency} ms**.'),
+        command('play', 'Joue une musique', 'Lecture de **{query}**.'),
       ],
       automations: [
         automation('welcome', "Message d'accueil", true, { channel: '#bienvenue', message: 'Bienvenue {user} !' }),
@@ -62,6 +65,8 @@ export function seedWorkspace(user) {
         automation('moderation', 'Modération automatique', true, { antiSpam: true }),
       ],
       flows: [flowTemplate('welcome', 'KyllBot Communauté'), flowTemplate('ticket', 'KyllBot Communauté'), flowTemplate('quiz', 'KyllBot Communauté')],
+      scheduledMessages: [],
+      savedMessages: [],
     },
     {
       id: newId(),
@@ -71,14 +76,15 @@ export function seedWorkspace(user) {
       status: 'offline',
       color: '#22d3ee',
       tags: ['Modération', 'Sécurité'],
+      discord: defaultDiscordServer({ name: 'Modération Pro', tags: ['Modération', 'Sécurité'] }),
       tokenHint: '••••••••71bd',
       createdAt: iso(28),
       commands: [
-        command('ban', 'Bannit un membre', '**{user}** a été banni. Raison : {reason}', 96),
-        command('kick', 'Expulse un membre', '**{user}** a été expulsé.', 143),
-        command('warn', 'Avertit un membre', 'Avertissement 1/3 pour **{user}**.', 412),
-        command('clear', 'Supprime des messages', '**{count}** messages supprimés.', 357),
-        command('slowmode', 'Définit le mode lent', 'Mode lent réglé sur **{seconds}s**.', 88),
+        command('ban', 'Bannit un membre', '**{user}** a été banni. Raison : {reason}'),
+        command('kick', 'Expulse un membre', '**{user}** a été expulsé.'),
+        command('warn', 'Avertit un membre', 'Avertissement 1/3 pour **{user}**.'),
+        command('clear', 'Supprime des messages', '**{count}** messages supprimés.'),
+        command('slowmode', 'Définit le mode lent', 'Mode lent réglé sur **{seconds}s**.'),
       ],
       automations: [
         automation('antiSpam', 'Anti-spam', true, { threshold: 5 }),
@@ -86,6 +92,8 @@ export function seedWorkspace(user) {
         automation('logs', 'Journal des sanctions', true, { channel: '#logs' }),
       ],
       flows: [flowTemplate('moderation', 'Modération Pro')],
+      scheduledMessages: [],
+      savedMessages: [],
     },
     {
       id: newId(),
@@ -95,15 +103,18 @@ export function seedWorkspace(user) {
       status: 'draft',
       color: '#f472b6',
       tags: ['Formation', 'Quiz'],
+      discord: defaultDiscordServer({ name: 'Kyll Learning Assistant', tags: ['Formation', 'Quiz'] }),
       tokenHint: '••••••••0c4e',
       createdAt: iso(9),
       commands: [
-        command('quiz', 'Lance un quiz de 5 questions', 'Quiz lancé ! Bonne chance.', 74),
-        command('cours', 'Affiche le prochain module', 'Prochain module : **{module}**.', 51),
-        command('certificat', 'Génère un certificat', 'Certificat disponible pour **{course}**.', 12),
+        command('quiz', 'Lance un quiz de 5 questions', 'Quiz lancé ! Bonne chance.'),
+        command('cours', 'Affiche le prochain module', 'Prochain module : **{module}**.'),
+        command('certificat', 'Génère un certificat', 'Certificat disponible pour **{course}**.'),
       ],
       automations: [automation('reminders', 'Rappels de cours', true, { cron: 'lundi 09:00' })],
       flows: [flowTemplate('quiz', 'Kyll Learning Assistant')],
+      scheduledMessages: [],
+      savedMessages: [],
     },
   ];
 
@@ -213,19 +224,9 @@ export function seedWorkspace(user) {
     },
   ];
 
-  const learners = [
-    { id: newId(), name: 'Emma Petit', email: 'emma.petit@example.com', courseId: c1, progress: 92, score: 88, lastActive: iso(0, 2) },
-    { id: newId(), name: 'Lucas Moreau', email: 'lucas.moreau@example.com', courseId: c1, progress: 64, score: 74, lastActive: iso(1) },
-    { id: newId(), name: 'Sarah Benali', email: 'sarah.benali@example.com', courseId: c2, progress: 100, score: 96, lastActive: iso(0, 6) },
-    { id: newId(), name: 'Hugo Lefèvre', email: 'hugo.lefevre@example.com', courseId: c2, progress: 45, score: 61, lastActive: iso(3) },
-    { id: newId(), name: 'Inès Garnier', email: 'ines.garnier@example.com', courseId: c1, progress: 78, score: 82, lastActive: iso(2) },
-    { id: newId(), name: 'Nathan Roy', email: 'nathan.roy@example.com', courseId: c2, progress: 23, score: 55, lastActive: iso(5) },
-  ];
-
-  const team = [
-    { id: newId(), name: 'Léa Martin', email: 'lea.martin@example.com', role: 'Éditeur', status: 'active', joinedAt: iso(18) },
-    { id: newId(), name: 'Noah Bernard', email: 'noah.bernard@example.com', role: 'Analyste', status: 'invited', joinedAt: iso(4) },
-  ];
+  // Aucune personne fictive : apprenants et équipe démarrent vides.
+  const learners = [];
+  const team = [];
 
   const apiKeys = [
     {
@@ -240,24 +241,32 @@ export function seedWorkspace(user) {
   ];
 
   const activity = [
-    { id: newId(), type: 'bot', message: 'KyllBot Communauté a traité 1 284 commandes aujourd’hui', at: iso(0, 1) },
-    { id: newId(), type: 'learner', message: 'Sarah Benali a terminé « Scénariser une formation engageante »', at: iso(0, 4) },
-    { id: newId(), type: 'course', message: 'Le module « Prévenir » a été ajouté à Modération & sécurité', at: iso(1, 3) },
-    { id: newId(), type: 'team', message: 'Noah Bernard a reçu une invitation', at: iso(4) },
-    { id: newId(), type: 'bot', message: 'Le panneau de tickets a été désactivé sur KyllBot Communauté', at: iso(2, 7) },
-    { id: newId(), type: 'certificate', message: '3 certificats ont été générés cette semaine', at: iso(3) },
-  ];
+    ...bots.map((bot) => ({ id: newId(), type: 'bot', message: `Le bot « ${bot.name} » a été créé`, at: bot.createdAt })),
+    ...courses.map((course) => ({ id: newId(), type: 'course', message: `La formation « ${course.title} » a été créée`, at: course.createdAt })),
+  ].sort((a, b) => new Date(b.at) - new Date(a.at));
+
+  const events = [
+    ...bots.map((bot) => ({ id: newId(), type: 'bot.created', botId: bot.id, at: bot.createdAt })),
+    ...courses.map((course) => ({ id: newId(), type: 'course.created', courseId: course.id, at: course.createdAt })),
+  ].sort((a, b) => new Date(b.at) - new Date(a.at));
 
   return {
     ownerId: user.id,
     studioName: 'KyllBot Studio',
-    plan: 'Pro',
+    plan: 'Gratuit',
     bots,
     courses,
     learners,
     team,
     apiKeys,
     activity,
+    events,
+    credits: 30,
+    dailyReward: { lastClaimAt: null, streak: 0, totalClaimed: 0 },
+    addons: defaultAddons(),
+    purchases: [],
+    invoices: [],
+    schemaVersion: 2,
     settings: {
       timezone: 'Europe/Paris',
       language: 'fr',

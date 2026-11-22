@@ -5,6 +5,7 @@ const els = {
   emailForm: document.getElementById('emailForm'),
   email: document.getElementById('email'),
   emailSubmit: document.getElementById('emailSubmit'),
+  mailNote: document.getElementById('mailNote'),
   emailDisplay: document.getElementById('emailDisplay'),
   codeForm: document.getElementById('codeForm'),
   codeRow: document.getElementById('codeRow'),
@@ -15,18 +16,27 @@ const els = {
   devNote: document.getElementById('devNote'),
   devCode: document.getElementById('devCode'),
   demoLink: document.getElementById('demoLink'),
+  ownerForm: document.getElementById('ownerForm'),
+  ownerCode: document.getElementById('ownerCode'),
+  ownerSubmit: document.getElementById('ownerSubmit'),
 };
 
-const state = { email: '', google: false, timer: null, busy: false };
+const state = { email: '', google: false, mail: false, timer: null, busy: false };
 const inputs = [...els.codeRow.querySelectorAll('input')];
 
 function showError(message) {
   els.error.textContent = message;
+  els.error.classList.remove('success');
   els.error.classList.add('show');
 }
 
+function showNotice(message) {
+  showError(message);
+  els.error.classList.add('success');
+}
+
 function clearError() {
-  els.error.classList.remove('show');
+  els.error.classList.remove('show', 'success');
   els.error.textContent = '';
 }
 
@@ -93,6 +103,9 @@ async function requestCode(email) {
     els.devNote.hidden = false;
   } else {
     els.devNote.hidden = true;
+  }
+  if (payload.transport === 'smtp' || payload.transport === 'resend') {
+    showNotice(`Code envoyé à ${state.email}. Vérifiez aussi les spams.`);
   }
   startCountdown(30);
 }
@@ -248,6 +261,26 @@ els.demoLink.addEventListener('click', async (event) => {
   }
 });
 
+els.ownerForm?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  clearError();
+  const code = els.ownerCode.value.trim();
+  if (!code) {
+    showError('Entrez le code d’accès propriétaire.');
+    els.ownerCode.focus();
+    return;
+  }
+  setBusy(els.ownerSubmit, true, 'Déverrouillage…');
+  try {
+    await api('/api/owner/unlock', { method: 'POST', body: JSON.stringify({ code }) });
+    window.location.href = '/app';
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    setBusy(els.ownerSubmit, false);
+  }
+});
+
 (async function init() {
   const params = new URLSearchParams(window.location.search);
   const googleStatus = params.get('google');
@@ -272,9 +305,17 @@ els.demoLink.addEventListener('click', async (event) => {
   try {
     const config = await api('/api/auth/config');
     state.google = Boolean(config.google);
+    state.mail = Boolean(config.mail);
     els.googleBtn.title = state.google
       ? 'Se connecter avec Google'
       : 'Google OAuth non configuré sur cette instance';
+    if (els.mailNote) {
+      els.mailNote.hidden = false;
+      els.mailNote.classList.toggle('warn', !state.mail);
+      els.mailNote.textContent = state.mail
+        ? 'Le code à 6 chiffres sera envoyé par email.'
+        : "L'envoi réel n'est pas configuré sur cette instance : le code s'affichera après validation.";
+    }
   } catch {
     state.google = false;
   }

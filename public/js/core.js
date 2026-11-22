@@ -8,10 +8,15 @@ const state = {
   user: null,
   ws: null,
   stats: null,
+  billing: null,
   config: {},
   route: { name: 'dashboard', id: null },
   botTab: 'commands',
   search: '',
+  feedback: null,
+  feedbackSummary: null,
+  feedbackFilter: 'all',
+  feedbackLoading: false,
 };
 
 const esc = (value) =>
@@ -31,6 +36,12 @@ const initials = (name) => {
     .join('')
     .toUpperCase();
   return value || 'K';
+};
+
+const preferredName = (name) => {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return 'toi';
+  return parts.find((part) => part.replace(/[.'’\-]/g, '').length > 1) || parts[0];
 };
 
 function avatarHtml(user, size = 34, radius = 10) {
@@ -67,9 +78,11 @@ const ICONS = {
   trash: '<path d="M4 6h12M8 6V4.5c0-.6.4-1 1-1h2c.6 0 1 .4 1 1V6M6 6l.7 10c0 .6.5 1 1 1h4.6c.5 0 1-.4 1-1L14 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>',
   edit: '<path d="M12.6 3.9a1.6 1.6 0 0 1 2.3 2.3l-8 8-3 .7.7-3 8-8Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>',
   play: '<path d="M6 4.5 14.5 10 6 15.5v-11Z" fill="currentColor"/>',
+  stop: '<rect x="5" y="5" width="10" height="10" rx="1.8" fill="currentColor"/>',
   check: '<path d="M3.5 10.5 7.5 14.5l9-9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
   x: '<path d="M5 5l10 10M15 5 5 15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
   clock: '<circle cx="10" cy="10" r="7.2" stroke="currentColor" stroke-width="1.5"/><path d="M10 6v4.3l2.8 1.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  music: '<path d="M7.5 14.5V5.2l7-1.4v9.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="5.5" cy="14.5" r="2" stroke="currentColor" stroke-width="1.5"/><circle cx="12.5" cy="13" r="2" stroke="currentColor" stroke-width="1.5"/>',
   video: '<rect x="2.5" y="5" width="11" height="10" rx="2.2" stroke="currentColor" stroke-width="1.5"/><path d="M13.5 8.5 17.5 6v8l-4-2.5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>',
   file: '<path d="M5 2.5h6l4 4v11H5v-15Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M11 2.5v4h4M7.5 10.5h5M7.5 13.5h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
   quiz: '<circle cx="10" cy="10" r="7.2" stroke="currentColor" stroke-width="1.5"/><path d="M8 8a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6 1v.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="14" r=".9" fill="currentColor"/>',
@@ -118,15 +131,73 @@ const icon = (name, cls = '') => `<svg class="${cls}" viewBox="0 0 20 20" fill="
 /* API                                                                 */
 /* ------------------------------------------------------------------ */
 
-async function api(path, options = {}) {
-  const response = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
+let serverDownPoll = null;
+
+function showServerDown() {
+  if (document.getElementById('serverDownOverlay')) return;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'serverDownOverlay';
+  overlay.className = 'server-down';
+  overlay.innerHTML = `
+    <div class="server-down-card" role="alertdialog" aria-modal="true" aria-labelledby="serverDownTitle">
+      <div class="server-down-mark" aria-hidden="true">K</div>
+      <h2 id="serverDownTitle">Le site/application est déconnecté</h2>
+      <p>Le serveur ne répond plus. Tu peux le relancer sans fermer cet onglet.</p>
+      <button type="button" data-restart-server>Redémarrer le site/application</button>
+      <p class="server-down-status" data-server-down-status role="status" aria-live="polite"></p>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const button = overlay.querySelector('[data-restart-server]');
+  const status = overlay.querySelector('[data-server-down-status]');
+
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    status.classList.remove('error');
+    status.textContent = 'Redémarrage du site/application…';
+    try {
+      const response = await fetch('/__restart', { method: 'POST', headers: { Accept: 'application/json' } });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) throw new Error(data.error || 'Le redémarrage a échoué.');
+      status.textContent = 'Site/application redémarré. Rechargement…';
+      setTimeout(() => window.location.reload(), 700);
+    } catch (error) {
+      status.textContent = error.message || 'Redémarrage impossible. Réessaie dans quelques secondes.';
+      status.classList.add('error');
+      button.disabled = false;
+    }
   });
+
+  if (!serverDownPoll) {
+    serverDownPoll = setInterval(async () => {
+      try {
+        const response = await fetch('/__gateway/health', { cache: 'no-store' });
+        const data = await response.json();
+        if (data.app === 'up') window.location.reload();
+      } catch {
+        /* le gateway ne répond pas encore */
+      }
+    }, 4000);
+  }
+}
+
+async function api(path, options = {}) {
+  let response;
+  try {
+    response = await fetch(path, {
+      headers: { 'Content-Type': 'application/json' },
+      ...options,
+    });
+  } catch (error) {
+    showServerDown();
+    throw new Error('Le site/application est déconnecté.');
+  }
   if (response.status === 401) {
     window.location.href = '/login';
     throw new Error('Session expirée.');
   }
+  if ([502, 503, 504].includes(response.status)) showServerDown();
   let data = {};
   try {
     data = await response.json();
@@ -142,6 +213,7 @@ async function refresh() {
   state.user = data.user;
   state.ws = data.workspace;
   state.stats = data.stats;
+  state.billing = data.billing;
   updateChrome();
   render();
 }
@@ -262,7 +334,18 @@ function updateChrome() {
   document.getElementById('topName').textContent = user.name.split(' ')[0];
   document.getElementById('topAvatar').outerHTML = avatarHtml(user, 26, 8).replace('class="avatar"', 'class="avatar" id="topAvatar"');
   document.getElementById('navBotCount').textContent = String(ws.bots.length);
-  document.getElementById('planName').textContent = ws.plan;
+  document.getElementById('planName').textContent = ws.owner ? 'Propriétaire' : ws.plan;
+  const limits = state.billing?.limits;
+  const hint = document.getElementById('planHint');
+  if (hint) {
+    hint.textContent = ws.owner
+      ? 'Accès propriétaire · limites maximales'
+      : limits
+        ? `${limits.bots} bots · ${limits.courses} formations · ${fmt(limits.learners)} apprenants`
+        : 'Votre abonnement et vos limites.';
+  }
+  const creditHint = document.getElementById('creditHint');
+  if (creditHint) creditHint.textContent = `${fmt(ws.credits || 0)} crédit${(ws.credits || 0) > 1 ? 's' : ''}`;
   document.getElementById('userMenuHead').textContent = user.email;
 
   const navName = ['bot', 'flow'].includes(state.route.name) ? 'bots' : state.route.name === 'course' ? 'courses' : state.route.name;
@@ -281,6 +364,7 @@ function updateChrome() {
     templates: 'Modèles',
     stats: 'Statistiques',
     team: 'Équipe',
+    feedback: 'Avis & idées',
     api: 'API & webhooks',
     billing: 'Facturation',
     settings: 'Paramètres',
@@ -329,6 +413,7 @@ function render() {
     templates: viewTemplates,
     stats: viewStats,
     team: viewTeam,
+    feedback: viewFeedback,
     api: viewApi,
     billing: viewBilling,
     settings: viewSettings,
@@ -465,7 +550,10 @@ function perBotBars(perBot) {
 
 function statusPill(status) {
   const map = {
-    online: ['green', 'En ligne'],
+    online: ['green', 'Connecté à Discord'],
+    starting: ['amber', 'Connexion…'],
+    connecting: ['amber', 'Connexion…'],
+    error: ['red', 'Erreur Discord'],
     offline: ['gray', 'Hors ligne'],
     draft: ['amber', 'Brouillon'],
     published: ['green', 'Publiée'],

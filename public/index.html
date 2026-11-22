@@ -7,10 +7,16 @@
   <meta name="description" content="KyllBot Studio réunit un constructeur de bots Discord no-code et une plateforme de formation complète : commandes, embeds, automatisations, quiz, suivi des apprenants et certificats." />
   <meta name="theme-color" content="#07060d" />
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/assets/icon-180.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="KyllBot" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/site.css" />
+  <link rel="stylesheet" href="/css/v17/site.css" />
 </head>
 <body>
   <header class="site-nav" id="siteNav">
@@ -62,6 +68,10 @@
               <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M5 3.5 12 8l-7 4.5v-9Z" fill="currentColor"/></svg>
               Explorer la démo
             </button>
+            <button class="btn btn-ghost btn-lg" type="button" data-install-app>
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2v7M5.5 6.5 8 9l2.5-2.5M3 11.5V13h10v-1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Installer l’application
+            </button>
           </div>
           <div class="hero-note">
             <span><i class="check">✓</i> Google ou code par email</span>
@@ -81,7 +91,7 @@
             <span class="ic">
               <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1.5 9.8 6l4.7.4-3.6 3.1 1.1 4.6L8 11.6l-4 2.5 1.1-4.6L1.5 6.4 6.2 6 8 1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
             </span>
-            <div>Certificat généré<small>Sarah B. · 96 % de réussite</small></div>
+            <div>Certificat généré<small>Parcours terminé · certificat prêt</small></div>
           </div>
 
           <div class="studio-window" aria-hidden="true">
@@ -101,13 +111,13 @@
               </div>
               <div class="win-main">
                 <div class="win-head">
-                  <h4>Bonjour Alex</h4>
-                  <span>Cette semaine</span>
+                  <h4>Aperçu du studio</h4>
+                  <span>Données d’exemple</span>
                 </div>
                 <div class="win-stats">
-                  <div class="win-stat"><small>Bots actifs</small><b>3</b><em>+1</em></div>
-                  <div class="win-stat"><small>Commandes</small><b>1 284</b><em>+12 %</em></div>
-                  <div class="win-stat"><small>Apprenants</small><b>146</b><em>+8 %</em></div>
+                  <div class="win-stat"><small>Bots actifs</small><b>3</b><em>en ligne</em></div>
+                  <div class="win-stat"><small>Commandes</small><b>12</b><em>prêtes</em></div>
+                  <div class="win-stat"><small>Apprenants</small><b>8</b><em>suivis</em></div>
                 </div>
                 <div class="win-chart">
                   <i style="height:38%"></i><i style="height:56%"></i><i style="height:44%"></i><i style="height:72%"></i>
@@ -127,10 +137,10 @@
 
       <div class="metrics">
         <div class="container metrics-inner">
-          <div class="metric reveal"><b>12 400+</b><span>créateurs et formateurs</span></div>
-          <div class="metric reveal"><b>38 K</b><span>commandes exécutées / jour</span></div>
-          <div class="metric reveal"><b>96 %</b><span>de satisfaction apprenants</span></div>
-          <div class="metric reveal"><b>120</b><span>pays couverts</span></div>
+          <div class="metric reveal"><b>2 min</b><span>pour créer votre premier bot</span></div>
+          <div class="metric reveal"><b>4 plans</b><span>dont un plan gratuit</span></div>
+          <div class="metric reveal"><b>CSV / JSON</b><span>exports de vos données</span></div>
+          <div class="metric reveal"><b>RGPD</b><span>données contrôlées par vous</span></div>
         </div>
       </div>
     </section>
@@ -304,32 +314,46 @@
         <div class="section-head center reveal">
           <span class="eyebrow">Tarifs</span>
           <h2>Un prix simple. Toute la plateforme.</h2>
-          <p>Commencez gratuitement, passez au Pro quand votre communauté grandit.</p>
+          <p>Commencez gratuitement, puis activez un plan avec vos crédits quotidiens.</p>
         </div>
         <div class="pricing-grid">
           <article class="price-card reveal">
-            <div class="price-name">Starter</div>
+            <div class="price-name">Gratuit</div>
             <div class="price-amount"><b>0 €</b><span>/ mois</span></div>
             <p class="price-desc">Pour découvrir le studio et lancer un premier bot.</p>
             <ul class="price-list">
-              <li><i class="check">✓</i> 1 bot Discord</li>
-              <li><i class="check">✓</i> 20 commandes</li>
-              <li><i class="check">✓</i> 1 formation</li>
-              <li><i class="check">✓</i> 25 apprenants</li>
+              <li><i class="check">✓</i> 3 bots Discord</li>
+              <li><i class="check">✓</i> 3 formations</li>
+              <li><i class="check">✓</i> 100 apprenants</li>
+              <li><i class="check">✓</i> 50 commandes par bot</li>
+              <li><i class="check">✓</i> Récompense quotidienne</li>
             </ul>
             <a class="btn btn-ghost" href="/login">Commencer</a>
+          </article>
+          <article class="price-card reveal">
+            <div class="price-name">Essentiel</div>
+            <div class="price-amount"><b>9 €</b><span>/ mois</span></div>
+            <p class="price-desc">Pour animer une communauté active.</p>
+            <ul class="price-list">
+              <li><i class="check">✓</i> 6 bots Discord</li>
+              <li><i class="check">✓</i> 15 formations</li>
+              <li><i class="check">✓</i> 500 apprenants</li>
+              <li><i class="check">✓</i> 80 commandes par bot</li>
+              <li><i class="check">✓</i> Certificats &amp; exports</li>
+            </ul>
+            <a class="btn btn-ghost" href="/login">Choisir Essentiel</a>
           </article>
           <article class="price-card featured reveal">
             <div class="price-name">Pro</div>
             <div class="price-amount"><b>19 €</b><span>/ mois</span></div>
             <p class="price-desc">Pour les communautés actives et les formateurs indépendants.</p>
             <ul class="price-list">
-              <li><i class="check">✓</i> 10 bots Discord</li>
-              <li><i class="check">✓</i> Commandes illimitées</li>
-              <li><i class="check">✓</i> 20 formations</li>
-              <li><i class="check">✓</i> 2 000 apprenants</li>
-              <li><i class="check">✓</i> Certificats &amp; exports</li>
-              <li><i class="check">✓</i> Support prioritaire</li>
+              <li><i class="check">✓</i> 15 bots Discord</li>
+              <li><i class="check">✓</i> 60 formations</li>
+              <li><i class="check">✓</i> 3 000 apprenants</li>
+              <li><i class="check">✓</i> 150 commandes par bot</li>
+              <li><i class="check">✓</i> Webhooks &amp; API</li>
+              <li><i class="check">✓</i> Support sous 48 h</li>
             </ul>
             <a class="btn btn-primary" href="/login">Choisir Pro</a>
           </article>
@@ -338,14 +362,14 @@
             <div class="price-amount"><b>49 €</b><span>/ mois</span></div>
             <p class="price-desc">Pour les équipes et les organismes de formation.</p>
             <ul class="price-list">
-              <li><i class="check">✓</i> Bots illimités</li>
-              <li><i class="check">✓</i> Formations illimitées</li>
+              <li><i class="check">✓</i> Bots et formations illimités</li>
               <li><i class="check">✓</i> Apprenants illimités</li>
-              <li><i class="check">✓</i> 10 collaborateurs</li>
-              <li><i class="check">✓</i> API &amp; webhooks</li>
+              <li><i class="check">✓</i> 300 commandes par bot</li>
               <li><i class="check">✓</i> Marque blanche</li>
+              <li><i class="check">✓</i> API avancée</li>
+              <li><i class="check">✓</i> Support prioritaire</li>
             </ul>
-            <a class="btn btn-ghost" href="/login">Nous contacter</a>
+            <a class="btn btn-ghost" href="/login">Choisir Studio</a>
           </article>
         </div>
       </div>
@@ -392,10 +416,10 @@
         </div>
         <div class="footer-col">
           <h4>Entreprise</h4>
-          <a href="/login">À propos</a>
-          <a href="/login">Confidentialité</a>
-          <a href="/login">Conditions</a>
-          <a href="/login">Contact</a>
+          <a href="/legal#contact">À propos</a>
+          <a href="/legal#privacy">Confidentialité</a>
+          <a href="/legal#terms">Conditions</a>
+          <a href="/legal#contact">Contact</a>
         </div>
       </div>
       <div class="footer-bottom">
@@ -405,6 +429,7 @@
     </div>
   </footer>
 
-  <script src="/js/landing.js"></script>
+  <script src="/js/pwa.js"></script>
+  <script src="/js/v17/landing.js"></script>
 </body>
 </html>

@@ -32,7 +32,7 @@ function viewStats() {
   return `<div class="page-head">
       <div>
         <h1>Statistiques</h1>
-        <p class="sub">Vue consolidée de l'activité de vos bots et de vos formations.</p>
+        <p class="sub">Vue consolidée de l'activité de vos bots et de vos formations. Chaque chiffre provient des événements réels de votre studio.</p>
       </div>
       <div class="page-actions">
         <button class="btn btn-ghost" data-action="export-stats">${icon('download')} Exporter le rapport</button>
@@ -340,18 +340,57 @@ onAction('use-template', async (el) => {
 /* vue : équipe                                                        */
 /* ------------------------------------------------------------------ */
 
+function ownerAccessPanel() {
+  const access = state.ws.ownerAccess || {};
+  const limits = state.billing?.limits || {};
+  const items = [
+    ['bots', 'bots'],
+    ['courses', 'formations'],
+    ['learners', 'apprenants'],
+    ['members', 'membres'],
+    ['commandsPerBot', 'commandes / bot'],
+    ['apiKeys', 'clés API'],
+  ];
+  return `<div class="owner-panel">
+      <div class="owner-panel-head">
+        <span class="owner-shield">${icon('shield')}</span>
+        <div class="owner-panel-title">
+          <h3>Accès propriétaire</h3>
+          <p>Une seule place · limites maximales · code d’accès pour l’agent</p>
+        </div>
+        <span class="pill violet">1 place</span>
+      </div>
+      <div class="owner-limits">
+        ${items.map(([key, label]) => `<div><b>${fmt(limits[key] || 0)}</b><span>${label}</span></div>`).join('')}
+      </div>
+      <div class="owner-code-row">
+        <div class="owner-code-main">
+          <span class="owner-code-label">${icon('key')} Code d’accès agent</span>
+          <p>${access.enabled ? `Actif · créé ${timeAgo(access.createdAt)}${access.lastUsedAt ? ` · utilisé ${timeAgo(access.lastUsedAt)}` : ''}` : 'Aucun code actif. Générez-en un pour autoriser une mise à jour.'}</p>
+        </div>
+        <div class="owner-code-actions">
+          ${access.enabled ? `<button class="btn btn-ghost btn-sm danger-text" data-action="owner-code-revoke">Révoquer</button>` : ''}
+          <button class="btn btn-primary btn-sm" data-action="owner-code-generate">${icon('key')} ${access.enabled ? 'Régénérer' : 'Générer'} le code</button>
+        </div>
+      </div>
+      <p class="hint">Le code n’est affiché qu’une fois et n’est jamais stocké en clair. Il permet à l’agent de se connecter au studio pour appliquer des mises à jour. Ne le partagez pas.</p>
+    </div>`;
+}
+
 function viewTeam() {
   const owner = state.user;
   const members = state.ws.team;
   return `<div class="page-head">
       <div>
         <h1>Équipe</h1>
-        <p class="sub">Invitez vos collaborateurs et définissez leurs permissions.</p>
+        <p class="sub">Invitez vos collaborateurs et définissez leurs permissions. Le studio vérifie si un compte existe vraiment.</p>
       </div>
       <div class="page-actions">
         <button class="btn btn-primary" data-action="invite-member">${icon('plus')} Inviter un membre</button>
       </div>
     </div>
+
+    ${state.ws.owner ? ownerAccessPanel() : ''}
 
     <div class="panel">
       <div class="panel-head"><h3>${members.length + 1} membre(s)</h3><div class="ph-actions"><span class="pill violet">Plan ${esc(state.ws.plan)}</span></div></div>
@@ -382,10 +421,14 @@ function viewTeam() {
                       .join('')}
                   </select>
                 </td>
-                <td><span class="pill ${member.status === 'active' ? 'green' : 'amber'}">${member.status === 'active' ? 'Actif' : 'Invité'}</span></td>
+                <td><div style="display:flex;gap:4px;flex-wrap:wrap">
+                  <span class="pill ${member.status === 'active' ? 'green' : 'amber'}">${member.status === 'active' ? 'Actif' : 'Invité'}</span>
+                  <span class="pill ${member.hasAccount ? 'cyan' : 'gray'}">${member.hasAccount ? 'Compte lié' : 'Pas encore de compte'}</span>
+                </div></td>
                 <td style="color:var(--muted-2);font-size:11.5px">${esc(timeAgo(member.joinedAt))}</td>
-                <td><div style="display:flex;justify-content:flex-end">
-                  <button class="mini-btn danger" data-action="remove-member" data-id="${esc(member.id)}" title="Retirer">${icon('trash')}</button>
+                <td><div style="display:flex;gap:6px;justify-content:flex-end;align-items:center">
+                  ${member.hasAccount ? '' : `<button class="btn btn-ghost btn-sm" data-action="check-member" data-id="${esc(member.id)}">Vérifier</button>`}
+                  <button class="btn btn-ghost btn-sm danger-text" data-action="remove-member" data-id="${esc(member.id)}">${icon('trash')} Retirer</button>
                 </div></td>
               </tr>`,
             )
@@ -407,8 +450,8 @@ function viewTeam() {
 onAction('invite-member', () => {
   openModal({
     title: 'Inviter un membre',
-    subtitle: 'Un email d’invitation sera envoyé (simulé en mode démo).',
-    submitLabel: 'Envoyer l’invitation',
+    subtitle: 'Le studio vérifie automatiquement si un compte existe avec cet email.',
+    submitLabel: 'Vérifier et inviter',
     body: `
       <div class="form-row">
         <div class="field"><label for="imName">Nom</label><input class="input" id="imName" name="name" placeholder="Léa Martin"></div>
@@ -419,14 +462,32 @@ onAction('invite-member', () => {
       </div>
     `,
     onSubmit: async (formData) => {
-      await api('/api/team', {
+      const { member } = await api('/api/team', {
         method: 'POST',
         body: JSON.stringify({ name: formData.get('name'), email: formData.get('email'), role: formData.get('role') }),
       });
       await refresh();
-      toast('Invitation envoyée.');
+      toast(
+        member.hasAccount
+          ? 'Compte trouvé : le membre a été ajouté à l’équipe.'
+          : 'Invitation envoyée. Aucun compte n’existe encore avec cet email.',
+        member.hasAccount ? 'success' : 'info',
+      );
     },
   });
+});
+
+onAction('check-member', async (el) => {
+  const member = state.ws.team.find((entry) => entry.id === el.dataset.id);
+  if (!member) return;
+  const result = await api(`/api/team/${member.id}/check`, { method: 'POST' });
+  await refresh();
+  toast(
+    result.exists
+      ? `Compte trouvé pour ${member.email}.`
+      : `Aucun compte trouvé pour ${member.email}. L’invitation reste en attente.`,
+    result.exists ? 'success' : 'info',
+  );
 });
 
 document.addEventListener('change', async (event) => {
@@ -458,9 +519,239 @@ onAction('remove-member', (el) => {
   });
 });
 
+function revealOwnerCode(code) {
+  openModal({
+    title: 'Code d’accès propriétaire',
+    subtitle: 'Copiez-le maintenant : il ne sera plus jamais affiché.',
+    submitLabel: 'J’ai copié le code',
+    body: `<div class="owner-code-reveal">
+        <code id="ownerCodeValue">${esc(code)}</code>
+        <button type="button" class="btn btn-ghost btn-sm" data-action="owner-code-copy" data-code="${esc(code)}">${icon('copy')} Copier</button>
+      </div>
+      <p class="hint">Écrivez ce code dans le prompt de l’agent pour qu’il puisse ouvrir une session propriétaire et appliquer des mises à jour. Ne le partagez pas et révoquez-le dès qu’il n’est plus utile.</p>`,
+    onSubmit: async () => {},
+  });
+}
+
+async function createOwnerCode() {
+  const payload = await api('/api/owner/access-code', { method: 'POST' });
+  state.ws.ownerAccess = payload.access;
+  await refresh();
+  return payload.code;
+}
+
+onAction('owner-code-generate', async () => {
+  try {
+    if (state.ws.ownerAccess?.enabled) {
+      confirmDialog({
+        title: 'Régénérer le code propriétaire ?',
+        message: 'L’ancien code sera immédiatement révoqué. Le nouveau ne sera affiché qu’une fois.',
+        confirmLabel: 'Régénérer',
+        onConfirm: async () => {
+          const code = await createOwnerCode();
+          setTimeout(() => revealOwnerCode(code), 350);
+        },
+      });
+      return;
+    }
+    revealOwnerCode(await createOwnerCode());
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+});
+
+onAction('owner-code-copy', async (el) => {
+  try {
+    await navigator.clipboard.writeText(el.dataset.code || '');
+    toast('Code copié.');
+  } catch {
+    toast('Copie impossible. Sélectionnez le code à la main.', 'error');
+  }
+});
+
+onAction('owner-code-revoke', () => {
+  confirmDialog({
+    title: 'Révoquer le code propriétaire ?',
+    message: 'L’agent ne pourra plus ouvrir de session avec ce code. Vous pourrez en générer un nouveau plus tard.',
+    confirmLabel: 'Révoquer',
+    onConfirm: async () => {
+      const payload = await api('/api/owner/access-code', { method: 'DELETE' });
+      state.ws.ownerAccess = payload.access;
+      await refresh();
+      toast('Code propriétaire révoqué.', 'info');
+    },
+  });
+});
+
 /* ------------------------------------------------------------------ */
 /* vue : API & webhooks                                                */
 /* ------------------------------------------------------------------ */
+
+async function loadFeedback() {
+  const data = await api('/api/feedback');
+  state.feedback = data.feedback || [];
+  state.feedbackSummary = data.summary || {};
+}
+
+function feedbackCard(item) {
+  const stars = item.kind === 'review' ? `${'★'.repeat(item.rating)}${'☆'.repeat(5 - item.rating)}` : '';
+  return `<article class="feedback-card">
+      <button class="feedback-vote ${item.voted ? 'active' : ''}" type="button" data-action="feedback-vote" data-id="${item.id}" aria-pressed="${item.voted}" title="Soutenir cette contribution">
+        ${icon('up')}
+        <b>${item.votes}</b>
+        <span>${item.votes > 1 ? 'votes' : 'vote'}</span>
+      </button>
+      <div class="feedback-main">
+        <div class="feedback-meta">
+          <span class="pill ${item.kind === 'idea' ? 'cyan' : 'violet'}">${item.kind === 'idea' ? 'Idée' : 'Avis'}</span>
+          ${stars ? `<span class="feedback-stars" aria-label="${item.rating} sur 5">${stars}</span>` : ''}
+          <span class="feedback-author">${esc(item.authorName)}</span>
+          <time>${timeAgo(item.createdAt)}</time>
+          ${item.canDelete ? `<button class="feedback-delete" type="button" data-action="feedback-delete" data-id="${item.id}">Supprimer</button>` : ''}
+        </div>
+        <h3>${esc(item.title)}</h3>
+        <p>${esc(item.message).replace(/\n/g, '<br>')}</p>
+      </div>
+    </article>`;
+}
+
+function viewFeedback() {
+  if (!state.feedback) {
+    if (!state.feedbackLoading) {
+      state.feedbackLoading = true;
+      loadFeedback()
+        .then(() => {
+          state.feedbackLoading = false;
+          if (state.route.name === 'feedback') render();
+        })
+        .catch(() => {
+          state.feedbackLoading = false;
+          state.feedback = [];
+          state.feedbackSummary = { total: 0, ideas: 0, reviews: 0, average: 0 };
+          if (state.route.name === 'feedback') render();
+        });
+    }
+    return `<div class="page-head">
+        <div><h1>Avis &amp; idées</h1><p class="sub">Partagez votre expérience et proposez des améliorations. Ce n’est pas un support.</p></div>
+      </div>
+      <div class="empty"><div class="ic">${icon('message')}</div><h3>Chargement des contributions…</h3><p>Un instant.</p></div>`;
+  }
+
+  const items = state.feedback;
+  const summary = state.feedbackSummary || {};
+  const filter = state.feedbackFilter || 'all';
+  const filtered = filter === 'all' ? items : items.filter((item) => item.kind === filter);
+  return `<div class="page-head">
+      <div>
+        <h1>Avis &amp; idées</h1>
+        <p class="sub">Partagez votre expérience et proposez des améliorations. Ce n’est pas un support.</p>
+      </div>
+      <span class="pill violet">${fmt(summary.total || 0)} contribution(s)</span>
+    </div>
+
+    <div class="feedback-stats">
+      <div><b>${summary.average ? String(summary.average).replace('.', ',') : '—'}</b><span>Note moyenne</span></div>
+      <div><b>${fmt(summary.reviews || 0)}</b><span>Avis</span></div>
+      <div><b>${fmt(summary.ideas || 0)}</b><span>Idées</span></div>
+      <div><b>${fmt(summary.total || 0)}</b><span>Contributions</span></div>
+    </div>
+
+    <div class="feedback-layout">
+      <form class="panel feedback-form" data-form="feedback-create">
+        <div class="panel-head"><h3>Nouvelle contribution</h3><span class="pill gray">Public</span></div>
+        <div class="panel-body">
+        <div class="feedback-kind">
+          <label><input type="radio" name="kind" value="idea" checked data-feedback-kind><span>Idée</span></label>
+          <label><input type="radio" name="kind" value="review" data-feedback-kind><span>Avis</span></label>
+        </div>
+        <div class="field">
+          <label for="fbTitle">Titre</label>
+          <input class="input" id="fbTitle" name="title" maxlength="80" required placeholder="Ex. Ajouter des sous-titres aux formations" />
+        </div>
+        <div class="field">
+          <label for="fbMessage">Message</label>
+          <textarea class="input" id="fbMessage" name="message" rows="5" maxlength="1000" required placeholder="Explique ton idée ou ton retour…"></textarea>
+        </div>
+        <div class="field" data-feedback-rating hidden>
+          <label>Note</label>
+          <div class="feedback-rating-input">
+            ${[1, 2, 3, 4, 5].map((n) => `<label title="${n} étoile${n > 1 ? 's' : ''}"><input type="radio" name="rating" value="${n}" ${n === 5 ? 'checked' : ''}><span>★</span></label>`).join('')}
+          </div>
+        </div>
+        <button class="btn btn-primary btn-block" type="submit">Publier</button>
+        <p class="hint">Les contributions sont visibles par les membres du studio. Pour un problème d’accès, utilise la page de connexion.</p>
+        </div>
+      </form>
+
+      <div class="feedback-list">
+        <div class="feedback-tabs">
+          <button class="feedback-tab ${filter === 'all' ? 'active' : ''}" type="button" data-action="feedback-filter" data-filter="all">Tout <span>${fmt(summary.total || 0)}</span></button>
+          <button class="feedback-tab ${filter === 'idea' ? 'active' : ''}" type="button" data-action="feedback-filter" data-filter="idea">Idées <span>${fmt(summary.ideas || 0)}</span></button>
+          <button class="feedback-tab ${filter === 'review' ? 'active' : ''}" type="button" data-action="feedback-filter" data-filter="review">Avis <span>${fmt(summary.reviews || 0)}</span></button>
+        </div>
+        ${filtered.length
+          ? filtered.map(feedbackCard).join('')
+          : `<div class="empty"><div class="ic">${icon('message')}</div><h3>Aucune contribution</h3><p>Sois le premier à proposer une idée ou à laisser un avis.</p></div>`}
+      </div>
+    </div>`;
+}
+
+document.addEventListener('change', (event) => {
+  const input = event.target.closest('[data-feedback-kind]');
+  if (!input) return;
+  const form = input.closest('form');
+  const field = form?.querySelector('[data-feedback-rating]');
+  if (field) field.hidden = input.value !== 'review';
+});
+
+onAction('feedback-filter', (el) => {
+  state.feedbackFilter = el.dataset.filter || 'all';
+  render();
+});
+
+onAction('feedback-vote', async (el) => {
+  el.disabled = true;
+  try {
+    await api(`/api/feedback/${el.dataset.id}/vote`, { method: 'POST' });
+    await loadFeedback();
+    render();
+  } catch (error) {
+    toast(error.message, 'error');
+  } finally {
+    el.disabled = false;
+  }
+});
+
+onAction('feedback-delete', (el) => {
+  confirmDialog({
+    title: 'Supprimer cette contribution ?',
+    message: 'Elle disparaîtra pour tout le monde.',
+    confirmLabel: 'Supprimer',
+    onConfirm: async () => {
+      await api(`/api/feedback/${el.dataset.id}`, { method: 'DELETE' });
+      await loadFeedback();
+      render();
+      toast('Contribution supprimée.', 'info');
+    },
+  });
+});
+
+onForm('feedback-create', async (form, formData) => {
+  const kind = formData.get('kind') === 'review' ? 'review' : 'idea';
+  await api('/api/feedback', {
+    method: 'POST',
+    body: JSON.stringify({
+      kind,
+      title: formData.get('title'),
+      message: formData.get('message'),
+      rating: Number(formData.get('rating') || 5),
+    }),
+  });
+  state.feedbackFilter = 'all';
+  await loadFeedback();
+  render();
+  toast(kind === 'review' ? 'Merci pour ton avis.' : 'Idée publiée, merci !');
+});
 
 function viewApi() {
   const keys = state.ws.apiKeys;

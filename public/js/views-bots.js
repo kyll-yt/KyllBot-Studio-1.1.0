@@ -41,7 +41,7 @@ function viewDashboard() {
 
   return `<div class="page-head">
       <div>
-        <h1>${greeting}, ${esc(user.name.split(' ')[0])}</h1>
+        <h1>${greeting}, ${esc(preferredName(user.name))}</h1>
         <p class="sub">Voici l'activité de votre studio — ${ws.bots.length} bot(s), ${ws.courses.length} formation(s) et ${ws.learners.length} apprenant(s).</p>
       </div>
       <div class="page-actions">
@@ -52,10 +52,12 @@ function viewDashboard() {
 
     <div class="grid-stats">
       ${statCard('Bots actifs', `${stats.botsOnline}/${stats.bots}`, `${stats.commands} commandes configurées`, 'bot')}
-      ${statCard('Commandes exécutées', fmt(stats.executions), '<span class="up">+12 %</span> vs semaine dernière', 'zap')}
+      ${statCard('Commandes exécutées', fmt(stats.executions), `${fmt(stats.executions7d)} sur les 7 derniers jours`, 'zap')}
       ${statCard('Formations publiées', `${stats.published}/${stats.courses}`, `${stats.lessons} leçons au total`, 'book')}
       ${statCard('Apprenants', fmt(stats.learners), `${stats.avgProgress} % de progression moyenne`, 'users')}
     </div>
+
+    ${dailyRewardCard()}
 
     <div class="dash-grid">
       <div class="panel">
@@ -92,6 +94,29 @@ function viewDashboard() {
     </div>`;
 }
 
+function dailyRewardCard() {
+  const reward = state.billing?.dailyReward;
+  if (!reward) return '';
+  const credits = state.ws.credits || 0;
+  return `<div class="panel reward-panel">
+    <div class="reward-main">
+      <span class="rw-ic">${icon('spark')}</span>
+      <div>
+        <div class="reward-kicker">Récompense quotidienne</div>
+        <h3>Solde : ${fmt(credits)} crédit${credits > 1 ? 's' : ''}</h3>
+        <p>${
+          reward.claimedToday
+            ? `Déjà récupérée aujourd’hui · série de ${reward.streak} jour(s)`
+            : `Récupérez ${reward.amount} crédits aujourd’hui · série de ${reward.nextStreak} jour(s)`
+        }</p>
+      </div>
+    </div>
+    <button class="btn btn-primary" data-action="claim-reward" ${reward.claimedToday ? 'disabled' : ''}>
+      ${reward.claimedToday ? 'Revenez demain' : `Réclamer +${reward.amount}`}
+    </button>
+  </div>`;
+}
+
 /* ------------------------------------------------------------------ */
 /* vue : liste des bots                                                */
 /* ------------------------------------------------------------------ */
@@ -105,8 +130,11 @@ function viewBots() {
   const cards = bots
     .map((bot) => {
       const activeAutomations = bot.automations.filter((a) => a.enabled).length;
-      const statusClass = bot.status === 'online' ? 'online' : bot.status === 'draft' ? 'draft' : 'offline';
-      const statusLabel = bot.status === 'online' ? 'En ligne' : bot.status === 'draft' ? 'Brouillon' : 'Hors ligne';
+      const runtime = bot.runtime || {};
+      const online = runtime.status === 'online';
+      const connecting = runtime.status === 'starting';
+      const statusClass = online ? 'online' : connecting || runtime.status === 'error' ? 'draft' : bot.status === 'draft' ? 'draft' : 'offline';
+      const statusLabel = online ? 'Connecté' : connecting ? 'Connexion…' : runtime.status === 'error' ? 'Erreur' : bot.status === 'draft' ? 'Brouillon' : 'Hors ligne';
       return `<article class="bot-card">
         <div class="bot-top">
           <span class="bot-avatar" style="background:linear-gradient(140deg,${esc(bot.color)},${esc(bot.color)}99)">${esc(initials(bot.name))}</span>
@@ -115,7 +143,7 @@ function viewBots() {
             <span class="status"><i class="status-dot ${statusClass}"></i>${statusLabel}</span>
           </div>
           <button class="mini-btn" data-action="toggle-bot-status" data-id="${esc(bot.id)}" title="Changer le statut">
-            ${icon(bot.status === 'online' ? 'clock' : 'play')}
+            ${icon(online ? 'clock' : 'play')}
           </button>
         </div>
         <p class="bot-desc">${esc(bot.description || 'Aucune description pour ce bot.')}</p>
@@ -165,6 +193,106 @@ const AUTOMATION_DESCRIPTIONS = {
   reminders: 'Envoie des rappels de cours aux apprenants.',
 };
 
+const AUTOMATION_FIELDS = {
+  welcome: [
+    { key: 'channel', label: 'Salon d’accueil', placeholder: '#bienvenue', list: 'channelSuggestions' },
+    { key: 'category', label: 'Catégorie', placeholder: 'Accueil', list: 'categorySuggestions' },
+    { key: 'message', label: 'Message de bienvenue', type: 'textarea', placeholder: 'Bienvenue {user} !' },
+  ],
+  autorole: [
+    { key: 'role', label: 'Rôle attribué', placeholder: 'Membre', list: 'roleSuggestions' },
+    { key: 'category', label: 'Catégorie', placeholder: 'Arrivées', list: 'categorySuggestions' },
+  ],
+  levels: [
+    { key: 'channel', label: 'Salon des niveaux', placeholder: '#niveaux', list: 'channelSuggestions' },
+    { key: 'xpPerMessage', label: 'XP par message', type: 'number', min: 1, max: 100 },
+  ],
+  ticketPanel: [
+    { key: 'channel', label: 'Salon du panneau', placeholder: '#support', list: 'channelSuggestions' },
+    { key: 'category', label: 'Catégorie des tickets', placeholder: 'Support', list: 'categorySuggestions' },
+  ],
+  moderation: [
+    { key: 'channel', label: 'Salon de journalisation', placeholder: '#logs', list: 'channelSuggestions' },
+    { key: 'category', label: 'Catégorie', placeholder: 'Modération', list: 'categorySuggestions' },
+    { key: 'antiSpam', label: 'Bloquer automatiquement le spam', type: 'boolean' },
+  ],
+  antiSpam: [
+    { key: 'channel', label: 'Salon surveillé', placeholder: '#général', list: 'channelSuggestions' },
+    { key: 'threshold', label: 'Messages avant sanction', type: 'number', min: 2, max: 20 },
+  ],
+  autoMod: [
+    { key: 'category', label: 'Catégorie', placeholder: 'Modération', list: 'categorySuggestions' },
+    { key: 'blockLinks', label: 'Bloquer les liens', type: 'boolean' },
+  ],
+  logs: [{ key: 'channel', label: 'Salon des logs', placeholder: '#logs', list: 'channelSuggestions' }],
+  reminders: [
+    { key: 'channel', label: 'Salon des rappels', placeholder: '#annonces', list: 'channelSuggestions' },
+    { key: 'cron', label: 'Fréquence', placeholder: 'lundi 09:00' },
+  ],
+};
+
+const CHANNEL_SUGGESTIONS = ['#bienvenue', '#général', '#annonces', '#logs', '#support', '#niveaux', '#règles'];
+const CATEGORY_SUGGESTIONS = ['Accueil', 'Support', 'Modération', 'Formation', 'Logs', 'Annonces'];
+const FLOW_ROLES_FALLBACK = ['Membre', 'Modérateur', 'Administrateur', 'Bot', 'VIP'];
+
+function automationFields(type) {
+  return (
+    AUTOMATION_FIELDS[type] || [
+      { key: 'channel', label: 'Salon', placeholder: '#général', list: 'channelSuggestions' },
+      { key: 'category', label: 'Catégorie', placeholder: 'Général', list: 'categorySuggestions' },
+    ]
+  );
+}
+
+function automationSummary(automation) {
+  const config = automation.config || {};
+  const pills = [];
+  if (config.channel) pills.push(`<span class="pill cyan">${esc(config.channel)}</span>`);
+  if (config.category) pills.push(`<span class="pill violet">${esc(config.category)}</span>`);
+  const details = Object.entries(config)
+    .filter(([key]) => !['channel', 'category'].includes(key))
+    .map(([key, value]) => `${esc(key)}: ${esc(typeof value === 'boolean' ? (value ? 'oui' : 'non') : value)}`);
+  return `<div class="auto-config">
+    ${pills.join('')}
+    ${details.length ? `<span class="auto-detail">${details.join(' · ')}</span>` : ''}
+    ${!pills.length && !details.length ? '<span class="auto-detail">Aucun salon configuré pour l’instant.</span>' : ''}
+  </div>`;
+}
+
+function automationFieldControl(field, value, discord = {}) {
+  const channelOptions = (discord.channels || [])
+    .filter((channel) => channel.type !== 'voice')
+    .map((channel) => `#${channel.name}`);
+  const categoryOptions = discord.categories || [];
+  const roleOptions = (discord.roles || []).map((role) => role.name);
+  const common = `name="${esc(field.key)}" id="auto-${esc(field.key)}"`;
+  if (field.type === 'boolean') {
+    return `<label class="check-row"><input type="checkbox" ${common} ${value ? 'checked' : ''}> <span>${esc(field.label)}</span></label>`;
+  }
+  if (field.type === 'textarea') {
+    return `<div class="field"><label for="auto-${esc(field.key)}">${esc(field.label)}</label>
+      <textarea class="textarea" ${common} placeholder="${esc(field.placeholder || '')}">${esc(value ?? '')}</textarea></div>`;
+  }
+  if (field.list) {
+    const options = field.list === 'channelSuggestions'
+      ? (channelOptions.length ? channelOptions : CHANNEL_SUGGESTIONS)
+      : field.list === 'roleSuggestions'
+        ? (roleOptions.length ? roleOptions : FLOW_ROLES_FALLBACK)
+        : (categoryOptions.length ? categoryOptions : CATEGORY_SUGGESTIONS);
+    return `<div class="field"><label for="auto-${esc(field.key)}">${esc(field.label)}</label>
+      <div class="form-row">
+        <select class="select" data-fill-target="auto-${esc(field.key)}">
+          <option value="">Choisir…</option>
+          ${options.map((option) => `<option value="${esc(option)}" ${value === option ? 'selected' : ''}>${esc(option)}</option>`).join('')}
+        </select>
+        <input class="input" ${common} list="${field.list}" placeholder="${esc(field.placeholder || '')}" value="${esc(value ?? '')}">
+      </div>
+    </div>`;
+  }
+  return `<div class="field"><label for="auto-${esc(field.key)}">${esc(field.label)}</label>
+    <input class="input" ${common} type="${field.type || 'text'}" ${field.min !== undefined ? `min="${field.min}"` : ''} ${field.max !== undefined ? `max="${field.max}"` : ''} placeholder="${esc(field.placeholder || '')}" value="${esc(value ?? '')}"></div>`;
+}
+
 function automationIcon(type) {
   if (/anti|mod|logs/.test(type)) return 'shield';
   if (/ticket/.test(type)) return 'ticket';
@@ -173,14 +301,113 @@ function automationIcon(type) {
   return 'zap';
 }
 
+function viewBotMessages(bot) {
+  const messages = bot.savedMessages || [];
+  const cards = messages
+    .map(
+      (message) => `<div class="auto-card saved-card">
+        <span class="a-ic">${icon('message')}</span>
+        <div class="a-main">
+          <h4>${esc(message.label || message.name || 'Message sauvegardé')}
+            ${message.hasEmbed ? '<span class="pill violet">embed</span>' : ''}
+            ${message.buttonCount ? `<span class="pill cyan">${message.buttonCount} bouton(s)</span>` : ''}
+          </h4>
+          <p><b>#${esc(message.channelName || message.channelId || 'salon')}</b> · ${
+            message.lastSentAt ? `Dernier envoi ${esc(timeAgo(message.lastSentAt))}` : 'Pas encore envoyé'
+          }</p>
+          <div class="auto-config"><span class="auto-detail">${esc(message.preview || '')}</span></div>
+        </div>
+        <button class="btn btn-ghost btn-sm" data-action="run-saved-message" data-id="${esc(bot.id)}" data-message="${esc(message.id)}" title="Envoyer maintenant">${icon('play')} Envoyer</button>
+        <button class="btn btn-ghost btn-sm" data-action="edit-saved-message" data-id="${esc(bot.id)}" data-message="${esc(message.id)}">${icon('edit')}</button>
+        <button class="mini-btn" data-action="duplicate-saved-message" data-id="${esc(bot.id)}" data-message="${esc(message.id)}" title="Dupliquer">${icon('copy')}</button>
+        <button class="mini-btn danger" data-action="delete-saved-message" data-id="${esc(bot.id)}" data-message="${esc(message.id)}" title="Supprimer">${icon('trash')}</button>
+      </div>`,
+    )
+    .join('');
+
+  return `<div class="panel">
+    <div class="panel-head">
+      <h3>Messages sauvegardés</h3>
+      <div class="ph-actions">
+        <span class="pill cyan">${messages.length}</span>
+        <button class="btn btn-primary btn-sm" data-action="new-saved-message" data-id="${esc(bot.id)}">${icon('plus')} Nouveau message</button>
+      </div>
+    </div>
+    <div class="panel-body">
+      <p class="hint">Écris un message, garde-le, puis envoie-le quand tu veux. Tu peux ajouter un embed, des boutons, des liens et des réponses au clic.</p>
+      ${
+        messages.length
+          ? `<div class="sched-list">${cards}</div>`
+          : `<div class="empty" style="padding:38px 20px">
+              <div class="ic">${icon('message')}</div>
+              <h3>Aucun message sauvegardé</h3>
+              <p>Garde une annonce, une réponse ou un message riche sous la main, puis envoie-le en un clic.</p>
+              <button class="btn btn-primary" data-action="new-saved-message" data-id="${esc(bot.id)}">Créer un message</button>
+            </div>`
+      }
+    </div>
+  </div>`;
+}
+
+function viewBotScheduled(bot) {
+  const messages = bot.scheduledMessages || [];
+  const active = messages.filter((message) => message.enabled).length;
+  const timezone = messages[0]?.timezone || 'Europe/Paris';
+  const cards = messages
+    .map(
+      (message) => `<div class="auto-card sched-card">
+        <span class="a-ic">${icon('clock')}</span>
+        <div class="a-main">
+          <h4>${esc(message.label)} ${message.enabled ? '' : '<span class="pill gray">Désactivé</span>'}</h4>
+          <p>${esc(message.scheduleLabel || `À ${message.time}`)} · <b>#${esc(message.channelName || message.channelId || 'salon')}</b></p>
+          <div class="auto-config">
+            <span class="auto-detail">${
+              message.lastSentAt ? `Dernier envoi ${esc(timeAgo(message.lastSentAt))}` : 'Pas encore envoyé'
+            }${message.lastError ? ` · Erreur : ${esc(message.lastError)}` : ''}</span>
+          </div>
+        </div>
+        <button class="btn btn-ghost btn-sm" data-action="run-scheduled-message" data-id="${esc(bot.id)}" data-message="${esc(message.id)}" title="Envoyer maintenant">${icon('play')} Envoyer</button>
+        <button class="btn btn-ghost btn-sm" data-action="edit-scheduled-message" data-id="${esc(bot.id)}" data-message="${esc(message.id)}">${icon('edit')}</button>
+        <button class="switch ${message.enabled ? 'on' : ''}" data-action="toggle-scheduled-message" data-id="${esc(bot.id)}" data-message="${esc(message.id)}" aria-label="Activer ${esc(message.label)}"></button>
+        <button class="mini-btn danger" data-action="delete-scheduled-message" data-id="${esc(bot.id)}" data-message="${esc(message.id)}" title="Supprimer">${icon('trash')}</button>
+      </div>`,
+    )
+    .join('');
+
+  return `<div class="panel">
+    <div class="panel-head">
+      <h3>Messages programmés</h3>
+      <div class="ph-actions">
+        <span class="pill cyan">${active} actif(s)</span>
+        <button class="btn btn-primary btn-sm" data-action="new-scheduled-message" data-id="${esc(bot.id)}">${icon('plus')} Programmer</button>
+      </div>
+    </div>
+    <div class="panel-body">
+      <p class="hint">Le bot envoie automatiquement le message à l’heure fixée, dans le fuseau <b>${esc(timezone)}</b>. Les envois sont vérifiés toutes les 20 secondes et ne sont jamais dupliqués.</p>
+      ${
+        messages.length
+          ? `<div class="sched-list">${cards}</div>`
+          : `<div class="empty" style="padding:38px 20px">
+              <div class="ic">${icon('clock')}</div>
+              <h3>Aucun message programmé</h3>
+              <p>Programme une annonce, un rappel ou un message récurrent à une heure précise.</p>
+              <button class="btn btn-primary" data-action="new-scheduled-message" data-id="${esc(bot.id)}">Programmer un message</button>
+            </div>`
+      }
+    </div>
+  </div>`;
+}
+
 function viewBotDetail(id) {
   const bot = state.ws.bots.find((entry) => entry.id === id);
   if (!bot) return emptyState('Bot introuvable', 'Ce bot a peut-être été supprimé.', 'Retour aux bots', 'go-bots');
 
   const tabs = [
     ['commands', `Commandes (${bot.commands.length})`],
+    ['messages', `Messages (${(bot.savedMessages || []).length})`],
     ['flows', `Flux (${(bot.flows || []).length})`],
     ['automations', `Automatisations (${bot.automations.length})`],
+    ['scheduled', `Messages programmés (${(bot.scheduledMessages || []).length})`],
     ['settings', 'Paramètres'],
   ];
 
@@ -216,8 +443,12 @@ function viewBotDetail(id) {
         }
       </div>
     </div>`;
+  } else if (state.botTab === 'messages') {
+    body = viewBotMessages(bot);
   } else if (state.botTab === 'flows') {
     body = viewBotFlows(bot);
+  } else if (state.botTab === 'scheduled') {
+    body = viewBotScheduled(bot);
   } else if (state.botTab === 'automations') {
     body = `<div class="panel">
       <div class="panel-head"><h3>Automatisations</h3><div class="ph-actions"><span class="pill violet">${bot.automations.filter((a) => a.enabled).length} active(s)</span></div></div>
@@ -231,14 +462,9 @@ function viewBotDetail(id) {
                     <div class="a-main">
                       <h4>${esc(automation.label)}</h4>
                       <p>${esc(AUTOMATION_DESCRIPTIONS[automation.type] || 'Automatisation personnalisée.')}</p>
-                      ${
-                        Object.keys(automation.config || {}).length
-                          ? `<p style="margin-top:5px;font-family:var(--mono);font-size:10.5px">${Object.entries(automation.config)
-                              .map(([key, value]) => `${esc(key)}: ${esc(typeof value === 'object' ? JSON.stringify(value) : value)}`)
-                              .join(' · ')}</p>`
-                          : ''
-                      }
+                      ${automationSummary(automation)}
                     </div>
+                    <button class="btn btn-ghost btn-sm" data-action="config-automation" data-id="${esc(bot.id)}" data-auto="${esc(automation.id)}">${icon('gear')} Configurer</button>
                     <button class="switch ${automation.enabled ? 'on' : ''}" data-action="toggle-automation" data-id="${esc(bot.id)}" data-auto="${esc(automation.id)}" aria-label="Activer ${esc(automation.label)}"></button>
                   </div>`,
                 )
@@ -248,6 +474,19 @@ function viewBotDetail(id) {
       </div>
     </div>`;
   } else {
+    const discord = bot.discord || { name: '', channels: [], categories: [], roles: [], guildId: '' };
+    const runtime = bot.runtime || { status: 'offline', logs: [], guilds: [] };
+    const runtimeClass =
+      runtime.status === 'online' ? 'green' : runtime.status === 'error' ? 'red' : runtime.status === 'starting' ? 'amber' : 'gray';
+    const runtimeLabel =
+      runtime.status === 'online'
+        ? 'Connecté à Discord'
+        : runtime.status === 'starting'
+          ? 'Connexion…'
+          : runtime.status === 'error'
+            ? 'Erreur de connexion'
+            : 'Hors ligne';
+    const knownGuilds = Array.isArray(bot.discordAccount?.guilds) ? bot.discordAccount.guilds : [];
     body = `<div class="panel">
       <div class="panel-head"><h3>Paramètres du bot</h3></div>
       <div class="panel-body">
@@ -272,6 +511,101 @@ function viewBotDetail(id) {
         </form>
       </div>
     </div>
+    <div class="panel" style="margin-top:14px">
+      <div class="panel-head">
+        <h3>Serveur Discord</h3>
+        <div class="ph-actions">
+          <button class="btn btn-ghost btn-sm" data-action="bot-sync-discord" data-id="${esc(bot.id)}">${icon('shuffle')} Synchroniser depuis Discord</button>
+          <span class="pill violet">${discord.channels.length} salon(s) · ${discord.categories.length} catégorie(s)</span>
+        </div>
+      </div>
+      <div class="panel-body">
+        <p class="hint">${
+          discord.syncedAt
+            ? `Dernière synchronisation Discord : ${esc(timeAgo(discord.syncedAt))}. Les listes ci-dessous viennent de ton serveur.`
+            : 'Ces listes sont des données de démonstration. Clique sur « Synchroniser depuis Discord » pour récupérer les vrais salons, catégories et rôles.'
+        }</p>
+        <form data-form="bot-discord" data-id="${esc(bot.id)}">
+          <div class="field"><label for="bdName">Nom du serveur</label><input class="input" id="bdName" name="serverName" value="${esc(discord.name)}"></div>
+          <div class="field">
+            <label for="bdGuildId">ID du serveur Discord</label>
+            <div class="form-row">
+              ${
+                knownGuilds.length
+                  ? `<select class="select" data-fill-target="bdGuildId"><option value="">Choisir un serveur…</option>${knownGuilds
+                      .map((guild) => `<option value="${esc(guild.id)}" ${discord.guildId === guild.id ? 'selected' : ''}>${esc(guild.name)}</option>`)
+                      .join('')}</select>`
+                  : ''
+              }
+              <input class="input" id="bdGuildId" name="guildId" value="${esc(discord.guildId || '')}" placeholder="123456789012345678">
+            </div>
+            <div class="hint">Requis pour synchroniser les commandes instantanément. ${
+              knownGuilds.length ? `${knownGuilds.length} serveur(s) détecté(s) avec ce token.` : 'Ajoute le token pour détecter automatiquement tes serveurs.'
+            }</div>
+          </div>
+          <div class="field">
+            <label for="bdChannels">Salons <span class="muted-small">(un par ligne · format #salon | Catégorie | text/voice/forum)</span></label>
+            <textarea class="textarea" id="bdChannels" name="channels" rows="6">${esc(discord.channels.map((channel) => `#${channel.name} | ${channel.category || 'Général'} | ${channel.type || 'text'}`).join('\n'))}</textarea>
+          </div>
+          <div class="form-row">
+            <div class="field">
+              <label for="bdCategories">Catégories <span class="muted-small">(une par ligne)</span></label>
+              <textarea class="textarea" id="bdCategories" name="categories" rows="4">${esc(discord.categories.join('\n'))}</textarea>
+            </div>
+            <div class="field">
+              <label for="bdRoles">Rôles <span class="muted-small">(format Nom | #couleur)</span></label>
+              <textarea class="textarea" id="bdRoles" name="roles" rows="4">${esc(discord.roles.map((role) => `${role.name} | ${role.color || '#7c5cff'}`).join('\n'))}</textarea>
+            </div>
+          </div>
+          <label class="check-row"><input type="checkbox" name="privilegedIntents" ${discord.privilegedIntents !== false ? 'checked' : ''}> <span>Activer les intents privilégiés (membres + contenu des messages)</span></label>
+          <p class="hint">« Synchroniser depuis Discord » remplace ces listes par les vrais salons, catégories et rôles du serveur. Ces données alimentent les automatisations et les flux. Les intents privilégiés doivent aussi être activés dans le portail développeur Discord ; sinon le bot bascule automatiquement en mode sûr (commandes OK, accueil et messages limités).</p>
+          <button class="btn btn-primary" type="submit">Enregistrer le serveur</button>
+        </form>
+      </div>
+    </div>
+    <div class="panel" style="margin-top:14px">
+      <div class="panel-head">
+        <h3>Connexion Discord</h3>
+        <div class="ph-actions"><span class="pill ${runtimeClass}">${runtimeLabel}</span></div>
+      </div>
+      <div class="panel-body">
+        <div class="token-row">
+          <span class="a-ic" style="width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:rgba(124,92,255,.13);color:#c2b4ff">${icon('key')}</span>
+          <div style="flex:1;min-width:0">
+            <b style="font-family:var(--mono);font-size:12.5px">${bot.hasToken ? `••••••••${esc(bot.tokenHint || '')}` : 'Aucun token'}</b>
+            <p style="font-size:11.5px;color:var(--muted-2);margin-top:2px">${bot.hasToken ? `Mis à jour ${esc(timeAgo(bot.tokenUpdatedAt))}` : 'Ajoutez le token pour connecter ce bot à Discord.'}</p>
+          </div>
+          <button class="btn btn-ghost btn-sm" data-action="bot-token" data-id="${esc(bot.id)}">${icon('key')} ${bot.hasToken ? 'Remplacer' : 'Ajouter'} le token</button>
+          ${bot.hasToken ? `<button class="btn btn-danger btn-sm" data-action="bot-token-clear" data-id="${esc(bot.id)}">Supprimer</button>` : ''}
+        </div>
+        ${
+          bot.tokenNeedsReconnect
+            ? '<p class="hint" style="color:#fde68a">Cet ancien token était stocké sous forme d’empreinte et ne peut plus être utilisé. Réenregistre le token pour activer la connexion réelle.</p>'
+            : ''
+        }
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+          <button class="btn btn-ghost btn-sm" data-action="bot-test-connection" data-id="${esc(bot.id)}">${icon('zap')} Tester la connexion</button>
+          <button class="btn btn-ghost btn-sm" data-action="bot-sync" data-id="${esc(bot.id)}">${icon('shuffle')} Synchroniser les commandes</button>
+          <button class="btn btn-ghost btn-sm" data-action="bot-test-message" data-id="${esc(bot.id)}">${icon('message')} Message de test</button>
+          <button class="btn btn-ghost btn-sm" data-action="bot-restart" data-id="${esc(bot.id)}">${icon('play')} Reconnecter</button>
+        </div>
+        <div style="margin-top:12px;display:grid;gap:4px">
+          ${runtime.tag ? `<p class="hint">Connecté en tant que <b>${esc(runtime.tag)}</b>${runtime.guilds?.length ? ` · ${runtime.guilds.length} serveur(s)` : ''}</p>` : ''}
+          ${runtime.lastSyncAt ? `<p class="hint">Dernière synchro : ${esc(timeAgo(runtime.lastSyncAt))} · ${runtime.commandCount} commande(s)</p>` : ''}
+          ${runtime.lastError ? `<p class="hint" style="color:#fda4af">Dernière erreur : ${esc(runtime.lastError)}</p>` : ''}
+          ${runtime.warning ? `<p class="hint" style="color:#fde68a">${esc(runtime.warning)}</p>` : ''}
+        </div>
+        ${
+          runtime.logs?.length
+            ? `<details class="token-help"><summary>Journal de connexion</summary>${runtime.logs
+                .slice(0, 6)
+                .map((entry) => `<p>${esc(entry.message)}</p>`)
+                .join('')}</details>`
+            : ''
+        }
+        <p class="hint">Le token est stocké chiffré (AES-256-GCM) et n’est jamais réaffiché. Le bot se connecte réellement à Discord quand un token valide et l’ID du serveur sont enregistrés.</p>
+      </div>
+    </div>
     <div class="panel" style="margin-top:14px;border-color:rgba(251,113,133,.25)">
       <div class="panel-head"><h3 style="color:#fda4af">Zone sensible</h3></div>
       <div class="panel-body" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
@@ -285,12 +619,12 @@ function viewBotDetail(id) {
     <div class="page-head">
       <span class="bot-avatar" style="width:52px;height:52px;border-radius:15px;font-size:20px;background:linear-gradient(140deg,${esc(bot.color)},${esc(bot.color)}99)">${esc(initials(bot.name))}</span>
       <div>
-        <h1 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${esc(bot.name)} ${statusPill(bot.status)}</h1>
+        <h1 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${esc(bot.name)} ${statusPill(bot.runtime?.status || bot.status)}</h1>
         <p class="sub">${esc(bot.description || 'Aucune description.')} · préfixe <b>${esc(bot.prefix)}</b> · créé ${esc(timeAgo(bot.createdAt))}</p>
       </div>
       <div class="page-actions">
-        <button class="btn btn-ghost" data-action="test-bot" data-id="${esc(bot.id)}">${icon('play')} Tester</button>
-        <button class="btn btn-primary" data-action="toggle-bot-status" data-id="${esc(bot.id)}">${icon('zap')} ${bot.status === 'online' ? 'Mettre hors ligne' : 'Connecter'}</button>
+        <button class="btn btn-ghost" data-action="test-bot" data-id="${esc(bot.id)}">${icon('play')} Simuler</button>
+        <button class="btn btn-primary" data-action="toggle-bot-status" data-id="${esc(bot.id)}">${icon('zap')} ${bot.runtime?.status === 'online' ? 'Déconnecter' : 'Connecter'}</button>
       </div>
     </div>
     <div class="tabs">
@@ -302,6 +636,310 @@ function viewBotDetail(id) {
 /* ------------------------------------------------------------------ */
 /* modales & actions : bots                                            */
 /* ------------------------------------------------------------------ */
+
+function savedButtonRow(button = {}) {
+  const type = button.url ? 'link' : button.label ? 'action' : 'link';
+  return `<div class="msg-btn-row">
+    <input class="input" data-field="label" maxlength="80" placeholder="Libellé" value="${esc(button.label || '')}">
+    <select class="select" data-field="type">
+      <option value="link" ${type === 'link' ? 'selected' : ''}>Lien</option>
+      <option value="action" ${type === 'action' ? 'selected' : ''}>Réponse</option>
+    </select>
+    <input class="input ${type === 'link' ? '' : 'is-hidden'}" data-field="url" maxlength="512" placeholder="https://..." value="${esc(button.url || '')}">
+    <input class="input ${type === 'action' ? '' : 'is-hidden'}" data-field="response" maxlength="1000" placeholder="Réponse au clic" value="${esc(button.response || '')}">
+    <input class="input msg-btn-emoji" data-field="emoji" maxlength="32" placeholder="😀" value="${esc(button.emoji || '')}">
+    <select class="select ${type === 'action' ? '' : 'is-hidden'}" data-field="style">
+      <option value="primary" ${button.style === 'primary' || !button.style ? 'selected' : ''}>Bleu</option>
+      <option value="secondary" ${button.style === 'secondary' ? 'selected' : ''}>Gris</option>
+      <option value="success" ${button.style === 'success' ? 'selected' : ''}>Vert</option>
+      <option value="danger" ${button.style === 'danger' ? 'selected' : ''}>Rouge</option>
+    </select>
+    <button type="button" class="mini-btn danger" data-remove-saved-button title="Retirer">${icon('x')}</button>
+  </div>`;
+}
+
+function mountSavedButtonEditor(form, initialButtons = []) {
+  const container = form.querySelector('#savedButtons');
+  if (!container) return;
+  const syncRow = (row) => {
+    const type = row.querySelector('[data-field="type"]').value;
+    row.querySelector('[data-field="url"]').classList.toggle('is-hidden', type !== 'link');
+    row.querySelector('[data-field="response"]').classList.toggle('is-hidden', type !== 'action');
+    row.querySelector('[data-field="style"]').classList.toggle('is-hidden', type !== 'action');
+  };
+  const addRow = (button = {}) => {
+    if (container.children.length >= 5) {
+      toast('Maximum 5 boutons par message.', 'error');
+      return;
+    }
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = savedButtonRow(button);
+    const row = wrapper.firstElementChild;
+    row.querySelector('[data-field="type"]').addEventListener('change', () => syncRow(row));
+    row.querySelector('[data-remove-saved-button]').addEventListener('click', () => row.remove());
+    container.appendChild(row);
+    syncRow(row);
+  };
+  (initialButtons.length ? initialButtons : [{}]).slice(0, 5).forEach(addRow);
+  form.querySelector('[data-add-saved-button]')?.addEventListener('click', () => addRow());
+}
+
+function savedMessageModal(bot, message = null) {
+  const channels = (bot.discord?.channels || []).filter((channel) => channel.type !== 'voice');
+  const embed = message?.embed || {};
+  const hasEmbed = Boolean(embed.title || embed.description || embed.footer || embed.image || embed.thumbnail);
+  const form = openModal({
+    title: message ? 'Modifier le message' : 'Nouveau message',
+    subtitle: 'Écris, sauvegarde, puis envoie quand tu veux.',
+    wide: true,
+    submitLabel: message ? 'Enregistrer' : 'Sauvegarder le message',
+    body: `
+      <div class="field">
+        <label for="savedName">Nom interne</label>
+        <input class="input" id="savedName" name="name" maxlength="80" value="${esc(message?.name || '')}" placeholder="Annonce de lancement">
+      </div>
+      <div class="field">
+        <label for="savedChannelName">Salon Discord</label>
+        <div class="form-row">
+          <select class="select" name="channelId">
+            <option value="">Choisir un salon…</option>
+            ${channels
+              .map(
+                (channel) => `<option value="${esc(channel.id)}" data-name="${esc(channel.name)}" ${
+                  message?.channelId === channel.id || (!message?.channelId && message?.channelName === channel.name) ? 'selected' : ''
+                }>#${esc(channel.name)}${channel.category ? ` · ${esc(channel.category)}` : ''}</option>`,
+              )
+              .join('')}
+          </select>
+          <input class="input" id="savedChannelName" name="channelName" list="savedChannelSuggestions" value="${esc(message?.channelName || '')}" placeholder="#annonces">
+        </div>
+        <div class="hint">Choisis un salon synchronisé, ou écris son nom / son ID.</div>
+        <datalist id="savedChannelSuggestions">
+          ${channels.map((channel) => `<option value="${esc(channel.name)}"></option>`).join('')}
+        </datalist>
+      </div>
+      <div class="field">
+        <label for="savedContent">Message</label>
+        <textarea class="textarea" id="savedContent" name="content" rows="5" maxlength="2000" placeholder="Bonjour à tous ! Voici les annonces du jour…">${esc(message?.content || '')}</textarea>
+      </div>
+      <details class="msg-embed" ${hasEmbed ? 'open' : ''}>
+        <summary>Ajouter un embed (titre, description, couleur, image…)</summary>
+        <div class="form-row">
+          <div class="field">
+            <label for="savedEmbedTitle">Titre</label>
+            <input class="input" id="savedEmbedTitle" name="embedTitle" maxlength="256" value="${esc(embed.title || '')}" placeholder="Annonce importante">
+          </div>
+          <div class="field">
+            <label for="savedEmbedColor">Couleur</label>
+            <input class="input" id="savedEmbedColor" name="embedColor" type="color" value="${esc(embed.color || '#7c5cff')}">
+          </div>
+        </div>
+        <div class="field">
+          <label for="savedEmbedDescription">Description</label>
+          <textarea class="textarea" id="savedEmbedDescription" name="embedDescription" rows="3" maxlength="4096" placeholder="Le texte de l’embed…">${esc(embed.description || '')}</textarea>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label for="savedEmbedFooter">Pied de page</label>
+            <input class="input" id="savedEmbedFooter" name="embedFooter" maxlength="2048" value="${esc(embed.footer || '')}" placeholder="KyllBot Studio">
+          </div>
+          <div class="field">
+            <label for="savedEmbedImage">Image (URL)</label>
+            <input class="input" id="savedEmbedImage" name="embedImage" maxlength="512" value="${esc(embed.image || '')}" placeholder="https://...">
+          </div>
+        </div>
+        <div class="field">
+          <label for="savedEmbedThumbnail">Miniature (URL)</label>
+          <input class="input" id="savedEmbedThumbnail" name="embedThumbnail" maxlength="512" value="${esc(embed.thumbnail || '')}" placeholder="https://...">
+        </div>
+      </details>
+      <div class="msg-buttons-head">
+        <label>Boutons</label>
+        <button type="button" class="btn btn-ghost btn-sm" data-add-saved-button>${icon('plus')} Ajouter un bouton</button>
+      </div>
+      <div class="msg-buttons" id="savedButtons"></div>
+      <p class="hint">Un bouton « lien » ouvre une URL. Un bouton « réponse » répond au clic avec le texte prévu. Maximum 5 boutons.</p>
+    `,
+    onSubmit: async (formData) => {
+      const select = form.querySelector('select[name="channelId"]');
+      const selectedOption = select?.selectedOptions?.[0];
+      let channelId = String(formData.get('channelId') || '').trim();
+      let channelName = String(formData.get('channelName') || '').trim().replace(/^#/, '');
+      if (!channelName && selectedOption?.dataset?.name) channelName = selectedOption.dataset.name;
+      if (channelId && channelName && selectedOption?.dataset?.name && channelName.toLowerCase() !== selectedOption.dataset.name.toLowerCase()) {
+        channelId = '';
+      }
+      const buttons = [...form.querySelectorAll('.msg-btn-row')]
+        .map((row) => {
+          const label = String(row.querySelector('[data-field="label"]')?.value || '').trim();
+          if (!label) return null;
+          const type = row.querySelector('[data-field="type"]')?.value || 'link';
+          const url = String(row.querySelector('[data-field="url"]')?.value || '').trim();
+          const response = String(row.querySelector('[data-field="response"]')?.value || '').trim();
+          if (type === 'link' && !/^https?:\/\/\S+$/i.test(url)) {
+            throw new Error(`Le bouton « ${label} » doit avoir une URL qui commence par http:// ou https://.`);
+          }
+          if (type === 'action' && !response) {
+            throw new Error(`Renseigne la réponse du bouton « ${label} ».`);
+          }
+          return {
+            label,
+            emoji: String(row.querySelector('[data-field="emoji"]')?.value || '').trim(),
+            style: row.querySelector('[data-field="style"]')?.value || 'primary',
+            url: type === 'link' ? url : '',
+            response: type === 'action' ? response : '',
+            ephemeral: true,
+          };
+        })
+        .filter(Boolean);
+      const payload = {
+        name: String(formData.get('name') || '').trim(),
+        channelId,
+        channelName,
+        content: String(formData.get('content') || '').trim(),
+        embed: {
+          title: String(formData.get('embedTitle') || '').trim(),
+          description: String(formData.get('embedDescription') || '').trim(),
+          color: String(formData.get('embedColor') || '#7c5cff').trim(),
+          footer: String(formData.get('embedFooter') || '').trim(),
+          image: String(formData.get('embedImage') || '').trim(),
+          thumbnail: String(formData.get('embedThumbnail') || '').trim(),
+        },
+        buttons,
+      };
+      const hasEmbedContent = Boolean(
+        payload.embed.title || payload.embed.description || payload.embed.footer || payload.embed.image || payload.embed.thumbnail,
+      );
+      if (!payload.content && !hasEmbedContent && !buttons.length) {
+        throw new Error('Écris un message, un embed ou ajoute au moins un bouton.');
+      }
+      await api(
+        message ? `/api/bots/${bot.id}/messages/${message.id}` : `/api/bots/${bot.id}/messages`,
+        { method: message ? 'PATCH' : 'POST', body: JSON.stringify(payload) },
+      );
+      await refresh();
+      toast(message ? 'Message mis à jour.' : 'Message sauvegardé.');
+    },
+  });
+
+  const channelSelect = form.querySelector('select[name="channelId"]');
+  channelSelect?.addEventListener('change', () => {
+    const option = channelSelect.selectedOptions[0];
+    const input = form.querySelector('#savedChannelName');
+    if (option?.value && option.dataset.name && input) input.value = option.dataset.name;
+  });
+  mountSavedButtonEditor(form, message?.buttons || []);
+  return form;
+}
+
+function scheduledMessageModal(bot, message = null) {
+  const channels = (bot.discord?.channels || []).filter((channel) => channel.type !== 'voice');
+  const days = Array.isArray(message?.days) ? message.days : [0, 1, 2, 3, 4, 5, 6];
+  const dayOptions = [
+    [1, 'Lun'],
+    [2, 'Mar'],
+    [3, 'Mer'],
+    [4, 'Jeu'],
+    [5, 'Ven'],
+    [6, 'Sam'],
+    [0, 'Dim'],
+  ];
+  const form = openModal({
+    title: message ? 'Modifier le message programmé' : 'Nouveau message programmé',
+    subtitle: 'Choisis le salon, l’heure fixe et les jours d’envoi.',
+    submitLabel: message ? 'Enregistrer' : 'Programmer le message',
+    body: `
+      <div class="field">
+        <label for="schedLabel">Nom du message</label>
+        <input class="input" id="schedLabel" name="label" maxlength="80" value="${esc(message?.label || '')}" placeholder="Annonce du lundi">
+      </div>
+      <div class="field">
+        <label for="schedChannelName">Salon Discord</label>
+        <div class="form-row">
+          <select class="select" name="channelId">
+            <option value="">Choisir un salon…</option>
+            ${channels
+              .map(
+                (channel) => `<option value="${esc(channel.id)}" data-name="${esc(channel.name)}" ${
+                  message?.channelId === channel.id || (!message?.channelId && message?.channelName === channel.name) ? 'selected' : ''
+                }>#${esc(channel.name)}${channel.category ? ` · ${esc(channel.category)}` : ''}</option>`,
+              )
+              .join('')}
+          </select>
+          <input class="input" id="schedChannelName" name="channelName" list="scheduledChannelSuggestions" value="${esc(message?.channelName || '')}" placeholder="#annonces">
+        </div>
+        <div class="hint">Choisis un salon synchronisé, ou écris son nom / son ID. Le bot doit avoir la permission d’envoyer dans ce salon.</div>
+        <datalist id="scheduledChannelSuggestions">
+          ${channels.map((channel) => `<option value="${esc(channel.name)}"></option>`).join('')}
+        </datalist>
+      </div>
+      <div class="form-row">
+        <div class="field">
+          <label for="schedTime">Heure fixe</label>
+          <input class="input" id="schedTime" name="time" type="time" value="${esc(message?.time || '09:00')}" required>
+        </div>
+        <div class="field">
+          <label for="schedTimezone">Fuseau horaire</label>
+          <input class="input" id="schedTimezone" name="timezone" value="${esc(message?.timezone || 'Europe/Paris')}" placeholder="Europe/Paris">
+        </div>
+      </div>
+      <div class="field">
+        <label>Jours d’envoi</label>
+        <div class="sched-days">
+          ${dayOptions
+            .map(
+              ([value, label]) => `<label class="sched-day"><input type="checkbox" name="days" value="${value}" ${
+                days.includes(value) ? 'checked' : ''
+              }> <span>${label}</span></label>`,
+            )
+            .join('')}
+        </div>
+        <div class="hint">Laisse tous les jours cochés pour un envoi quotidien.</div>
+      </div>
+      <div class="field">
+        <label for="schedContent">Message à envoyer</label>
+        <textarea class="textarea" id="schedContent" name="content" rows="5" maxlength="2000" required placeholder="Bonjour à tous ! Voici les annonces du jour…">${esc(message?.content || '')}</textarea>
+      </div>
+      <label class="check-row"><input type="checkbox" name="enabled" ${message?.enabled !== false ? 'checked' : ''}> <span>Message actif</span></label>
+      <p class="hint">Le message est envoyé par le bot Discord, pas par KyllBot Studio. Les mentions sont désactivées pour éviter les pings involontaires.</p>
+    `,
+    onSubmit: async (formData) => {
+      const select = form.querySelector('select[name="channelId"]');
+      const selectedOption = select?.selectedOptions?.[0];
+      let channelId = String(formData.get('channelId') || '').trim();
+      let channelName = String(formData.get('channelName') || '').trim().replace(/^#/, '');
+      if (!channelName && selectedOption?.dataset?.name) channelName = selectedOption.dataset.name;
+      if (channelId && channelName && selectedOption?.dataset?.name && channelName.toLowerCase() !== selectedOption.dataset.name.toLowerCase()) {
+        channelId = '';
+      }
+      const selectedDays = [...form.querySelectorAll('input[name="days"]:checked')].map((input) => Number(input.value));
+      const payload = {
+        label: String(formData.get('label') || '').trim(),
+        channelId,
+        channelName,
+        time: String(formData.get('time') || '').trim(),
+        timezone: String(formData.get('timezone') || 'Europe/Paris').trim(),
+        days: selectedDays,
+        content: String(formData.get('content') || '').trim(),
+        enabled: formData.get('enabled') === 'on',
+      };
+      await api(
+        message ? `/api/bots/${bot.id}/scheduled-messages/${message.id}` : `/api/bots/${bot.id}/scheduled-messages`,
+        { method: message ? 'PATCH' : 'POST', body: JSON.stringify(payload) },
+      );
+      await refresh();
+      toast(message ? 'Message programmé mis à jour.' : 'Message programmé ajouté.');
+    },
+  });
+
+  const channelSelect = form.querySelector('select[name="channelId"]');
+  channelSelect?.addEventListener('change', () => {
+    const option = channelSelect.selectedOptions[0];
+    const input = form.querySelector('#schedChannelName');
+    if (option?.value && option.dataset.name && input) input.value = option.dataset.name;
+  });
+  return form;
+}
 
 function newBotModal() {
   openModal({
@@ -316,7 +954,15 @@ function newBotModal() {
         <div class="field"><label for="nbColor">Couleur</label><input class="input" id="nbColor" name="color" type="color" value="#7c5cff"></div>
       </div>
       <div class="field"><label for="nbTags">Étiquettes</label><input class="input" id="nbTags" name="tags" placeholder="Communauté, Modération"></div>
-      <p class="hint">Astuce : ne saisissez jamais votre token Discord ici. La connexion se fait depuis l’onglet Paramètres.</p>
+      <div class="field">
+        <label for="nbToken">Token du bot Discord <span class="muted-small">(optionnel)</span></label>
+        <input class="input" id="nbToken" name="token" type="password" placeholder="Collez le token depuis le portail développeur Discord" autocomplete="off">
+        <div class="hint">Le token n’est jamais réaffiché : seul un indice (4 derniers caractères) est conservé. Vous pourrez le remplacer dans Paramètres → Connexion Discord.</div>
+        <details class="token-help">
+          <summary>Où trouver mon token ?</summary>
+          <p>Portail développeur Discord → votre application → onglet Bot → Reset Token. Ne partagez jamais ce token.</p>
+        </details>
+      </div>
     `,
     onSubmit: async (formData) => {
       await api('/api/bots', {
@@ -326,6 +972,7 @@ function newBotModal() {
           description: formData.get('description'),
           prefix: formData.get('prefix'),
           color: formData.get('color'),
+          token: String(formData.get('token') || '').trim() || undefined,
           tags: String(formData.get('tags') || '')
             .split(',')
             .map((tag) => tag.trim())
@@ -337,6 +984,73 @@ function newBotModal() {
     },
   });
 }
+
+const COMMAND_PRESETS = [
+  {
+    key: 'welcome',
+    label: 'Bienvenue',
+    name: 'bienvenue',
+    description: "Affiche le message d'accueil",
+    response: 'Bienvenue {user} sur **{server}** !',
+    embed: { title: 'Bienvenue !', description: 'Passe lire les règles, puis présente-toi dans #présentations.', color: '#7c5cff', footer: 'KyllBot Studio' },
+  },
+  {
+    key: 'rules',
+    label: 'Règles',
+    name: 'regles',
+    description: 'Rappelle les règles du serveur',
+    response: '',
+    embed: { title: 'Règles du serveur', description: '1. Respect · 2. Pas de spam · 3. Pas de publicité non autorisée.', color: '#22d3ee', footer: 'KyllBot Studio' },
+  },
+  {
+    key: 'ping',
+    label: 'Ping',
+    name: 'ping',
+    description: 'Affiche la latence du bot',
+    response: 'Pong ! Latence : **{latency} ms**.',
+    embed: { title: '', description: '', color: '#7c5cff', footer: 'KyllBot Studio' },
+  },
+  {
+    key: 'help',
+    label: 'Aide',
+    name: 'aide',
+    description: 'Liste les commandes disponibles',
+    response: '',
+    embed: { title: 'Commandes disponibles', description: '/bienvenue · /regles · /ticket · /rank · /ping', color: '#a3e635', footer: 'KyllBot Studio' },
+  },
+  {
+    key: 'ticket',
+    label: 'Ticket',
+    name: 'ticket',
+    description: 'Ouvre un ticket de support',
+    response: 'Ticket ouvert : un membre du staff arrive.',
+    embed: { title: 'Support', description: 'Décris ton problème, un membre du staff te répondra ici.', color: '#f472b6', footer: 'Support' },
+  },
+  {
+    key: 'poll',
+    label: 'Sondage',
+    name: 'sondage',
+    description: 'Lance un sondage rapide',
+    response: '',
+    embed: { title: 'Sondage', description: 'Réagis avec ✅ pour oui ou ❌ pour non.', color: '#fbbf24', footer: 'KyllBot Studio' },
+  },
+  {
+    key: 'rank',
+    label: 'Niveau',
+    name: 'rank',
+    description: 'Affiche le niveau et l’XP',
+    response: '{user} est niveau **{level}** avec **{xp} XP**.',
+    embed: { title: '', description: '', color: '#7c5cff', footer: 'KyllBot Studio' },
+  },
+  {
+    key: 'announce',
+    label: 'Annonce',
+    name: 'annonce',
+    description: 'Publie une annonce',
+    response: '',
+    embed: { title: '📢 Annonce', description: 'Votre annonce ici.', color: '#7c5cff', footer: 'Staff' },
+  },
+];
 
 function commandModal(bot, command) {
   const value = command || {
@@ -353,6 +1067,15 @@ function commandModal(bot, command) {
     wide: true,
     submitLabel: command ? 'Enregistrer' : 'Créer la commande',
     body: `
+      <div class="field">
+        <label>Actions prêtes à l’emploi</label>
+        <div class="preset-grid">
+          ${COMMAND_PRESETS.map(
+            (preset) => `<button type="button" class="preset-chip" data-preset="${esc(preset.key)}">${esc(preset.label)}</button>`,
+          ).join('')}
+        </div>
+        <div class="hint">Cliquez sur une action pour remplir le formulaire, puis adaptez le texte.</div>
+      </div>
       <div class="form-row">
         <div class="field"><label for="cName">Nom</label><input class="input" id="cName" name="name" placeholder="bienvenue" value="${esc(value.name)}" required></div>
         <div class="field"><label for="cCooldown">Cooldown (secondes)</label><input class="input" id="cCooldown" name="cooldown" type="number" min="0" max="600" value="${esc(value.cooldown)}"></div>
@@ -404,6 +1127,25 @@ function commandModal(bot, command) {
     });
   };
   form.addEventListener('input', update);
+  form.querySelectorAll('[data-preset]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const preset = COMMAND_PRESETS.find((entry) => entry.key === button.dataset.preset);
+      if (!preset) return;
+      const set = (name, value) => {
+        const field = form.querySelector(`[name="${name}"]`);
+        if (field) field.value = value;
+      };
+      set('name', preset.name);
+      set('description', preset.description);
+      set('response', preset.response);
+      set('embedTitle', preset.embed.title);
+      set('embedDescription', preset.embed.description);
+      set('embedColor', preset.embed.color);
+      set('embedFooter', preset.embed.footer);
+      update();
+      form.querySelector('[name="name"]')?.focus();
+    });
+  });
   update();
 }
 
@@ -439,10 +1181,150 @@ onAction('delete-bot', (el) => {
 onAction('toggle-bot-status', async (el) => {
   const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
   if (!bot) return;
-  const next = bot.status === 'online' ? 'offline' : 'online';
-  await api(`/api/bots/${bot.id}`, { method: 'PATCH', body: JSON.stringify({ status: next }) });
-  await refresh();
-  toast(next === 'online' ? `${bot.name} est en ligne.` : `${bot.name} est hors ligne.`, 'info');
+  const online = bot.runtime?.status === 'online';
+  const next = online ? 'offline' : 'online';
+  try {
+    const result = await api(`/api/bots/${bot.id}`, { method: 'PATCH', body: JSON.stringify({ status: next }) });
+    await refresh();
+    if (next === 'offline') toast(`${bot.name} est déconnecté de Discord.`, 'info');
+    else if (result.runtime?.status === 'online') toast(`${bot.name} est connecté à Discord.`);
+    else if (!bot.hasToken) toast('Ajoute un token Discord dans Paramètres → Connexion Discord.', 'info');
+    else toast(result.runtime?.lastError || 'Connexion à Discord en cours…', result.runtime?.status === 'error' ? 'error' : 'info');
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+});
+
+onAction('bot-test-connection', async (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  if (!bot) return;
+  try {
+    const result = await api(`/api/bots/${bot.id}/test`, { method: 'POST' });
+    const account = result.account || {};
+    toast(`Connexion réelle OK : ${account.globalName || account.username || 'bot Discord'} · ${(result.guilds || []).length} serveur(s).`);
+    await refresh();
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+});
+
+onAction('bot-sync', async (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  if (!bot) return;
+  try {
+    const result = await api(`/api/bots/${bot.id}/sync`, { method: 'POST' });
+    const metadata = result.metadata?.ok
+      ? ` · ${result.metadata.channels} salon(s), ${result.metadata.roles} rôle(s) synchronisés`
+      : '';
+    toast(
+      `${result.count} commande(s) synchronisée(s)${result.global ? ' globalement (propagation jusqu’à 1 h)' : ' sur le serveur'}${metadata}.`,
+      result.global ? 'info' : 'success',
+    );
+    await refresh();
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+});
+
+onAction('bot-sync-discord', async (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  if (!bot) return;
+  try {
+    const result = await api(`/api/bots/${bot.id}/discord/sync`, { method: 'POST' });
+    toast(
+      `${result.channels} salon(s), ${result.categories} catégorie(s) et ${result.roles} rôle(s) synchronisés depuis ${result.guildName || 'Discord'}.`,
+      'success',
+    );
+    await refresh();
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+});
+
+onAction('bot-restart', async (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  if (!bot) return;
+  try {
+    const result = await api(`/api/bots/${bot.id}/restart`, { method: 'POST' });
+    toast(
+      result.runtime?.status === 'online' ? 'Bot reconnecté à Discord.' : `Connexion : ${result.runtime?.lastError || 'en cours…'}`,
+      result.runtime?.status === 'error' ? 'error' : 'success',
+    );
+    await refresh();
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+});
+
+onAction('bot-test-message', (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  if (!bot) return;
+  const channels = (bot.discord?.channels || []).filter((channel) => channel.type !== 'voice');
+  openModal({
+    title: 'Envoyer un message de test réel',
+    subtitle: 'Le message sera publié sur ton serveur Discord avec le token du bot.',
+    submitLabel: 'Envoyer sur Discord',
+    body: `
+      <div class="field"><label for="tmChannel">Salon</label>
+        <select class="select" id="tmChannel" name="channel">
+          <option value="">Premier salon textuel</option>
+          ${channels.map((channel) => `<option value="#${esc(channel.name)}">#${esc(channel.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label for="tmCustom">Ou ID / nom exact du salon</label><input class="input" id="tmCustom" name="channelCustom" placeholder="#général ou 123456789012345678"></div>
+      <p class="hint">Le bot doit être connecté et avoir la permission « Envoyer des messages » dans ce salon.</p>
+    `,
+    onSubmit: async (formData) => {
+      const channel = String(formData.get('channelCustom') || '').trim() || String(formData.get('channel') || '').trim();
+      const result = await api(`/api/bots/${bot.id}/test-message`, {
+        method: 'POST',
+        body: JSON.stringify({ channel }),
+      });
+      toast(`Message réel envoyé dans #${result.channel?.name || 'salon'}.`);
+    },
+  });
+});
+
+onAction('bot-token', (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  if (!bot) return;
+  openModal({
+    title: bot.hasToken ? 'Remplacer le token Discord' : 'Ajouter le token Discord',
+    subtitle: 'Le token est vérifié auprès de Discord puis stocké chiffré (AES-256-GCM).',
+    submitLabel: 'Enregistrer le token',
+    body: `
+      <div class="field">
+        <label for="botToken">Token du bot</label>
+        <input class="input" id="botToken" name="token" type="password" placeholder="Collez le token Discord" autocomplete="off" required>
+        <div class="hint">Portail développeur Discord → votre application → Bot → Reset Token. Ne partagez jamais ce token.</div>
+      </div>
+      <div class="field"><label class="check-row"><input type="checkbox" checked disabled> <span>Le bot se connecte réellement et synchronise ses commandes après l’enregistrement</span></label></div>
+    `,
+    onSubmit: async (formData) => {
+      const result = await api(`/api/bots/${bot.id}/token`, {
+        method: 'POST',
+        body: JSON.stringify({ token: String(formData.get('token') || '').trim() }),
+      });
+      await refresh();
+      if (result.runtime?.status === 'online') toast('Token valide. Le bot est connecté à Discord.');
+      else toast(`Token enregistré. ${result.runtime?.lastError || 'Connexion à Discord en cours…'}`, result.runtime?.status === 'error' ? 'error' : 'info');
+    },
+  });
+});
+
+onAction('bot-token-clear', (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  if (!bot) return;
+  confirmDialog({
+    title: 'Supprimer le token ?',
+    message: 'Le bot sera déconnecté de Discord. Vous pourrez ajouter un nouveau token plus tard.',
+    confirmLabel: 'Supprimer le token',
+    onConfirm: async () => {
+      await api(`/api/bots/${bot.id}/token`, { method: 'DELETE' });
+      await refresh();
+      toast('Token supprimé.', 'info');
+    },
+  });
 });
 
 onAction('bot-tab', (el) => {
@@ -492,6 +1374,52 @@ onAction('toggle-command', async (el) => {
   await refresh();
 });
 
+onAction('config-automation', (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  const automation = bot?.automations.find((entry) => entry.id === el.dataset.auto);
+  if (!bot || !automation) return;
+  const fields = automationFields(automation.type);
+  const config = automation.config || {};
+  const form = openModal({
+    title: `Configurer ${automation.label}`,
+    subtitle: 'Choisissez le salon, la catégorie et les options de cette automatisation.',
+    submitLabel: 'Enregistrer la configuration',
+    body: `
+      <div class="field"><label for="autoLabel">Nom de l’automatisation</label>
+        <input class="input" id="autoLabel" name="label" value="${esc(automation.label)}" maxlength="80">
+      </div>
+      ${fields.map((field) => automationFieldControl(field, config[field.key], bot.discord || {})).join('')}
+      <datalist id="channelSuggestions">${(bot.discord?.channels?.length ? bot.discord.channels.filter((channel) => channel.type !== 'voice').map((channel) => `#${channel.name}`) : CHANNEL_SUGGESTIONS).map((item) => `<option value="${esc(item)}"></option>`).join('')}</datalist>
+      <datalist id="categorySuggestions">${(bot.discord?.categories?.length ? bot.discord.categories : CATEGORY_SUGGESTIONS).map((item) => `<option value="${esc(item)}"></option>`).join('')}</datalist>
+      <datalist id="roleSuggestions">${(bot.discord?.roles || FLOW_ROLES_FALLBACK.map((name) => ({ name }))).map((role) => `<option value="${esc(role.name)}"></option>`).join('')}</datalist>
+      <p class="hint">Le salon et la catégorie sont utilisés dès que le bot est connecté avec son token.</p>
+    `,
+    onSubmit: async (formData) => {
+      const nextConfig = {};
+      for (const field of fields) {
+        if (field.type === 'boolean') nextConfig[field.key] = formData.get(field.key) === 'on';
+        else if (field.type === 'number') nextConfig[field.key] = Number(formData.get(field.key)) || 0;
+        else nextConfig[field.key] = String(formData.get(field.key) || '').trim();
+      }
+      await api(`/api/bots/${bot.id}/automations/${automation.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ label: formData.get('label'), config: nextConfig }),
+      });
+      await refresh();
+      toast('Automatisation configurée.');
+    },
+  });
+  form.querySelectorAll('[data-fill-target]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const input = form.querySelector(`#${select.dataset.fillTarget}`);
+      if (input && select.value) {
+        input.value = select.value;
+        input.focus();
+      }
+    });
+  });
+});
+
 onAction('toggle-automation', async (el) => {
   const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
   const automation = bot?.automations.find((entry) => entry.id === el.dataset.auto);
@@ -504,19 +1432,116 @@ onAction('toggle-automation', async (el) => {
   toast(automation.enabled ? `${automation.label} désactivée.` : `${automation.label} activée.`, 'info');
 });
 
+onAction('new-saved-message', (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  if (bot) savedMessageModal(bot);
+});
+
+onAction('edit-saved-message', (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  const message = bot?.savedMessages?.find((entry) => entry.id === el.dataset.message);
+  if (bot && message) savedMessageModal(bot, message);
+});
+
+onAction('duplicate-saved-message', async (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  const message = bot?.savedMessages?.find((entry) => entry.id === el.dataset.message);
+  if (!bot || !message) return;
+  await api(`/api/bots/${bot.id}/messages/${message.id}/duplicate`, { method: 'POST' });
+  await refresh();
+  toast('Message dupliqué.', 'info');
+});
+
+onAction('delete-saved-message', (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  const message = bot?.savedMessages?.find((entry) => entry.id === el.dataset.message);
+  if (!bot || !message) return;
+  confirmDialog({
+    title: `Supprimer « ${message.label || message.name} » ?`,
+    message: 'Ce message sauvegardé sera définitivement supprimé. Les messages déjà envoyés sur Discord ne sont pas touchés.',
+    confirmLabel: 'Supprimer',
+    onConfirm: async () => {
+      await api(`/api/bots/${bot.id}/messages/${message.id}`, { method: 'DELETE' });
+      await refresh();
+      toast('Message supprimé.', 'info');
+    },
+  });
+});
+
+onAction('run-saved-message', async (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  const message = bot?.savedMessages?.find((entry) => entry.id === el.dataset.message);
+  if (!bot || !message) return;
+  const result = await api(`/api/bots/${bot.id}/messages/${message.id}/run`, { method: 'POST' });
+  toast(`Message envoyé dans #${result.channel?.name || message.channelName || 'le salon'}.`);
+  await refresh();
+});
+
+onAction('new-scheduled-message', (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  if (bot) scheduledMessageModal(bot);
+});
+
+onAction('edit-scheduled-message', (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  const message = bot?.scheduledMessages?.find((entry) => entry.id === el.dataset.message);
+  if (bot && message) scheduledMessageModal(bot, message);
+});
+
+onAction('toggle-scheduled-message', async (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  const message = bot?.scheduledMessages?.find((entry) => entry.id === el.dataset.message);
+  if (!bot || !message) return;
+  await api(`/api/bots/${bot.id}/scheduled-messages/${message.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled: !message.enabled }),
+  });
+  await refresh();
+  toast(message.enabled ? 'Message programmé désactivé.' : 'Message programmé activé.', 'info');
+});
+
+onAction('delete-scheduled-message', (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  const message = bot?.scheduledMessages?.find((entry) => entry.id === el.dataset.message);
+  if (!bot || !message) return;
+  confirmDialog({
+    title: `Supprimer « ${message.label} » ?`,
+    message: 'Ce message programmé sera définitivement supprimé. Le bot ne l’enverra plus.',
+    confirmLabel: 'Supprimer',
+    onConfirm: async () => {
+      await api(`/api/bots/${bot.id}/scheduled-messages/${message.id}`, { method: 'DELETE' });
+      await refresh();
+      toast('Message programmé supprimé.', 'info');
+    },
+  });
+});
+
+onAction('run-scheduled-message', async (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  const message = bot?.scheduledMessages?.find((entry) => entry.id === el.dataset.message);
+  if (!bot || !message) return;
+  const result = await api(`/api/bots/${bot.id}/scheduled-messages/${message.id}/run`, { method: 'POST' });
+  toast(`Message envoyé dans #${result.channel?.name || message.channelName || 'le salon'}.`);
+  await refresh();
+});
+
 onAction('test-bot', (el) => {
   const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
   if (!bot) return;
   const options = bot.commands.map((command) => `<option value="${esc(command.id)}">/${esc(command.name)}</option>`).join('');
   const form = openModal({
     title: `Tester ${bot.name}`,
-    subtitle: 'Simulation locale : aucune action réelle n’est envoyée sur Discord.',
+    subtitle: 'Simulation locale : aucune action réelle n’est envoyée sur Discord. Pour la connexion réelle, ouvre Paramètres → Connexion Discord.',
     submitLabel: 'Fermer',
     body: `
       ${
         bot.commands.length
           ? `<div class="field"><label for="testCmd">Commande</label><select class="select" id="testCmd" name="command">${options}</select></div>
-             <div class="field"><label>Réponse simulée</label><div id="testOut"></div></div>`
+             <div class="field"><label>Réponse simulée</label><div id="testOut"></div></div>
+             <div class="field" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+               <button type="button" class="btn btn-primary btn-sm" id="testRun">${icon('play')} Exécuter la commande</button>
+               <span style="font-size:11px;color:var(--muted-2)">Chaque exécution alimente les statistiques réelles.</span>
+             </div>`
           : '<p style="font-size:13px;color:var(--muted)">Ce bot n’a encore aucune commande à tester.</p>'
       }
     `,
@@ -533,5 +1558,17 @@ onAction('test-bot', (el) => {
       `<p style="font-size:11.5px;color:var(--muted-2);margin-top:9px">Cooldown : ${command.cooldown}s · ${fmt(command.uses)} usages cumulés</p>`;
   };
   select?.addEventListener('change', update);
+  form.querySelector('#testRun')?.addEventListener('click', async () => {
+    const command = bot.commands.find((entry) => entry.id === select?.value);
+    if (!command) return;
+    try {
+      const result = await api(`/api/bots/${bot.id}/commands/${command.id}/run`, { method: 'POST' });
+      command.uses = result.uses;
+      update();
+      toast('Commande exécutée : statistiques mises à jour.');
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  });
   update();
 });

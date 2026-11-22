@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import nodemailer from 'nodemailer';
 import { db, findUserByEmail, findUserById, newId, persist } from './db.js';
 import { seedWorkspace } from './seed.js';
 
@@ -8,7 +9,10 @@ const CODE_TTL = 10 * 60e3;
 const MAX_ATTEMPTS = 5;
 const SECRET = process.env.AUTH_SECRET || 'kyllbot-studio-dev-secret';
 
-export const mailConfigured = Boolean(process.env.RESEND_API_KEY);
+export const resendConfigured = Boolean(process.env.RESEND_API_KEY);
+export const smtpConfigured = Boolean(process.env.SMTP_HOST);
+export const mailConfigured = resendConfigured || smtpConfigured;
+export const mailMode = resendConfigured ? 'resend' : smtpConfigured ? 'smtp' : 'demo';
 export const googleConfigured = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
 
 const hash = (value) => crypto.createHash('sha256').update(String(value)).digest('hex');
@@ -41,11 +45,35 @@ function rateLimit(key, limit, windowMs) {
 
 /* ---------------- email delivery ---------------- */
 
-async function sendCodeEmail(email, code) {
-  if (!mailConfigured) {
-    console.log(`\n  [KyllBot Studio] Code de connexion pour ${email} : ${code}\n`);
-    return { delivered: false };
+const mailFrom = () => process.env.MAIL_FROM || 'KyllBot Studio <no-reply@kyllbot.studio>';
+
+function codeEmail(code) {
+  return `<div style="font-family:Inter,Arial,sans-serif;background:#0b0a14;color:#e9e7ff;padding:40px;border-radius:16px">
+    <h1 style="font-size:20px;margin:0 0 8px">KyllBot Studio</h1>
+    <p style="color:#a9a4c9;margin:0 0 24px">Voici votre code de connexion. Il expire dans 10 minutes.</p>
+    <div style="font-size:34px;font-weight:700;letter-spacing:10px;background:#16132a;padding:18px 24px;border-radius:12px;display:inline-block">${code}</div>
+    <p style="color:#6f6a8f;font-size:12px;margin-top:28px">Si vous n'êtes pas à l'origine de cette demande, ignorez cet email.</p>
+  </div>`;
+}
+
+let smtpTransport = null;
+
+function getSmtpTransport() {
+  if (!smtpTransport) {
+    const port = Number(process.env.SMTP_PORT) || 587;
+    smtpTransport = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port,
+      secure: process.env.SMTP_SECURE ? process.env.SMTP_SECURE === '1' : port === 465,
+      auth: process.env.SMTP_USER
+        ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS || '' }
+        : undefined,
+    });
   }
+  return smtpTransport;
+}
+
+async function sendWithResend(email, code) {
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -53,19 +81,40 @@ async function sendCodeEmail(email, code) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      from: process.env.MAIL_FROM || 'KyllBot Studio <no-reply@kyllbot.studio>',
+      from: mailFrom(),
       to: [email],
       subject: `Votre code de connexion : ${code}`,
-      html: `<div style="font-family:Inter,Arial,sans-serif;background:#0b0a14;color:#e9e7ff;padding:40px;border-radius:16px">
-        <h1 style="font-size:20px;margin:0 0 8px">KyllBot Studio</h1>
-        <p style="color:#a9a4c9;margin:0 0 24px">Voici votre code de connexion. Il expire dans 10 minutes.</p>
-        <div style="font-size:34px;font-weight:700;letter-spacing:10px;background:#16132a;padding:18px 24px;border-radius:12px;display:inline-block">${code}</div>
-        <p style="color:#6f6a8f;font-size:12px;margin-top:28px">Si vous n'êtes pas à l'origine de cette demande, ignorez cet email.</p>
-      </div>`,
+      html: codeEmail(code),
     }),
   });
   if (!response.ok) throw new Error(`Envoi email impossible (${response.status})`);
-  return { delivered: true };
+}
+
+async function sendWithSmtp(email, code) {
+  await getSmtpTransport().sendMail({
+    from: mailFrom(),
+    to: email,
+    subject: `Votre code de connexion : ${code}`,
+    html: codeEmail(code),
+  });
+}
+
+async function sendCodeEmail(email, code) {
+  if (!mailConfigured) {
+    console.log(`\n  [KyllBot Studio] Code de connexion pour ${email} : ${code}\n`);
+    return { delivered: false, transport: 'demo' };
+  }
+  if (resendConfigured) {
+    try {
+      await sendWithResend(email, code);
+      return { delivered: true, transport: 'resend' };
+    } catch (error) {
+      if (!smtpConfigured) throw error;
+      console.warn(`[KyllBot Studio] Resend indisponible, bascule SMTP : ${error.message}`);
+    }
+  }
+  await sendWithSmtp(email, code);
+  return { delivered: true, transport: 'smtp' };
 }
 
 /* ---------------- login codes ---------------- */
@@ -95,7 +144,7 @@ export async function requestLoginCode(rawEmail, ip) {
   persist();
 
   const result = await sendCodeEmail(email, code);
-  return { email, delivered: result.delivered, devCode: result.delivered ? undefined : code };
+  return { email, delivered: result.delivered, transport: result.transport, devCode: result.delivered ? undefined : code };
 }
 
 export function verifyLoginCode(rawEmail, rawCode, req) {
@@ -146,7 +195,7 @@ export function findOrCreateUser(email, { name, avatar, googleId, provider } = {
       name: displayName.slice(0, 60),
       avatar: avatar || '',
       googleId: googleId || null,
-      plan: 'Pro',
+      plan: 'Gratuit',
       provider: provider || 'email',
       createdAt: new Date().toISOString(),
       lastLoginAt: new Date().toISOString(),

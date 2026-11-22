@@ -10,6 +10,8 @@ function emptyState() {
     users: [],
     sessions: [],
     codes: [],
+    ownerAccess: { codeHash: null, createdAt: null, lastUsedAt: null },
+    feedback: [],
     workspaces: {},
     createdAt: new Date().toISOString(),
   };

@@ -1,0 +1,2926 @@
+import {
+  ActionRowBuilder,
+  ActivityType,
+  ButtonBuilder,
+  ButtonStyle,
+  ChannelType,
+  CheckboxGroupBuilder,
+  Client,
+  EmbedBuilder,
+  Events,
+  GatewayIntentBits,
+  LabelBuilder,
+  ModalBuilder,
+  Partials,
+  PermissionsBitField,
+  RoleSelectMenuBuilder,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  UserSelectMenuBuilder,
+} from 'discord.js';
+import { createReadStream } from 'node:fs';
+import { Readable } from 'node:stream';
+import ffmpegPath from 'ffmpeg-static';
+import { db, persist } from './db.js';
+import { recordEvent } from './activity.js';
+import { formatDuration, formatSignedDuration, normalizeModalFields, parseDurationInput, runFlow } from './flows.js';
+import { decryptSecret } from './secrets.js';
+import { normalizeDiscordServer } from './discord.js';
+import { savedMessageHasEmbed } from './messages.js';
+import { scheduledMessageDue } from './scheduled.js';
+import { addServicePenalty, applyServiceTokens, applyServiceTokensDeep, ensureServiceState, safeTimezone, serviceDisplayName, serviceEntry, servicePeriodLabel, serviceResetLabel, serviceTokens, serviceTotals } from './service.js';
+
+if (ffmpegPath) process.env.FFMPEG_PATH = ffmpegPath;
+
+const DISCORD_API = 'https://discord.com/api/v10';
+const runtimes = new Map();
+const cooldowns = new Map();
+const spamBuckets = new Map();
+const flowCooldowns = new Map();
+const pendingSelects = new Map();
+const pendingModals = new Map();
+const pendingAwaits = new Map();
+const pendingCaptchas = new Map();
+const pendingButtons = new Map();
+const musicSessions = new Map();
+const chronos = new Map();
+const pendingServicePenalties = new Map();
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function getBotContext(botId) {
+  for (const ws of Object.values(db.workspaces || {})) {
+    const bot = (ws.bots || []).find((entry) => entry.id === botId);
+    if (bot) return { ws, bot };
+  }
+  return null;
+}
+
+function buildServicePenaltyModal(flow, block) {
+  return new ModalBuilder()
+    .setCustomId(`kfservicepenaltysubmit:${flow.id}:${block.id}`)
+    .setTitle(String(block?.title || 'Pénalité de service').slice(0, 45))
+    .addLabelComponents(
+      new LabelBuilder()
+        .setLabel('Membre concerné')
+        .setUserSelectMenuComponent(
+          new UserSelectMenuBuilder()
+            .setCustomId('member')
+            .setPlaceholder('Choisir le membre…')
+            .setMinValues(1)
+            .setMaxValues(1)
+            .setRequired(true),
+        ),
+      new LabelBuilder()
+        .setLabel('Durée de la pénalité')
+        .setDescription('Ex : 30 min, 1 h 30, 90 min, 2 jours')
+        .setTextInputComponent(
+          new TextInputBuilder()
+            .setCustomId('duration')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('30 min')
+            .setMinLength(1)
+            .setMaxLength(40)
+            .setRequired(true),
+        ),
+    );
+}
+
+function ensureRuntime(botId) {
+  let runtime = runtimes.get(botId);
+  if (!runtime) {
+    runtime = {
+      botId,
+      status: 'offline',
+      client: null,
+      tag: null,
+      userId: null,
+      guilds: [],
+      mode: null,
+      intents: [],
+      lastError: null,
+      warning: null,
+      lastSyncAt: null,
+      commandCount: 0,
+      lastMetadataSyncAt: null,
+      metadata: null,
+      startedAt: null,
+      logs: [],
+    };
+    runtimes.set(botId, runtime);
+  }
+  return runtime;
+}
+
+function log(runtime, level, message) {
+  const entry = { at: new Date().toISOString(), level, message: String(message).slice(0, 300) };
+  runtime.logs.unshift(entry);
+  runtime.logs = runtime.logs.slice(0, 30);
+  const prefix = `[Discord ${runtime.botId.slice(0, 8)}]`;
+  if (level === 'error') console.error(prefix, message);
+  else if (level === 'warn') console.warn(prefix, message);
+  else console.log(prefix, message);
+}
+
+export function getBotRuntime(botId) {
+  const runtime = runtimes.get(botId);
+  if (!runtime) {
+    return {
+      status: 'offline',
+      tag: null,
+      guilds: [],
+      mode: null,
+      intents: [],
+      lastError: null,
+      warning: null,
+      lastSyncAt: null,
+      commandCount: 0,
+      lastMetadataSyncAt: null,
+      metadata: null,
+      startedAt: null,
+      logs: [],
+    };
+  }
+  const { client, ...rest } = runtime;
+  return { ...rest, logs: rest.logs.slice(0, 12) };
+}
+
+async function discordRequest(token, pathName, { method = 'GET', body } = {}) {
+  let response;
+  try {
+    response = await fetch(`${DISCORD_API}${pathName}`, {
+      method,
+      headers: { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(10000),
+    });
+  } catch (error) {
+    const wrapped = new Error(`Impossible de joindre Discord : ${error.message}`);
+    wrapped.code = 'DISCORD_NETWORK';
+    throw wrapped;
+  }
+  const text = await response.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = { message: text };
+  }
+  if (!response.ok) {
+    const error = new Error(data?.message || `Discord a refusé la requête (${response.status}).`);
+    error.status = response.status;
+    error.discord = data;
+    if (response.status === 401) error.code = 'DISCORD_UNAUTHORIZED';
+    if (response.status === 403) error.code = 'DISCORD_FORBIDDEN';
+    throw error;
+  }
+  return data;
+}
+
+export async function validateDiscordToken(token) {
+  const me = await discordRequest(token, '/users/@me');
+  const guilds = await discordRequest(token, '/users/@me/guilds');
+  return {
+    id: me.id,
+    username: me.username,
+    globalName: me.global_name || me.username,
+    avatar: me.avatar || null,
+    guilds: (Array.isArray(guilds) ? guilds : []).map((guild) => ({
+      id: guild.id,
+      name: guild.name,
+      icon: guild.icon || null,
+      owner: Boolean(guild.owner),
+    })),
+  };
+}
+
+const CHANNEL_TYPES = {
+  0: 'text',
+  2: 'voice',
+  5: 'text',
+  13: 'voice',
+  15: 'forum',
+  16: 'forum',
+};
+
+function roleColor(value) {
+  const color = Number(value) || 0;
+  return color ? `#${color.toString(16).padStart(6, '0')}` : '#94a3b8';
+}
+
+export async function syncDiscordMetadata(botId) {
+  const context = getBotContext(botId);
+  if (!context) throw new Error('Bot introuvable.');
+  const { bot } = context;
+  if (!bot.tokenEnc) throw new Error('Aucun token Discord enregistré.');
+  const token = decryptSecret(bot.tokenEnc);
+  let guildId = String(bot.discord?.guildId || '').trim();
+  if (!guildId) {
+    const guilds = await discordRequest(token, '/users/@me/guilds');
+    guildId = String(guilds?.[0]?.id || '');
+  }
+  if (!guildId) throw new Error('Aucun serveur Discord disponible. Ajoute le bot à un serveur.');
+
+  const [guild, rawChannels, rawRoles] = await Promise.all([
+    discordRequest(token, `/guilds/${guildId}`),
+    discordRequest(token, `/guilds/${guildId}/channels`),
+    discordRequest(token, `/guilds/${guildId}/roles`),
+  ]);
+
+  const channelList = Array.isArray(rawChannels) ? rawChannels : [];
+  const categoryChannels = channelList.filter((channel) => channel.type === 4);
+  const categoryById = new Map(categoryChannels.map((channel) => [channel.id, channel.name]));
+  const categoryPosition = new Map(categoryChannels.map((channel) => [channel.id, Number(channel.position) || 0]));
+  const channels = channelList
+    .filter((channel) => CHANNEL_TYPES[channel.type])
+    .map((channel) => ({
+      id: channel.id,
+      name: String(channel.name || '').trim(),
+      type: CHANNEL_TYPES[channel.type],
+      category: categoryById.get(channel.parent_id) || 'Sans catégorie',
+      position: Number(channel.position) || 0,
+      categoryPosition: categoryPosition.get(channel.parent_id) ?? 9999,
+    }))
+    .filter((channel) => channel.name)
+    .sort((a, b) => a.categoryPosition - b.categoryPosition || a.position - b.position)
+    .map(({ position, categoryPosition: _categoryPosition, ...channel }) => channel);
+  if (!channels.length) throw new Error('Aucun salon accessible sur ce serveur. Vérifie les permissions du bot.');
+
+  const categories = categoryChannels
+    .sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0))
+    .map((channel) => String(channel.name || '').trim())
+    .filter(Boolean);
+  if (channels.some((channel) => channel.category === 'Sans catégorie')) categories.push('Sans catégorie');
+
+  const roles = (Array.isArray(rawRoles) ? rawRoles : [])
+    .filter((role) => role.id !== guildId && !role.managed && role.name)
+    .sort((a, b) => (Number(b.position) || 0) - (Number(a.position) || 0))
+    .map((role) => ({ id: role.id, name: role.name, color: roleColor(role.color) }));
+
+  bot.discord = normalizeDiscordServer(
+    {
+      ...(bot.discord || {}),
+      guildId,
+      guildName: guild?.name || bot.discord?.guildName || '',
+      channels,
+      categories,
+      roles,
+      syncedAt: new Date().toISOString(),
+    },
+    bot,
+  );
+  persist();
+
+  const runtime = ensureRuntime(botId);
+  runtime.lastMetadataSyncAt = bot.discord.syncedAt;
+  runtime.metadata = { channels: channels.length, categories: categories.length, roles: roles.length };
+  runtime.lastError = null;
+  return {
+    ok: true,
+    guildId,
+    guildName: bot.discord.guildName,
+    channels: channels.length,
+    categories: categories.length,
+    roles: roles.length,
+    syncedAt: bot.discord.syncedAt,
+  };
+}
+
+function safeIntents() {
+  return [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.DirectMessages,
+    GatewayIntentBits.GuildMessageReactions,
+  ];
+}
+
+function fullIntents() {
+  return [...safeIntents(), GatewayIntentBits.GuildMembers, GatewayIntentBits.MessageContent];
+}
+
+function intentNames(mode) {
+  return mode === 'full'
+    ? ['Guilds', 'GuildMessages', 'DirectMessages', 'GuildMessageReactions', 'GuildMembers', 'MessageContent']
+    : ['Guilds', 'GuildMessages', 'DirectMessages', 'GuildMessageReactions'];
+}
+
+function isDisallowedIntents(error) {
+  return /disallowed intents|4014/i.test(String(error?.message || ''));
+}
+
+function resolveChannel(guild, ref) {
+  if (!guild) return null;
+  const raw = String(ref || '').trim().replace(/^#/, '');
+  if (!raw) return null;
+  if (/^\d{17,20}$/.test(raw)) return guild.channels.cache.get(raw) || null;
+  const lower = raw.toLowerCase();
+  return (
+    guild.channels.cache.find((channel) => channel.name?.toLowerCase() === lower && typeof channel.send === 'function') ||
+    guild.channels.cache.find((channel) => channel.name?.toLowerCase() === lower) ||
+    null
+  );
+}
+
+function resolveForumPost(guild, ref, channelRef, currentChannel, lastChannel) {
+  const threadTypes = new Set([ChannelType.PublicThread, ChannelType.PrivateThread]);
+  const isThread = (entry) => entry && threadTypes.has(entry.type);
+  const raw = String(ref || '').trim().replace(/^#/, '');
+  if (raw) {
+    const id = raw.replace(/\D/g, '');
+    const byId = id ? guild?.channels?.cache?.get(id) : null;
+    if (isThread(byId)) return byId;
+    const parent = resolveChannel(guild, channelRef);
+    const candidates = [...(guild?.channels?.cache?.values() || [])].filter(isThread);
+    const lower = raw.toLowerCase();
+    return (
+      candidates.find((entry) => entry.name?.toLowerCase() === lower && (!parent || entry.parentId === parent.id)) ||
+      candidates.find((entry) => entry.name?.toLowerCase().includes(lower) && (!parent || entry.parentId === parent.id)) ||
+      null
+    );
+  }
+  if (isThread(currentChannel)) return currentChannel;
+  if (isThread(lastChannel)) return lastChannel;
+  return null;
+}
+
+function stopMusicSession(guildId) {
+  const session = musicSessions.get(guildId);
+  if (!session) return false;
+  session.stopped = true;
+  try { session.player.stop(true); } catch {}
+  try { session.connection.destroy(); } catch {}
+  musicSessions.delete(guildId);
+  return true;
+}
+
+function resolveCategory(guild, ref) {
+  if (!guild) return null;
+  const raw = String(ref || '').trim().replace(/^#/, '');
+  if (!raw) return null;
+  if (/^\d{17,20}$/.test(raw)) {
+    const channel = guild.channels.cache.get(raw);
+    return channel?.type === ChannelType.GuildCategory ? channel : null;
+  }
+  const lower = raw.toLowerCase();
+  return guild.channels.cache.find((channel) => channel.type === ChannelType.GuildCategory && channel.name?.toLowerCase() === lower) || null;
+}
+
+function resolveRole(guild, ref) {
+  if (!guild) return null;
+  const raw = String(ref || '').trim().replace(/^@/, '');
+  if (!raw || raw.toLowerCase() === 'everyone') return null;
+  if (/^\d{17,20}$/.test(raw)) return guild.roles.cache.get(raw) || null;
+  const lower = raw.toLowerCase();
+  return guild.roles.cache.find((role) => role.name?.toLowerCase() === lower && !role.managed) || null;
+}
+
+function toEmbed(input = {}) {
+  const embed = new EmbedBuilder();
+  if (input.title) embed.setTitle(String(input.title).slice(0, 256));
+  if (input.description) embed.setDescription(String(input.description).slice(0, 4096));
+  if (/^#[0-9a-f]{6}$/i.test(String(input.color || ''))) embed.setColor(Number.parseInt(input.color.slice(1), 16));
+  if (input.footer) embed.setFooter({ text: String(input.footer).slice(0, 2048) });
+  if (input.author) embed.setAuthor({ name: String(input.author).slice(0, 256), iconURL: input.authorIcon || undefined });
+  if (input.image) embed.setImage(input.image);
+  if (input.thumbnail) embed.setThumbnail(input.thumbnail);
+  if (input.timestamp) embed.setTimestamp(new Date());
+  const fields = (input.fields || []).filter((field) => field.name && field.value).slice(0, 25);
+  if (fields.length) {
+    embed.addFields(
+      fields.map((field) => ({
+        name: String(field.name).slice(0, 256),
+        value: String(field.value).slice(0, 1024),
+        inline: Boolean(field.inline),
+      })),
+    );
+  }
+  return embed;
+}
+
+function renderTemplate(text, { guild, member, interaction, client }) {
+  const user = member?.user || interaction?.user;
+  const display = member?.displayName || user?.globalName || user?.username || 'membre';
+  return String(text || '')
+    .replace(/\{user\}/g, user ? `<@${user.id}>` : display)
+    .replace(/\{user\.name\}/g, display)
+    .replace(/\{member\}/g, display)
+    .replace(/\{server\}/g, guild?.name || 'Discord')
+    .replace(/\{server\.name\}/g, guild?.name || 'Discord')
+    .replace(/\{channel\}/g, interaction?.channel?.name ? `#${interaction.channel.name}` : '')
+    .replace(/\{latency\}/g, String(client?.ws?.ping ?? 0))
+    .replace(/\{level\}/g, '1')
+    .replace(/\{xp\}/g, '0');
+}
+
+function commandPayload(command, context) {
+  const content = renderTemplate(command.response, context);
+  const embed = command.embed || {};
+  const hasEmbed = Boolean(embed.title || embed.description || embed.footer);
+  const payload = {};
+  if (content) payload.content = content.slice(0, 2000);
+  if (hasEmbed) payload.embeds = [toEmbed(embed)];
+  if (!payload.content && !payload.embeds) payload.content = 'Commande exécutée.';
+  return payload;
+}
+
+function cooldownRemaining(botId, userId, name, seconds) {
+  const key = `${botId}:${userId}:${name}`;
+  const now = Date.now();
+  const until = cooldowns.get(key) || 0;
+  if (until > now) return Math.ceil((until - now) / 1000);
+  cooldowns.set(key, now + Math.max(0, Number(seconds) || 0) * 1000);
+  if (cooldowns.size > 5000) {
+    for (const [entry, value] of cooldowns) if (value < now) cooldowns.delete(entry);
+  }
+  return 0;
+}
+
+function bumpCommand(ws, bot, command, source, user) {
+  command.uses = (command.uses || 0) + 1;
+  command.lastUsedAt = new Date().toISOString();
+  recordEvent(ws, 'command.run', { botId: bot.id, commandId: command.id, source, userId: user?.id || null });
+  persist();
+}
+
+function bumpFlow(ws, bot, flow, source, user) {
+  flow.runs = (flow.runs || 0) + 1;
+  flow.lastRunAt = new Date().toISOString();
+  recordEvent(ws, 'flow.run', { botId: bot.id, flowId: flow.id, source, userId: user?.id || null });
+  persist();
+}
+
+function setPresence(client, bot) {
+  if (!client.user) return;
+  const result = client.user.setPresence({
+    status: bot.status === 'draft' ? 'idle' : 'online',
+    activities: [{ name: bot.description || 'KyllBot Studio', type: ActivityType.Watching }],
+  });
+  if (result && typeof result.catch === 'function') result.catch(() => {});
+}
+
+function formVarKey(label, index) {
+  return String(label || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '') || `champ_${index + 1}`;
+}
+
+function parseModalFields(block) {
+  return normalizeModalFields(block?.fields).map((field, index) => ({
+    ...field,
+    index,
+    customId: `field_${index}`,
+    key: formVarKey(field.label, index),
+  }));
+}
+
+function buildModal(flow, block) {
+  const fields = parseModalFields(block);
+  const modal = new ModalBuilder()
+    .setCustomId(`kfmodalsubmit:${flow.id}:${block.id}`)
+    .setTitle(String(block?.title || 'Formulaire').slice(0, 45));
+  for (const field of fields) {
+    const label = new LabelBuilder().setLabel(field.label);
+    if (field.placeholder) label.setDescription(field.placeholder);
+    if (field.type === 'role') {
+      const select = new RoleSelectMenuBuilder()
+        .setCustomId(field.customId)
+        .setPlaceholder(field.placeholder || 'Choisissez un rôle…')
+        .setMinValues(field.required ? 1 : 0)
+        .setMaxValues(1)
+        .setRequired(field.required);
+      label.setRoleSelectMenuComponent(select);
+    } else if (field.type === 'user') {
+      const select = new UserSelectMenuBuilder()
+        .setCustomId(field.customId)
+        .setPlaceholder(field.placeholder || 'Choisissez une personne…')
+        .setMinValues(field.required ? 1 : 0)
+        .setMaxValues(1)
+        .setRequired(field.required);
+      label.setUserSelectMenuComponent(select);
+    } else if (field.type === 'select') {
+      const select = new StringSelectMenuBuilder()
+        .setCustomId(field.customId)
+        .setPlaceholder(field.placeholder || 'Choisissez…')
+        .setMinValues(field.required ? 1 : 0)
+        .setMaxValues(1)
+        .setRequired(field.required)
+        .addOptions(field.options.slice(0, 25).map((option) => ({ label: option.slice(0, 100), value: option.slice(0, 100) })));
+      label.setStringSelectMenuComponent(select);
+    } else if (field.type === 'checkbox') {
+      const group = new CheckboxGroupBuilder()
+        .setCustomId(field.customId)
+        .setMinValues(field.required ? 1 : 0)
+        .setMaxValues(1)
+        .setRequired(field.required)
+        .addOptions({ label: (field.placeholder || 'Oui').slice(0, 100), value: 'oui' });
+      label.setCheckboxGroupComponent(group);
+    } else if (field.type === 'multi') {
+      const group = new CheckboxGroupBuilder()
+        .setCustomId(field.customId)
+        .setMinValues(field.required ? 1 : 0)
+        .setMaxValues(Math.max(1, Math.min(25, field.options.length)))
+        .setRequired(field.required)
+        .addOptions(field.options.slice(0, 25).map((option) => ({ label: option.slice(0, 100), value: option.slice(0, 100) })));
+      label.setCheckboxGroupComponent(group);
+    } else {
+      const input = new TextInputBuilder()
+        .setCustomId(field.customId)
+        .setStyle(field.type === 'paragraph' ? TextInputStyle.Paragraph : TextInputStyle.Short)
+        .setRequired(field.required);
+      if (field.placeholder) input.setPlaceholder(field.placeholder.slice(0, 100));
+      label.setTextInputComponent(input);
+    }
+    modal.addLabelComponents(label);
+  }
+  return { modal, fields };
+}
+
+function buildCaptchaModal(flow, block) {
+  return new ModalBuilder()
+    .setCustomId(`kfcaptchasubmit:${flow.id}:${block.id}`)
+    .setTitle('Vérification')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('captcha')
+          .setLabel('Écris OK pour confirmer')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(20),
+      ),
+    );
+}
+
+function pendingKey(flowId, blockId, userId) {
+  return `${flowId}:${blockId}:${userId || 'anon'}`;
+}
+
+function rememberPending(map, key, value, ttlSeconds) {
+  map.set(key, { ...value, expiresAt: Date.now() + Math.max(10, Number(ttlSeconds) || 900) * 1000 });
+  if (map.size > 1000) {
+    const now = Date.now();
+    for (const [entry, item] of map) if (item.expiresAt < now) map.delete(entry);
+  }
+}
+
+function takePending(map, key) {
+  const item = map.get(key);
+  if (!item) return null;
+  map.delete(key);
+  if (item.expiresAt && item.expiresAt < Date.now()) return null;
+  return item;
+}
+
+function peekPending(map, key) {
+  const item = map.get(key);
+  if (!item) return null;
+  if (item.expiresAt && item.expiresAt < Date.now()) {
+    map.delete(key);
+    return null;
+  }
+  return item;
+}
+
+function takePendingAwait({ botId, flowId, blockId, userId, channelId, messageId, kind }) {
+  const now = Date.now();
+  for (const [key, item] of pendingAwaits) {
+    if (item.expiresAt < now) {
+      pendingAwaits.delete(key);
+      continue;
+    }
+    if (botId && item.botId !== botId) continue;
+    if (flowId && item.flowId !== flowId) continue;
+    if (blockId && item.blockId !== blockId) continue;
+    if (userId && item.userId !== userId) continue;
+    if (channelId && item.channelId !== channelId) continue;
+    if (messageId && item.messageId && item.messageId !== messageId) continue;
+    if (kind && item.kind !== kind) continue;
+    pendingAwaits.delete(key);
+    return item;
+  }
+  return null;
+}
+
+function scheduleGiveaway({ message, channel, prize, winners, emoji, duration }) {
+  const delay = Math.min(Math.max(Number(duration) || 24, 1) * 3600000, 2147483647);
+  const timer = setTimeout(async () => {
+    try {
+      const fetched = await message.fetch().catch(() => message);
+      const reaction = fetched.reactions?.cache?.get(emoji) || fetched.reactions?.cache?.first();
+      const users = reaction ? await reaction.users.fetch().catch(() => null) : null;
+      const participants = users ? [...users.values()].filter((user) => !user.bot) : [];
+      participants.sort(() => Math.random() - 0.5);
+      const selected = participants.slice(0, Math.max(1, Number(winners) || 1));
+      const text = selected.length
+        ? `🎉 **Giveaway terminé !**\nLot : **${prize}**\nGagnant(s) : ${selected.map((user) => `<@${user.id}>`).join(', ')}`
+        : `🎉 **Giveaway terminé !**\nLot : **${prize}**\nAucun participant valide.`;
+      await channel.send({ content: text, allowedMentions: { users: selected.map((user) => user.id) } });
+    } catch {
+      // The giveaway message may have been deleted before the draw.
+    }
+  }, delay);
+  timer.unref?.();
+}
+
+function localAIResponse(prompt) {
+  const clean = String(prompt || '').replace(/\s+/g, ' ').trim();
+  const excerpt = clean.slice(0, 280);
+  const lower = clean.toLowerCase();
+  if (!clean) return 'Je suis là, mais je n’ai pas reçu de question. Écris-moi ce que tu veux savoir.';
+  if (/^(bonjour|salut|hello|hey)\b/.test(lower)) return 'Bonjour ! Je suis l’assistant IA de KyllBot Studio. Pose-moi ta question et je te répondrai.';
+  if (lower.includes('qui es-tu') || lower.includes('qui es tu')) return 'Je suis l’assistant IA intégré à KyllBot Studio. Je réponds aux messages de ton serveur sans clé API obligatoire.';
+  if (lower.includes('merci')) return 'Avec plaisir ! Si tu as une autre question, je suis là.';
+  return `Je fonctionne en mode local sans API. J’ai bien reçu : « ${excerpt} ». Pour une réponse plus détaillée, active le mode automatique avec Internet ou ajoute une clé OpenAI dans les paramètres du serveur.`;
+}
+
+async function askAI({ model, prompt, maxTokens, provider = 'auto' }) {
+  const key = process.env.OPENAI_API_KEY;
+  const mode = provider === 'local' ? 'local' : provider === 'openai' ? (key ? 'openai' : 'local') : (key ? 'openai' : 'free');
+  if (mode === 'local') return localAIResponse(prompt);
+
+  if (mode === 'openai') {
+    try {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: model || 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: Math.min(Math.max(Number(maxTokens) || 300, 50), 4000),
+        }),
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!response.ok) throw new Error(`API IA ${response.status}`);
+      const data = await response.json();
+      const text = data?.choices?.[0]?.message?.content;
+      if (text) return String(text).trim();
+    } catch {
+      // The local fallback keeps the flow alive when the API is unavailable.
+    }
+    return localAIResponse(prompt);
+  }
+
+  try {
+    const response = await fetch('https://text.pollinations.ai/openai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'openai',
+        messages: [{ role: 'user', content: prompt }],
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (response.ok) {
+      const data = await response.json();
+      const text = data?.choices?.[0]?.message?.content;
+      if (text) return String(text).trim();
+    }
+  } catch {
+    // Fall back to a local answer when the no-key service is unreachable.
+  }
+  return localAIResponse(prompt);
+}
+
+async function executeFlow({ bot, ws, flow, guild, member, channel, message, interaction, startBlock, vars = {} }) {
+  const runtime = ensureRuntime(bot.id);
+  const user = member?.user || interaction?.user || message?.author;
+  const roles = member?.roles?.cache ? member.roles.cache.map((role) => role.name) : [];
+  if (!bot.flowDatabase || typeof bot.flowDatabase !== 'object') bot.flowDatabase = {};
+  const persistedVars = Object.fromEntries(
+    Object.entries(bot.flowDatabase).map(([key, value]) => [`db:${key}`, value]),
+  );
+  const result = runFlow(flow, {
+    user: {
+      name: member?.displayName || user?.globalName || user?.username || 'Membre',
+      id: user?.id || '',
+      mention: user ? `<@${user.id}>` : '',
+      roles,
+      createdTimestamp: user?.createdTimestamp || 0,
+      bot: Boolean(user?.bot),
+      hasAvatar: Boolean(user?.avatar),
+    },
+    server: guild?.name || 'Message privé',
+    channel: channel?.name ? `#${channel.name}` : '',
+    message: message?.content || '',
+    bot: bot.name,
+    startBlock,
+    vars: { ...persistedVars, ...vars },
+  });
+  let lastMessage = null;
+  let lastChannel = channel || null;
+  let stopped = false;
+  let sent = false;
+  let interactionUsed = false;
+
+  for (const rawOutput of result.outputs) {
+    const output = String(rawOutput.kind || '').startsWith('service')
+      ? rawOutput
+      : applyServiceTokensDeep(rawOutput, result.variables);
+    try {
+      switch (output.kind) {
+        case 'message':
+        case 'reply': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          if (!target) break;
+          if (output.ephemeral && interaction) {
+            const payload = { content: output.text || ' ', ephemeral: true };
+            if (interaction.deferred && !interactionUsed) {
+              await interaction.editReply(payload);
+              interactionUsed = true;
+            } else if (interaction.replied || interactionUsed) {
+              await interaction.followUp(payload);
+            } else {
+              await interaction.reply(payload);
+              interactionUsed = true;
+            }
+          } else {
+            const payload = {
+              content: output.text || ' ',
+              allowedMentions: { parse: output.ping === false ? [] : ['users', 'roles'] },
+            };
+            if (output.tts) payload.tts = true;
+            if (output.reply && message?.id) payload.reply = { messageReference: message.id, failIfNotExists: false };
+            lastMessage = await target.send(payload);
+            lastChannel = target;
+          }
+          sent = true;
+          break;
+        }
+        case 'embed': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          if (!target) break;
+          lastMessage = await target.send({ embeds: [toEmbed(output.embed)] });
+          lastChannel = target;
+          sent = true;
+          break;
+        }
+        case 'dm': {
+          if (member) {
+            await member.send({ content: String(output.text || '').slice(0, 2000) });
+            sent = true;
+          }
+          break;
+        }
+        case 'buttons': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          if (!target) break;
+          const row = new ActionRowBuilder();
+          output.buttons.slice(0, 5).forEach((entry, index) => {
+            const button = new ButtonBuilder().setLabel(String(entry.label || 'Bouton').slice(0, 80));
+            if (entry.emoji) button.setEmoji(entry.emoji);
+            if (entry.disabled) button.setDisabled(true);
+            if (entry.url) {
+              button.setStyle(ButtonStyle.Link).setURL(entry.url);
+            } else {
+              const style =
+                entry.style === 'success'
+                  ? ButtonStyle.Success
+                  : entry.style === 'danger'
+                    ? ButtonStyle.Danger
+                    : entry.style === 'secondary'
+                      ? ButtonStyle.Secondary
+                      : ButtonStyle.Primary;
+              button.setStyle(style).setCustomId(`kf:${flow.id}:${output.blockId}:${index}`.slice(0, 100));
+            }
+            row.addComponents(button);
+          });
+          lastMessage = await target.send({ components: [row] });
+          lastChannel = target;
+          rememberPending(
+            pendingButtons,
+            pendingKey(flow.id, output.blockId, user?.id),
+            { vars: result.variables },
+            3600,
+          );
+          sent = true;
+          break;
+        }
+        case 'react': {
+          const target = lastMessage || message;
+          if (target) await target.react(output.emoji || '✅');
+          break;
+        }
+        case 'role': {
+          const role = resolveRole(guild, output.role);
+          if (role && member) {
+            if (output.action === 'remove') await member.roles.remove(role, 'KyllBot Studio');
+            else await member.roles.add(role, 'KyllBot Studio');
+            if (Number(output.duration) > 0) {
+              const unit = output.durationUnit === 'hours' ? 3600000 : output.durationUnit === 'minutes' ? 60000 : 1000;
+              setTimeout(
+                () => member.roles.remove(role, 'KyllBot Studio — durée écoulée').catch(() => {}),
+                Math.min(Number(output.duration) * unit, 7 * 864e5),
+              ).unref?.();
+            }
+          }
+          break;
+        }
+        case 'pin': {
+          const target = lastMessage || message;
+          if (target) await (output.unpin ? target.unpin() : target.pin()).catch(() => {});
+          break;
+        }
+        case 'delete': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          const count = Math.min(Math.max(Number(output.count) || 1, 1), 100);
+          if (count > 1 && target?.bulkDelete) {
+            const messages = await target.messages.fetch({ limit: count }).catch(() => null);
+            if (messages?.size) await target.bulkDelete(messages, true).catch(() => {});
+          } else if (lastMessage) {
+            await lastMessage.delete().catch(() => {});
+          } else if (message) {
+            await message.delete().catch(() => {});
+          }
+          break;
+        }
+        case 'cooldown': {
+          const key = `${bot.id}:${flow.id}:${output.scope === 'channel' ? channel?.id || 'channel' : user?.id || 'user'}`;
+          const now = Date.now();
+          const until = flowCooldowns.get(key) || 0;
+          if (until > now) {
+            const remaining = Math.ceil((until - now) / 1000);
+            if (interaction && !interaction.replied && !interaction.deferred) {
+              await interaction.reply({ content: `Patiente encore ${remaining}s avant de relancer ce flux.`, ephemeral: true }).catch(() => {});
+              interactionUsed = true;
+            } else if (channel?.send) {
+              await channel.send({ content: `Patiente encore ${remaining}s avant de relancer ce flux.` }).catch(() => {});
+            }
+            stopped = true;
+            break;
+          }
+          flowCooldowns.set(key, now + Math.max(1, Number(output.seconds) || 1) * 1000);
+          if (flowCooldowns.size > 5000) {
+            for (const [entry, value] of flowCooldowns) if (value < now) flowCooldowns.delete(entry);
+          }
+          break;
+        }
+        case 'wait':
+          await sleep(Math.min(Number(output.seconds) || 0, 30) * 1000);
+          break;
+        case 'timer': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          if (!target?.send) break;
+          const timerMessage = await target.send({ content: String(output.text || ' ').slice(0, 2000) }).catch(() => null);
+          if (timerMessage) {
+            lastMessage = timerMessage;
+            lastChannel = target;
+            sent = true;
+          }
+          const finish = async () => {
+            const text = String(output.endText || '⏰ Temps écoulé !').slice(0, 2000);
+            if (timerMessage?.reply) await timerMessage.reply({ content: text }).catch(() => {});
+            else await target.send({ content: text }).catch(() => {});
+          };
+          const durationMs = Math.max(1000, Number(output.durationMs) || 1000);
+          if (output.wait) {
+            await sleep(Math.min(durationMs, 86400000));
+            await finish();
+          } else {
+            const timer = setTimeout(() => { finish().catch(() => {}); }, Math.min(durationMs, 2147483647));
+            timer.unref?.();
+          }
+          break;
+        }
+        case 'chrono': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          const variable = output.variable || 'chrono_start';
+          const key = `${bot.id}:${guild.id}:${variable}`;
+          if (output.action === 'start') {
+            chronos.set(key, Date.now());
+            const text = String(output.startText || '').trim();
+            if (text && target?.send) {
+              lastMessage = await target.send({ content: text.slice(0, 2000) }).catch(() => null);
+              if (lastMessage) {
+                lastChannel = target;
+                sent = true;
+              }
+            }
+            break;
+          }
+          const started = chronos.get(key);
+          if (!started) {
+            if (target?.send) await target.send({ content: 'Aucun chronomètre démarré avec cette variable. Lance d’abord le bloc « Démarrer le chronomètre ».' }).catch(() => {});
+            break;
+          }
+          chronos.delete(key);
+          const elapsed = formatDuration(Date.now() - started);
+          const template = String(output.stopText || '⏱️ Temps écoulé : __ELAPSED__');
+          const text = template.replaceAll('__ELAPSED__', elapsed);
+          if (target?.send) {
+            lastMessage = await target.send({ content: text.slice(0, 2000) }).catch(() => null);
+            if (lastMessage) {
+              lastChannel = target;
+              sent = true;
+            }
+          }
+          break;
+        }
+        case 'serviceStart': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          const state = ensureServiceState(bot, guild?.id || 'dm');
+          const entry = serviceEntry(state, user?.id, serviceDisplayName(member, user));
+          const now = Date.now();
+          let text;
+          if (entry.startedAt) {
+            Object.assign(result.variables, serviceTokens(state, entry, { now, sinceMs: now - entry.startedAt }));
+            text = applyServiceTokens(
+              output.alreadyText || '⚠️ Service déjà en cours depuis {{since}}.',
+              serviceTokens(state, entry, { now, sinceMs: now - entry.startedAt }),
+            );
+          } else {
+            entry.startedAt = now;
+            entry.name = serviceDisplayName(member, user);
+            Object.assign(result.variables, serviceTokens(state, entry, { now }));
+            persist();
+            text = applyServiceTokens(
+              output.text || '▶️ Service démarré pour {{member}}.',
+              serviceTokens(state, entry, { now }),
+            );
+          }
+          if (target?.send && text) {
+            lastMessage = await target.send({ content: text.slice(0, 2000) }).catch(() => null);
+            if (lastMessage) {
+              lastChannel = target;
+              sent = true;
+            }
+          }
+          break;
+        }
+        case 'serviceStop': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          const state = ensureServiceState(bot, guild?.id || 'dm');
+          const userId = String(user?.id || 'inconnu');
+          const existing = state.members[userId];
+          const entry = existing || {
+            id: userId,
+            name: serviceDisplayName(member, user),
+            serviceMs: 0,
+            penaltyMs: 0,
+            startedAt: null,
+          };
+          const now = Date.now();
+          let text;
+          let durationMs = 0;
+          if (entry.startedAt) {
+            durationMs = Math.max(0, now - Number(entry.startedAt));
+            entry.serviceMs = Math.max(0, Number(entry.serviceMs) || 0) + durationMs;
+            entry.startedAt = null;
+            entry.name = serviceDisplayName(member, user);
+            Object.assign(result.variables, serviceTokens(state, entry, { now, durationMs }));
+            persist();
+            text = applyServiceTokens(
+              output.text || '⏹️ Service terminé : {{duration}} ajoutées.',
+              serviceTokens(state, entry, { now, durationMs }),
+            );
+          } else {
+            Object.assign(result.variables, serviceTokens(state, entry, { now }));
+            text = applyServiceTokens(
+              output.emptyText || '⚠️ Aucun service en cours pour {{member}}.',
+              serviceTokens(state, entry, { now }),
+            );
+          }
+          if (target?.send && text) {
+            lastMessage = await target.send({ content: text.slice(0, 2000) }).catch(() => null);
+            if (lastMessage) {
+              lastChannel = target;
+              sent = true;
+            }
+          }
+          break;
+        }
+        case 'servicePenalty': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          const pending = {
+            flowId: flow.id,
+            blockId: output.blockId,
+            next: output.next,
+            vars: result.variables,
+            botId: bot.id,
+            userId: user?.id,
+            channelId: channel?.id,
+          };
+          rememberPending(
+            pendingServicePenalties,
+            pendingKey(flow.id, output.blockId, user?.id),
+            pending,
+            900,
+          );
+          if (interaction && !interaction.replied && !interaction.deferred) {
+            try {
+              await interaction.showModal(buildServicePenaltyModal(flow, { id: output.blockId, title: output.title }));
+              interactionUsed = true;
+              sent = true;
+              break;
+            } catch (error) {
+              log(runtime, 'warn', `Formulaire de pénalité direct impossible : ${error.message}. Repli sur un bouton.`);
+            }
+          }
+          if (!target?.send) break;
+          const openButton = new ButtonBuilder()
+            .setCustomId(`kfservicepenalty:${flow.id}:${output.blockId}`)
+            .setLabel('Ouvrir la pénalité')
+            .setStyle(ButtonStyle.Primary);
+          lastMessage = await target.send({
+            content: `**${String(output.title || 'Pénalité de service').slice(0, 200)}**`,
+            components: [new ActionRowBuilder().addComponents(openButton)],
+          }).catch(() => null);
+          if (lastMessage) {
+            lastChannel = target;
+            sent = true;
+          }
+          break;
+        }
+        case 'serviceLeaderboard': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          const state = ensureServiceState(bot, guild?.id || 'dm');
+          const now = Date.now();
+          const entries = Object.values(state.members)
+            .map((entry) => ({ ...serviceTotals(entry, now), name: entry.name || entry.id || 'Membre', id: entry.id, startedAt: entry.startedAt }))
+            .filter((entry) => entry.serviceMs > 0 || entry.penaltyMs > 0 || entry.liveMs > 0 || entry.startedAt)
+            .sort((a, b) => b.totalMs - a.totalMs || b.serviceMs - a.serviceMs || a.name.localeCompare(b.name, 'fr'));
+          const top = Math.max(1, Math.min(25, Number(output.top) || 10));
+          const lines = entries.slice(0, top).map((entry, index) => {
+            const name = String(entry.name || 'Membre').replace(/@/g, '@\u200b');
+            return `**${index + 1}.** ${name} — Service : ${formatDuration(entry.serviceMs)} · Pénalité : ${formatDuration(entry.penaltyMs)} · Total : ${formatSignedDuration(entry.totalMs)}${entry.liveMs > 0 ? ' · en service' : ''}`;
+          });
+          const period = servicePeriodLabel(state);
+          const reset = serviceResetLabel(state.config);
+          Object.assign(result.variables, { period, reset });
+          const title = applyServiceTokens(output.title || 'Classement du service', result.variables);
+          const embed = new EmbedBuilder()
+            .setTitle(String(title).slice(0, 256))
+            .setDescription((lines.length ? lines.join('\n') : 'Aucun temps de service enregistré pour cette période.').slice(0, 4096))
+            .setColor(0x7c5cff)
+            .setFooter({ text: `${period} · remise à zéro ${reset}` });
+          if (output.ephemeral && interaction && !interaction.replied && !interaction.deferred) {
+            await interaction.reply({ embeds: [embed], ephemeral: true }).catch(() => {});
+            interactionUsed = true;
+            sent = true;
+          } else if (target?.send) {
+            lastMessage = await target.send({ embeds: [embed] }).catch(() => null);
+            if (lastMessage) {
+              lastChannel = target;
+              sent = true;
+            }
+          }
+          break;
+        }
+        case 'serviceConfig': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          const state = ensureServiceState(bot, guild?.id || 'dm');
+          const nextConfig = {
+            period: output.period === 'month' ? 'month' : 'week',
+            resetDay: Math.min(7, Math.max(1, Number(output.resetDay) || 1)),
+            resetHour: Math.min(23, Math.max(0, Number(output.resetHour) || 0)),
+            timezone: safeTimezone(output.timezone),
+          };
+          const configChanged = JSON.stringify(state.config) !== JSON.stringify(nextConfig);
+          state.config = nextConfig;
+          if (configChanged) {
+            state.periodKey = null;
+            state.members = {};
+          }
+          ensureServiceState(bot, guild?.id || 'dm');
+          persist();
+          const tokens = {
+            ...result.variables,
+            period: servicePeriodLabel(state),
+            reset: serviceResetLabel(state.config),
+          };
+          Object.assign(result.variables, tokens);
+          const text = applyServiceTokens(
+            output.message || '✅ Période du service : {{period}} (reset {{reset}}).',
+            tokens,
+          );
+          if (target?.send && text) {
+            lastMessage = await target.send({ content: text.slice(0, 2000) }).catch(() => null);
+            if (lastMessage) {
+              lastChannel = target;
+              sent = true;
+            }
+          }
+          break;
+        }
+        case 'serviceReset': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          const state = ensureServiceState(bot, guild?.id || 'dm');
+          state.members = {};
+          persist();
+          const tokens = { ...result.variables, period: servicePeriodLabel(state), reset: serviceResetLabel(state.config) };
+          Object.assign(result.variables, tokens);
+          const text = applyServiceTokens(
+            output.message || '🧹 Les compteurs du service ont été réinitialisés.',
+            tokens,
+          );
+          if (target?.send && text) {
+            lastMessage = await target.send({ content: text.slice(0, 2000) }).catch(() => null);
+            if (lastMessage) {
+              lastChannel = target;
+              sent = true;
+            }
+          }
+          break;
+        }
+        case 'typing': {
+          const target = lastChannel || channel;
+          if (target?.sendTyping) await target.sendTyping();
+          break;
+        }
+        case 'webhook': {
+          if (output.url) {
+            const method = output.method || 'POST';
+            const request = { method };
+            if (method !== 'GET') {
+              request.headers = { 'Content-Type': 'application/json' };
+              request.body = output.body || '{}';
+            }
+            await fetch(output.url, request);
+          }
+          break;
+        }
+        case 'log': {
+          const logChannel = resolveChannel(guild, bot.discord?.logChannel || 'logs');
+          if (logChannel) await logChannel.send({ content: String(output.text || '').slice(0, 2000) });
+          break;
+        }
+        case 'thread': {
+          const target = lastMessage || message;
+          if (target?.startThread) {
+            await target.startThread({
+              name: String(output.name || 'Discussion').slice(0, 100),
+              autoArchiveDuration: [60, 1440, 4320, 10080].includes(Number(output.archive)) ? Number(output.archive) : 1440,
+              reason: 'KyllBot Studio',
+            });
+          }
+          break;
+        }
+        case 'edit': {
+          const target = lastMessage || message;
+          if (target?.edit) {
+            if (output.embed) {
+              await target.edit({
+                content: null,
+                embeds: [
+                  toEmbed({
+                    title: output.title,
+                    description: output.description || output.text,
+                    color: output.color,
+                  }),
+                ],
+              });
+            } else {
+              await target.edit({ content: String(output.text || ' ').slice(0, 2000) });
+            }
+            lastMessage = target;
+          }
+          break;
+        }
+        case 'forum': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          if (target?.threads?.create) {
+            const availableTags = target.availableTags || [];
+            const wantedTags = String(output.tags || '')
+              .split(',')
+              .map((tag) => tag.trim().toLowerCase())
+              .filter(Boolean);
+            const appliedTags = availableTags
+              .filter((tag) => wantedTags.includes(String(tag.name || '').toLowerCase()))
+              .slice(0, 5)
+              .map((tag) => tag.id);
+            const threadOptions = {
+              name: String(output.title || 'Nouveau post').slice(0, 100),
+              message: { content: String(output.content || '').slice(0, 2000) || ' ' },
+              reason: 'KyllBot Studio',
+            };
+            if (target.type === ChannelType.GuildForum && appliedTags.length) threadOptions.appliedTags = appliedTags;
+            const thread = await target.threads.create(threadOptions);
+            lastChannel = thread;
+            lastMessage = await thread.fetchStarterMessage().catch(() => null);
+            sent = true;
+          } else if (target?.send) {
+            lastMessage = await target.send({
+              content: `**${String(output.title || 'Nouveau post').slice(0, 200)}**\n${String(output.content || '').slice(0, 1800)}`,
+            });
+            lastChannel = target;
+            sent = true;
+          }
+          break;
+        }
+        case 'forumAction': {
+          const target = resolveForumPost(guild, output.post, output.channel, channel, lastChannel);
+          if (!target?.send) {
+            if (channel?.send) await channel.send({ content: 'Aucun post de forum trouvé. Vérifie le nom du post ou utilise ce bloc dans un post.' }).catch(() => {});
+            break;
+          }
+          if (output.action === 'close') {
+            const reason = String(output.reason || 'Post fermé par le staff.').slice(0, 200);
+            await target.send({ content: String(output.content || '🔒 Post fermé.').slice(0, 2000) }).catch(() => {});
+            if (target.setLocked) await target.setLocked(true, reason).catch(() => {});
+            if (target.setArchived) await target.setArchived(true, reason).catch(() => {});
+          } else {
+            lastMessage = await target.send({ content: String(output.content || ' ').slice(0, 2000) });
+            lastChannel = target;
+            sent = true;
+          }
+          break;
+        }
+        case 'forumDelete': {
+          const target = resolveForumPost(guild, output.post, output.channel, channel, lastChannel);
+          if (!target?.messages) {
+            log(runtime, 'warn', 'Bloc suppression forum : post introuvable.');
+            break;
+          }
+          const ref = String(output.message || '').trim();
+          let targetMessage = null;
+          if (!ref || ref.toLowerCase() === 'last' || ref.toLowerCase() === 'dernier') {
+            if (lastMessage?.channelId === target.id) targetMessage = lastMessage;
+            if (!targetMessage) {
+              const recent = await target.messages.fetch({ limit: 1 }).catch(() => null);
+              targetMessage = recent?.first() || null;
+            }
+          } else if (/^\d{17,20}$/.test(ref)) {
+            targetMessage = await target.messages.fetch(ref).catch(() => null);
+          } else {
+            const recent = await target.messages.fetch({ limit: 50 }).catch(() => null);
+            targetMessage = recent?.find((entry) => String(entry.content || '').toLowerCase().includes(ref.toLowerCase())) || null;
+          }
+          if (!targetMessage) {
+            log(runtime, 'warn', `Bloc suppression forum : message « ${ref || 'dernier'} » introuvable.`);
+            break;
+          }
+          await targetMessage.delete().catch((error) => log(runtime, 'warn', `Bloc suppression forum : ${error.message}`));
+          break;
+        }
+        case 'ai': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          if (!target) break;
+          let text = null;
+          try {
+            text = await askAI({ model: output.model, prompt: output.prompt, maxTokens: output.maxTokens, provider: output.provider });
+          } catch (error) {
+            log(runtime, 'warn', `Bloc IA : ${error.message}`);
+          }
+          if (!text) text = localAIResponse(output.prompt);
+          lastMessage = await target.send({ content: String(text).slice(0, 2000) });
+          lastChannel = target;
+          sent = true;
+          break;
+        }
+        case 'image': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          if (target && output.url) {
+            lastMessage = await target.send({ content: output.url });
+            lastChannel = target;
+            sent = true;
+          }
+          break;
+        }
+        case 'music': {
+          if (!guild) break;
+          if (output.action === 'stop') {
+            const stoppedMusic = stopMusicSession(guild.id);
+            if (interaction && !interaction.replied && !interaction.deferred) {
+              await interaction.reply({ content: stoppedMusic ? 'Musique arrêtée.' : 'Aucune musique en cours.', ephemeral: true }).catch(() => {});
+              interactionUsed = true;
+            } else if (channel?.send) {
+              await channel.send({ content: stoppedMusic ? 'Musique arrêtée.' : 'Aucune musique en cours.' }).catch(() => {});
+            }
+            break;
+          }
+          const url = String(output.url || '').trim();
+          if (!url) {
+            if (interaction && !interaction.replied && !interaction.deferred) {
+              await interaction.reply({ content: 'Ajoute une URL audio directe au bloc Musique.', ephemeral: true }).catch(() => {});
+              interactionUsed = true;
+            } else if (channel?.send) {
+              await channel.send({ content: 'Ajoute une URL audio directe au bloc Musique.' }).catch(() => {});
+            }
+            break;
+          }
+          if (output.mode === 'personal') {
+            const content = `🎵 ${output.title ? `**${String(output.title).slice(0, 100)}** — ` : ''}${url}`;
+            if (interaction && !interaction.replied && !interaction.deferred) {
+              await interaction.reply({ content, ephemeral: true }).catch(() => {});
+              interactionUsed = true;
+            } else if (user?.send) {
+              await user.send({ content }).catch(() => {});
+            } else if (channel?.send) {
+              await channel.send({ content: user ? `<@${user.id}> ${content}` : content }).catch(() => {});
+            }
+            break;
+          }
+          const voiceChannel = resolveChannel(guild, output.channel) || member?.voice?.channel;
+          if (!voiceChannel || ![ChannelType.GuildVoice, ChannelType.GuildStageVoice].includes(voiceChannel.type)) {
+            if (interaction && !interaction.replied && !interaction.deferred) {
+              await interaction.reply({ content: 'Rejoins d’abord un salon vocal, ou choisis un salon vocal dans le bloc.', ephemeral: true }).catch(() => {});
+              interactionUsed = true;
+            } else if (channel?.send) {
+              await channel.send({ content: 'Rejoins d’abord un salon vocal, ou choisis un salon vocal dans le bloc.' }).catch(() => {});
+            }
+            break;
+          }
+          try {
+            const voice = await import('@discordjs/voice');
+            stopMusicSession(guild.id);
+            const connection = voice.joinVoiceChannel({
+              channelId: voiceChannel.id,
+              guildId: guild.id,
+              adapterCreator: guild.voiceAdapterCreator,
+              selfDeaf: true,
+            });
+            const player = voice.createAudioPlayer();
+            const volumePct = Number(output.volume);
+            const volume = Math.min(2, Math.max(0, (Number.isFinite(volumePct) ? volumePct : 80) / 100));
+            const makeResource = async () => {
+              let input;
+              if (/^https?:\/\//i.test(url)) {
+                const response = await fetch(url);
+                if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+                input = Readable.fromWeb(response.body);
+              } else {
+                input = createReadStream(url);
+              }
+              const resource = voice.createAudioResource(input, { inlineVolume: true, inputType: voice.StreamType.Arbitrary });
+              resource.volume?.setVolume(volume);
+              return resource;
+            };
+            const session = { player, connection, stopped: false, loop: Boolean(output.loop), url, volume };
+            musicSessions.set(guild.id, session);
+            connection.subscribe(player);
+            player.play(await makeResource());
+            player.on(voice.AudioPlayerStatus.Idle, () => {
+              if (session.stopped) return;
+              if (session.loop) {
+                makeResource().then((resource) => player.play(resource)).catch(() => stopMusicSession(guild.id));
+              } else {
+                stopMusicSession(guild.id);
+              }
+            });
+            player.on('error', () => stopMusicSession(guild.id));
+            const notice = `🎶 **${String(output.title || 'Musique').slice(0, 100)}** en lecture dans ${voiceChannel}.`;
+            if (interaction && !interaction.replied && !interaction.deferred) {
+              await interaction.reply({ content: notice, ephemeral: true }).catch(() => {});
+              interactionUsed = true;
+            } else if (channel?.send) {
+              lastMessage = await channel.send({ content: notice }).catch(() => null);
+              sent = Boolean(lastMessage);
+            }
+          } catch (error) {
+            stopMusicSession(guild.id);
+            log(runtime, 'warn', `Bloc musique : ${error.message}`);
+            if (interaction && !interaction.replied && !interaction.deferred) {
+              await interaction.reply({ content: `Impossible de lancer la musique : ${error.message}`, ephemeral: true }).catch(() => {});
+              interactionUsed = true;
+            } else if (channel?.send) {
+              await channel.send({ content: `Impossible de lancer la musique : ${error.message}` }).catch(() => {});
+            }
+          }
+          break;
+        }
+        case 'poll': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          const options = [...new Set((output.options || []).map((option) => String(option).trim()).filter(Boolean))].slice(0, 10);
+          if (!target || !options.length) break;
+          if (options.length >= 2) {
+            try {
+              lastMessage = await target.send({
+                poll: {
+                  question: { text: String(output.question || 'Sondage').slice(0, 300) },
+                  answers: options.map((option) => ({ text: String(option).slice(0, 55) })),
+                  duration: Math.min(Math.max(Number(output.duration) || 24, 1), 768),
+                  allowMultiselect: Boolean(output.multiple),
+                },
+              });
+              lastChannel = target;
+              sent = true;
+              break;
+            } catch (error) {
+              log(runtime, 'warn', `Sondage natif indisponible : ${error.message}. Repli sur les réactions.`);
+            }
+          }
+          const text = `**${output.question || 'Sondage'}**\n${options.map((option, index) => `${index + 1}. ${option}`).join('\n')}`;
+          lastMessage = await target.send({ content: text.slice(0, 2000) });
+          for (let index = 0; index < Math.min(options.length, 9); index += 1) {
+            await lastMessage.react(`${index + 1}\u20e3`).catch(() => {});
+          }
+          lastChannel = target;
+          sent = true;
+          break;
+        }
+        case 'select': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          const options = [...new Set((output.options || []).map((option) => String(option).trim()).filter(Boolean))].slice(0, 25);
+          if (!target || !options.length) break;
+          const min = Math.min(Math.max(Number(output.min) || 1, 1), options.length);
+          const max = Math.min(Math.max(Number(output.max) || 1, min), options.length);
+          const menu = new StringSelectMenuBuilder()
+            .setCustomId(`kfsel:${flow.id}:${output.blockId}`)
+            .setPlaceholder(String(output.placeholder || 'Choisissez…').slice(0, 150))
+            .setMinValues(min)
+            .setMaxValues(max)
+            .addOptions(
+              options.map((option) =>
+                new StringSelectMenuOptionBuilder().setLabel(String(option).slice(0, 100)).setValue(String(option).slice(0, 100)),
+              ),
+            );
+          rememberPending(
+            pendingSelects,
+            pendingKey(flow.id, output.blockId, user?.id),
+            {
+              flowId: flow.id,
+              blockId: output.blockId,
+              next: output.next,
+              vars: result.variables,
+              botId: bot.id,
+              userId: user?.id,
+              channelId: channel?.id,
+            },
+            900,
+          );
+          lastMessage = await target.send({ components: [new ActionRowBuilder().addComponents(menu)] });
+          lastChannel = target;
+          sent = true;
+          break;
+        }
+        case 'modal': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          const sourceBlock = (flow.blocks || []).find((entry) => entry.id === output.blockId) || {};
+          const modalBlock = {
+            id: output.blockId,
+            title: output.title || sourceBlock.title,
+            fields: sourceBlock.fields || output.fields || [],
+          };
+          const { modal } = buildModal(flow, modalBlock);
+          rememberPending(
+            pendingModals,
+            pendingKey(flow.id, output.blockId, user?.id),
+            {
+              flowId: flow.id,
+              blockId: output.blockId,
+              next: output.next,
+              vars: result.variables,
+              botId: bot.id,
+              userId: user?.id,
+              channelId: channel?.id,
+            },
+            900,
+          );
+          if (interaction && !interaction.replied && !interaction.deferred) {
+            try {
+              await interaction.showModal(modal);
+              interactionUsed = true;
+              sent = true;
+              break;
+            } catch (error) {
+              log(runtime, 'warn', `Formulaire direct impossible : ${error.message}. Repli sur un bouton.`);
+            }
+          }
+          if (!target) break;
+          const openButton = new ButtonBuilder()
+            .setCustomId(`kfmodal:${flow.id}:${output.blockId}`)
+            .setLabel('Ouvrir le formulaire')
+            .setStyle(ButtonStyle.Primary);
+          lastMessage = await target.send({
+            content: `**${String(output.title || 'Formulaire').slice(0, 200)}**`,
+            components: [new ActionRowBuilder().addComponents(openButton)],
+          });
+          lastChannel = target;
+          sent = true;
+          break;
+        }
+        case 'giveaway': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          if (!target) break;
+          const duration = Math.min(Math.max(Number(output.duration) || 24, 1), 720);
+          const endsAt = Math.floor(Date.now() / 1000) + duration * 3600;
+          const emoji = String(output.emoji || '🎉');
+          const embed = new EmbedBuilder()
+            .setTitle(`🎉 Giveaway — ${String(output.prize || 'Lot à gagner').slice(0, 200)}`)
+            .setDescription(
+              `Réagis avec ${emoji} pour participer !\nFin : <t:${endsAt}:R>\nGagnant(s) : **${Number(output.winners) || 1}**`,
+            )
+            .setColor(0x7c5cff)
+            .setTimestamp();
+          lastMessage = await target.send({ embeds: [embed] });
+          await lastMessage.react(emoji).catch(() => {});
+          scheduleGiveaway({
+            message: lastMessage,
+            channel: target,
+            prize: output.prize,
+            winners: output.winners,
+            emoji,
+            duration,
+          });
+          lastChannel = target;
+          sent = true;
+          break;
+        }
+        case 'await': {
+          const target = lastMessage || message;
+          const timeout = Math.min(Math.max(Number(output.timeout) || 60, 5), 3600);
+          rememberPending(
+            pendingAwaits,
+            pendingKey(flow.id, output.blockId, user?.id),
+            {
+              flowId: flow.id,
+              blockId: output.blockId,
+              next: output.next,
+              vars: result.variables,
+              botId: bot.id,
+              userId: user?.id,
+              channelId: channel?.id,
+              messageId: target?.id || null,
+              kind: output.interaction,
+            },
+            timeout,
+          );
+          if (output.interaction === 'button') {
+            const row = new ActionRowBuilder().addComponents(
+              new ButtonBuilder()
+                .setCustomId(`kfawait:${flow.id}:${output.blockId}`)
+                .setLabel('Continuer')
+                .setStyle(ButtonStyle.Primary),
+            );
+            lastMessage = await channel.send({ content: 'Clique sur **Continuer** pour poursuivre le flux.', components: [row] });
+            lastChannel = channel;
+            sent = true;
+          } else if (output.interaction === 'reaction') {
+            if (!target) {
+              lastMessage = await channel.send({ content: 'Réagis avec ✅ pour poursuivre le flux.' });
+              lastChannel = channel;
+            }
+            const reactionTarget = lastMessage || target;
+            if (reactionTarget) await reactionTarget.react('✅').catch(() => {});
+            sent = sent || Boolean(reactionTarget);
+          } else {
+            lastMessage = await channel.send({ content: 'Envoie un message pour poursuivre le flux.' });
+            lastChannel = channel;
+            sent = true;
+          }
+          break;
+        }
+        case 'captcha': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          if (!target) break;
+          const timeout = Math.min(Math.max(Number(output.timeout) || 120, 10), 3600);
+          rememberPending(
+            pendingCaptchas,
+            pendingKey(flow.id, output.blockId, user?.id),
+            {
+              flowId: flow.id,
+              blockId: output.blockId,
+              next: output.next,
+              vars: result.variables,
+              botId: bot.id,
+              userId: user?.id,
+              channelId: channel?.id,
+              role: output.role,
+            },
+            timeout,
+          );
+          if (output.mode === 'modal' && interaction && !interaction.replied && !interaction.deferred) {
+            try {
+              await interaction.showModal(buildCaptchaModal(flow, { id: output.blockId }));
+              interactionUsed = true;
+              sent = true;
+              break;
+            } catch (error) {
+              log(runtime, 'warn', `Vérification modale impossible : ${error.message}. Repli sur un bouton.`);
+            }
+          }
+          const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(output.mode === 'modal' ? `kfcaptchamodal:${flow.id}:${output.blockId}` : `kfcaptcha:${flow.id}:${output.blockId}`)
+              .setLabel(output.mode === 'modal' ? 'Ouvrir la vérification' : 'Je ne suis pas un robot')
+              .setEmoji('✅')
+              .setStyle(ButtonStyle.Success),
+          );
+          lastMessage = await target.send({
+            content: `**Vérification**\n${output.mode === 'modal' ? 'Ouvre le formulaire et écris **OK** pour confirmer.' : 'Clique sur le bouton ci-dessous pour confirmer que tu es humain.'} Tu as ${timeout} secondes.`,
+            components: [row],
+          });
+          lastChannel = target;
+          sent = true;
+          break;
+        }
+        case 'ticket': {
+          if (!guild) break;
+          if (output.action === 'open') {
+            const parent = resolveCategory(guild, output.category);
+            const safeName = String(user?.username || 'membre')
+              .toLowerCase()
+              .replace(/[^a-z0-9-]/g, '-')
+              .replace(/-+/g, '-')
+              .slice(0, 40);
+            const ticketChannel = await guild.channels.create({
+              name: `ticket-${safeName || 'membre'}`.slice(0, 100),
+              type: ChannelType.GuildText,
+              parent: parent?.id || undefined,
+              topic: `Ticket de ${user?.tag || user?.username || 'membre'} — ${String(output.reason || 'Demande de support').slice(0, 200)}`,
+              permissionOverwrites: [
+                { id: guild.roles.everyone.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+                {
+                  id: user?.id,
+                  allow: [
+                    PermissionsBitField.Flags.ViewChannel,
+                    PermissionsBitField.Flags.SendMessages,
+                    PermissionsBitField.Flags.ReadMessageHistory,
+                    PermissionsBitField.Flags.AttachFiles,
+                  ],
+                },
+                {
+                  id: runtime.client?.user?.id,
+                  allow: [
+                    PermissionsBitField.Flags.ViewChannel,
+                    PermissionsBitField.Flags.SendMessages,
+                    PermissionsBitField.Flags.ReadMessageHistory,
+                    PermissionsBitField.Flags.ManageChannels,
+                  ],
+                },
+              ].filter((entry) => entry.id),
+            });
+            lastChannel = ticketChannel;
+            lastMessage = await ticketChannel.send({
+              content: `${user ? `<@${user.id}>` : ''} ton ticket est ouvert. Un membre du staff va te répondre.\nRaison : **${String(output.reason || 'Non précisée').slice(0, 300)}**`,
+              allowedMentions: { users: user ? [user.id] : [] },
+            });
+            sent = true;
+          } else if (output.action === 'claim') {
+            if (channel?.setTopic) {
+              await channel.setTopic(`Ticket réclamé par ${user?.tag || user?.username || 'staff'}`).catch(() => {});
+            }
+            await channel?.send?.({ content: `✅ Ticket réclamé par ${user ? `<@${user.id}>` : 'le staff'}.` }).catch(() => {});
+          } else if (output.action === 'close') {
+            await channel?.send?.({ content: `🔒 Ticket fermé par ${user ? `<@${user.id}>` : 'le staff'}. Suppression dans 3 secondes…` }).catch(() => {});
+            const closing = channel;
+            const timer = setTimeout(() => {
+              if (closing?.delete) closing.delete('Ticket fermé — KyllBot Studio').catch(() => {});
+            }, 3000);
+            timer.unref?.();
+          }
+          break;
+        }
+        case 'var':
+          if (output.databaseAction === 'set' && output.databaseKey) {
+            bot.flowDatabase[output.databaseKey] = output.value;
+            persist();
+          }
+          break;
+        case 'accountCheck': {
+          if (!output.pass) {
+            const target = resolveChannel(guild, output.channel) || channel;
+            const content = String(output.text || '🚫 Ton compte ne remplit pas les conditions.').slice(0, 2000);
+            if (interaction && !interaction.replied && !interaction.deferred) {
+              await interaction.reply({ content, ephemeral: true }).catch(() => {});
+              interactionUsed = true;
+            } else if (target?.send) {
+              await target.send({ content, allowedMentions: { users: user?.id ? [user.id] : [] } }).catch(() => {});
+            }
+            if (output.stop) stopped = true;
+          }
+          break;
+        }
+        case 'timeout':
+          if (member && Number(output.duration) > 0) {
+            await member.timeout(Math.min(Number(output.duration), 40320) * 60000, output.reason || 'KyllBot Studio');
+          }
+          break;
+        case 'kick':
+          if (member) await member.kick(output.reason || 'KyllBot Studio');
+          break;
+        case 'ban':
+          if (member) {
+            await member.ban({
+              reason: output.reason || 'KyllBot Studio',
+              deleteMessageSeconds: Math.min((Number(output.deleteDays) || 0) * 86400, 604800),
+            });
+          }
+          break;
+        case 'nickname':
+          if (member && output.nickname) await member.setNickname(String(output.nickname).slice(0, 32), 'KyllBot Studio');
+          break;
+        case 'move': {
+          const target = resolveChannel(guild, output.channel);
+          if (member?.voice && target) await member.voice.setChannel(target);
+          break;
+        }
+        case 'invite': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          if (target?.createInvite) {
+            const invite = await target.createInvite({
+              maxUses: Number(output.maxUses) || 0,
+              maxAge: (Number(output.maxAge) || 0) * 3600,
+              reason: 'KyllBot Studio',
+            });
+            await (channel || target).send({ content: `Invitation : ${invite.url}` });
+            sent = true;
+          }
+          break;
+        }
+        case 'channel':
+          if (guild) {
+            const parent = resolveCategory(guild, output.category);
+            lastChannel = await guild.channels.create({
+              name: String(output.name || 'salon').slice(0, 90),
+              type:
+                output.channelKind === 'voice'
+                  ? ChannelType.GuildVoice
+                  : output.channelKind === 'forum'
+                    ? ChannelType.GuildForum
+                    : ChannelType.GuildText,
+              parent: parent?.id || undefined,
+              topic: output.topic || undefined,
+              nsfw: Boolean(output.nsfw),
+              rateLimitPerUser: Number(output.slowmode) || 0,
+            });
+          }
+          break;
+        case 'stop':
+          stopped = true;
+          break;
+        default:
+          log(runtime, 'warn', `Bloc « ${output.kind} » non exécuté en mode réel.`);
+      }
+    } catch (error) {
+      log(runtime, 'error', `Bloc « ${output.kind} » : ${error.message}`);
+    }
+    if (stopped) break;
+  }
+  return { outputs: result.outputs, trace: result.trace, sent, interactionUsed };
+}
+
+function matchKeyword(trigger, content) {
+  const keyword = String(trigger?.keyword || '').trim();
+  if (!keyword) return false;
+  const haystack = String(content || '').toLowerCase();
+  const needle = keyword.toLowerCase();
+  if (trigger.match === 'exact') return haystack.trim() === needle;
+  if (trigger.match === 'startsWith') return haystack.startsWith(needle);
+  return haystack.includes(needle);
+}
+
+function matchReaction(trigger, emoji) {
+  const expected = String(trigger?.emoji || '').trim();
+  if (!expected) return false;
+  return String(emoji || '').toLowerCase() === expected.toLowerCase();
+}
+
+async function runTriggeredFlows({ bot, ws, type, guild, member, channel, message, interaction, match }) {
+  const flows = (bot.flows || []).filter((flow) => flow.enabled !== false && flow.trigger?.type === type);
+  let count = 0;
+  for (const flow of flows) {
+    if (type === 'keyword' && !matchKeyword(flow.trigger, message?.content || '')) continue;
+    if (type === 'reaction' && !matchReaction(flow.trigger, match)) continue;
+    await executeFlow({ bot, ws, flow, guild, member, channel, message, interaction });
+    bumpFlow(ws, bot, flow, `discord:${type}`, member?.user || interaction?.user);
+    count += 1;
+  }
+  return count;
+}
+
+async function memberFromInteraction(interaction) {
+  if (interaction.member?.roles?.cache) return interaction.member;
+  if (!interaction.guild) return null;
+  return interaction.guild.members.cache.get(interaction.user.id) || (await interaction.guild.members.fetch(interaction.user.id).catch(() => null));
+}
+
+async function handleInteraction(botId, interaction) {
+  const context = getBotContext(botId);
+  if (!context) return;
+  const { ws, bot } = context;
+  const member = await memberFromInteraction(interaction);
+  const channel = interaction.channel;
+  const guild = interaction.guild;
+
+  if (interaction.isChatInputCommand()) {
+    const commandName = normalizeCommandName(interaction.commandName);
+    const command = (bot.commands || []).find(
+      (entry) => normalizeCommandName(entry.name) === commandName && entry.enabled !== false,
+    );
+    const slashFlows = (bot.flows || []).filter(
+      (flow) =>
+        flow.enabled !== false &&
+        flow.trigger?.type === 'slash' &&
+        normalizeCommandName(flow.trigger?.command) === commandName,
+    );
+    if (!command && !slashFlows.length) {
+      await interaction.reply({ content: 'Cette commande n’est plus active sur ce bot.', ephemeral: true });
+      return;
+    }
+    if (command) {
+      const remaining = cooldownRemaining(bot.id, interaction.user.id, command.name, command.cooldown);
+      if (remaining > 0) {
+        await interaction.reply({ content: `Patiente encore ${remaining}s avant de réutiliser /${command.name}.`, ephemeral: true });
+        return;
+      }
+      await interaction.reply(commandPayload(command, { guild, member, interaction, client: ensureRuntime(botId).client }));
+      bumpCommand(ws, bot, command, 'discord:slash', interaction.user);
+    }
+    let flowUsedInteraction = false;
+    for (const flow of slashFlows) {
+      const result = await executeFlow({ bot, ws, flow, guild, member, channel, message: null, interaction });
+      if (result?.interactionUsed) flowUsedInteraction = true;
+      bumpFlow(ws, bot, flow, 'discord:slash', interaction.user);
+    }
+    if (!command && slashFlows.length && !flowUsedInteraction && !interaction.replied && !interaction.deferred) {
+      await interaction.reply({ content: 'Flux exécuté.', ephemeral: true }).catch(() => {});
+    }
+    return;
+  }
+
+  if (interaction.isStringSelectMenu() && interaction.customId.startsWith('kfsel:')) {
+    const [, flowId, blockId] = interaction.customId.split(':');
+    const flow = (bot.flows || []).find((entry) => entry.id === flowId);
+    if (!flow) {
+      await interaction.reply({ content: 'Ce menu n’est plus relié à un flux actif.', ephemeral: true });
+      return;
+    }
+    const block = (flow.blocks || []).find((entry) => entry.id === blockId);
+    const pending = takePending(pendingSelects, pendingKey(flowId, blockId, interaction.user.id));
+    const values = Array.isArray(interaction.values) ? interaction.values : [];
+    const vars = {
+      ...(pending?.vars || {}),
+      selection: values.join(', '),
+      select: values[0] || '',
+      interaction: 'select',
+    };
+    const nextBlock = pending?.next || block?.next;
+    if (!nextBlock) {
+      await interaction.reply({ content: `Choix enregistré : **${values.join(', ')}**`, ephemeral: true }).catch(() => {});
+      return;
+    }
+    const result = await executeFlow({
+      bot,
+      ws,
+      flow,
+      guild,
+      member,
+      channel,
+      message: null,
+      interaction,
+      startBlock: nextBlock,
+      vars,
+    });
+    bumpFlow(ws, bot, flow, 'discord:select', interaction.user);
+    if (!result.interactionUsed && !interaction.replied && !interaction.deferred) {
+      await interaction.reply({ content: `Choix enregistré : **${values.join(', ')}**`, ephemeral: true }).catch(() => {});
+    }
+    return;
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('kfmodalsubmit:')) {
+    const [, flowId, blockId] = interaction.customId.split(':');
+    const flow = (bot.flows || []).find((entry) => entry.id === flowId);
+    const block = flow?.blocks?.find((entry) => entry.id === blockId);
+    if (!flow || !block) {
+      await interaction.reply({ content: 'Ce formulaire n’est plus relié à un flux actif.', ephemeral: true });
+      return;
+    }
+    const pending = takePending(pendingModals, pendingKey(flowId, blockId, interaction.user.id));
+    const vars = { ...(pending?.vars || {}), interaction: 'form', form_title: block.title || 'Formulaire' };
+    for (const field of parseModalFields(block)) {
+      let value = '';
+      let idValue = '';
+      let nameValue = '';
+      if (field.type === 'select') {
+        value = (interaction.fields.getStringSelectValues(field.customId) || []).join(', ');
+      } else if (field.type === 'multi') {
+        value = (interaction.fields.getCheckboxGroup(field.customId) || []).join(', ');
+      } else if (field.type === 'checkbox') {
+        value = (interaction.fields.getCheckboxGroup(field.customId) || []).length ? 'Oui' : 'Non';
+      } else if (field.type === 'role') {
+        const selected = interaction.fields.getSelectedRoles(field.customId);
+        const roles = selected ? [...selected.values()] : [];
+        value = roles.map((role) => `<@&${role.id}>`).join(', ');
+        idValue = roles.map((role) => role.id).join(', ');
+        nameValue = roles.map((role) => role.name).join(', ');
+      } else if (field.type === 'user') {
+        const selected = interaction.fields.getSelectedUsers(field.customId);
+        const users = selected ? [...selected.values()] : [];
+        value = users.map((user) => `<@${user.id}>`).join(', ');
+        idValue = users.map((user) => user.id).join(', ');
+        nameValue = users.map((user) => user.globalName || user.username).join(', ');
+      } else {
+        value = interaction.fields.getTextInputValue(field.customId) || '';
+      }
+      vars[field.key] = value;
+      vars[`form.${field.key}`] = value;
+      if (field.type === 'role' || field.type === 'user') {
+        vars[`${field.key}_id`] = idValue;
+        vars[`${field.key}_name`] = nameValue;
+        vars[`form.${field.key}_id`] = idValue;
+        vars[`form.${field.key}_name`] = nameValue;
+      }
+    }
+    const nextBlock = pending?.next || block.next;
+    if (!nextBlock) {
+      await interaction.reply({ content: 'Formulaire reçu ✅', ephemeral: true }).catch(() => {});
+      return;
+    }
+    const result = await executeFlow({
+      bot,
+      ws,
+      flow,
+      guild,
+      member,
+      channel,
+      message: null,
+      interaction,
+      startBlock: nextBlock,
+      vars,
+    });
+    bumpFlow(ws, bot, flow, 'discord:modal', interaction.user);
+    if (!result.interactionUsed && !interaction.replied && !interaction.deferred) {
+      await interaction.reply({ content: 'Formulaire reçu ✅', ephemeral: true }).catch(() => {});
+    }
+    return;
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('kfservicepenaltysubmit:')) {
+    const [, flowId, blockId] = interaction.customId.split(':');
+    const flow = (bot.flows || []).find((entry) => entry.id === flowId);
+    const block = flow?.blocks?.find((entry) => entry.id === blockId);
+    if (!flow || !block) {
+      await interaction.reply({ content: 'Ce formulaire de pénalité n’est plus relié à un flux actif.', ephemeral: true });
+      return;
+    }
+    const pending = takePending(pendingServicePenalties, pendingKey(flowId, blockId, interaction.user.id));
+    const selected = interaction.fields.getSelectedUsers('member');
+    const targetUser = selected ? [...selected.values()][0] : null;
+    const penaltyMs = parseDurationInput(interaction.fields.getTextInputValue('duration'));
+    if (!targetUser || !penaltyMs) {
+      await interaction.reply({
+        content: 'Durée invalide. Utilise par exemple `30`, `30 min`, `1 h 30`, `90 min` ou `2 jours`.',
+        ephemeral: true,
+      });
+      return;
+    }
+    const { tokens } = addServicePenalty(
+      bot,
+      interaction.guild?.id || interaction.guildId || 'dm',
+      { id: targetUser.id, name: targetUser.globalName || targetUser.username },
+      penaltyMs,
+    );
+    persist();
+    const nextBlock = pending?.next || block.next;
+    if (!nextBlock) {
+      const text = applyServiceTokens(
+        block.penaltyText || '✅ Pénalité de {{penalty_added}} ajoutée à {{member}}.',
+        tokens,
+      );
+      await interaction.reply({ content: text.slice(0, 2000), ephemeral: true }).catch(() => {});
+      return;
+    }
+    const vars = {
+      ...(pending?.vars || {}),
+      member: tokens.member,
+      member_id: targetUser.id,
+      member_name: tokens.member_name,
+      member_mention: tokens.member_mention,
+      service: tokens.service,
+      penalty: tokens.penalty,
+      total: tokens.total,
+      penalty_added: tokens.penalty_added,
+      period: tokens.period,
+      reset: tokens.reset,
+    };
+    const result = await executeFlow({
+      bot,
+      ws,
+      flow,
+      guild: interaction.guild,
+      member,
+      channel,
+      message: null,
+      interaction,
+      startBlock: nextBlock,
+      vars,
+    });
+    bumpFlow(ws, bot, flow, 'discord:service-penalty', interaction.user);
+    if (!result.interactionUsed && !interaction.replied && !interaction.deferred) {
+      const text = applyServiceTokens(
+        block.penaltyText || '✅ Pénalité de {{penalty_added}} ajoutée à {{member}}.',
+        tokens,
+      );
+      await interaction.reply({ content: text.slice(0, 2000), ephemeral: true }).catch(() => {});
+    }
+    return;
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('kfcaptchasubmit:')) {
+    const [, flowId, blockId] = interaction.customId.split(':');
+    const flow = (bot.flows || []).find((entry) => entry.id === flowId);
+    if (!flow) {
+      await interaction.reply({ content: 'Cette vérification n’est plus reliée à un flux actif.', ephemeral: true });
+      return;
+    }
+    const pending = takePending(pendingCaptchas, pendingKey(flowId, blockId, interaction.user.id));
+    if (!pending) {
+      await interaction.reply({ content: 'Cette vérification a expiré. Relance le flux.', ephemeral: true });
+      return;
+    }
+    if (pending.role && guild && member) {
+      const role = resolveRole(guild, pending.role);
+      if (role) await member.roles.add(role, 'KyllBot Studio — vérification').catch(() => {});
+    }
+    const vars = {
+      ...(pending.vars || {}),
+      verified: 'oui',
+      captcha: interaction.fields.getTextInputValue('captcha'),
+    };
+    if (!pending.next) {
+      await interaction.reply({ content: 'Vérification réussie ✅', ephemeral: true }).catch(() => {});
+      return;
+    }
+    const result = await executeFlow({
+      bot,
+      ws,
+      flow,
+      guild,
+      member,
+      channel,
+      message: null,
+      interaction,
+      startBlock: pending.next,
+      vars,
+    });
+    bumpFlow(ws, bot, flow, 'discord:captcha', interaction.user);
+    if (!result.interactionUsed && !interaction.replied && !interaction.deferred) {
+      await interaction.reply({ content: 'Vérification réussie ✅', ephemeral: true }).catch(() => {});
+    }
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId.startsWith('km:')) {
+    const [, messageId, rawIndex] = interaction.customId.split(':');
+    const saved = (bot.savedMessages || []).find((entry) => entry.id === messageId);
+    const button = saved?.buttons?.[Number(rawIndex)];
+    if (!saved || !button) {
+      await interaction.reply({ content: 'Ce bouton n’est plus disponible.', ephemeral: true });
+      return;
+    }
+    await interaction
+      .reply({
+        content: String(button.response || 'Merci !').slice(0, 2000),
+        ephemeral: button.ephemeral !== false,
+      })
+      .catch(() => {});
+    recordEvent(ws, 'message.button', {
+      botId: bot.id,
+      messageId: saved.id,
+      buttonIndex: Number(rawIndex),
+      userId: interaction.user?.id || null,
+    });
+    persist();
+    return;
+  }
+
+  if (interaction.isButton()) {
+    const [prefix, flowId, blockId, rawIndex] = interaction.customId.split(':');
+    const flow = (bot.flows || []).find((entry) => entry.id === flowId);
+    if (!flow) {
+      await interaction.reply({ content: 'Ce bouton n’est plus relié à un flux actif.', ephemeral: true });
+      return;
+    }
+
+    if (prefix === 'kfmodal') {
+      const block = (flow.blocks || []).find((entry) => entry.id === blockId);
+      if (!block) {
+        await interaction.reply({ content: 'Ce formulaire n’est plus disponible.', ephemeral: true });
+        return;
+      }
+      const pending = takePending(pendingModals, pendingKey(flowId, blockId, interaction.user.id));
+      rememberPending(
+        pendingModals,
+        pendingKey(flowId, blockId, interaction.user.id),
+        {
+          flowId,
+          blockId,
+          next: pending?.next || block.next,
+          vars: pending?.vars || {},
+          botId: bot.id,
+          userId: interaction.user.id,
+          channelId: interaction.channelId,
+        },
+        900,
+      );
+      const { modal } = buildModal(flow, block);
+      await interaction.showModal(modal);
+      return;
+    }
+
+    if (prefix === 'kfservicepenalty') {
+      const block = (flow.blocks || []).find((entry) => entry.id === blockId);
+      if (!block) {
+        await interaction.reply({ content: 'Ce formulaire de pénalité n’est plus disponible.', ephemeral: true });
+        return;
+      }
+      const pending = takePending(pendingServicePenalties, pendingKey(flowId, blockId, interaction.user.id));
+      rememberPending(
+        pendingServicePenalties,
+        pendingKey(flowId, blockId, interaction.user.id),
+        {
+          flowId,
+          blockId,
+          next: pending?.next || block.next,
+          vars: pending?.vars || {},
+          botId: bot.id,
+          userId: interaction.user.id,
+          channelId: interaction.channelId,
+        },
+        900,
+      );
+      try {
+        await interaction.showModal(buildServicePenaltyModal(flow, block));
+      } catch (error) {
+        await interaction.reply({ content: `Formulaire indisponible : ${error.message}`, ephemeral: true }).catch(() => {});
+      }
+      return;
+    }
+
+    if (prefix === 'kfawait') {
+      const pending = takePendingAwait({
+        botId: bot.id,
+        flowId,
+        blockId,
+        userId: interaction.user.id,
+        channelId: interaction.channelId,
+        kind: 'button',
+      });
+      if (!pending) {
+        await interaction.reply({ content: 'Cette attente a expiré. Relance le flux.', ephemeral: true });
+        return;
+      }
+      if (!pending.next) {
+        await interaction.reply({ content: 'Interaction reçue ✅', ephemeral: true }).catch(() => {});
+        return;
+      }
+      const awaitClicker = member?.displayName || interaction.user?.globalName || interaction.user?.username || '';
+      const result = await executeFlow({
+        bot,
+        ws,
+        flow,
+        guild,
+        member,
+        channel,
+        message: null,
+        interaction,
+        startBlock: pending.next,
+        vars: {
+          ...(pending.vars || {}),
+          interaction: 'await_button',
+          button: 'Continuer',
+          button_label: 'Continuer',
+          button_value: 'Continuer',
+          button_index: '1',
+          clicker: awaitClicker,
+          clicker_id: interaction.user?.id || '',
+          clicker_mention: interaction.user?.id ? `<@${interaction.user.id}>` : '',
+        },
+      });
+      bumpFlow(ws, bot, flow, 'discord:await', interaction.user);
+      if (!result.interactionUsed && !interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: 'Interaction reçue ✅', ephemeral: true }).catch(() => {});
+      }
+      return;
+    }
+
+    if (prefix === 'kfcaptchamodal') {
+      const block = (flow.blocks || []).find((entry) => entry.id === blockId);
+      if (!block) {
+        await interaction.reply({ content: 'Cette vérification n’est plus disponible.', ephemeral: true });
+        return;
+      }
+      await interaction.showModal(buildCaptchaModal(flow, block));
+      return;
+    }
+
+    if (prefix === 'kfcaptcha') {
+      const pending = takePending(pendingCaptchas, pendingKey(flowId, blockId, interaction.user.id));
+      if (!pending) {
+        await interaction.reply({ content: 'Cette vérification a expiré. Relance le flux.', ephemeral: true });
+        return;
+      }
+      if (pending.role && guild && member) {
+        const role = resolveRole(guild, pending.role);
+        if (role) await member.roles.add(role, 'KyllBot Studio — vérification').catch(() => {});
+      }
+      if (!pending.next) {
+        await interaction.reply({ content: 'Vérification réussie ✅', ephemeral: true }).catch(() => {});
+        return;
+      }
+      const result = await executeFlow({
+        bot,
+        ws,
+        flow,
+        guild,
+        member,
+        channel,
+        message: null,
+        interaction,
+        startBlock: pending.next,
+        vars: pending.vars || {},
+      });
+      bumpFlow(ws, bot, flow, 'discord:captcha', interaction.user);
+      if (!result.interactionUsed && !interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: 'Vérification réussie ✅', ephemeral: true }).catch(() => {});
+      }
+      return;
+    }
+
+    if (prefix !== 'kf') return;
+    const block = (flow.blocks || []).find((entry) => entry.id === blockId);
+    const button = block?.buttons?.[Number(rawIndex)];
+    if (!block || !button) {
+      await interaction.reply({ content: 'Ce bouton n’est plus disponible.', ephemeral: true });
+      return;
+    }
+    const targetFlow = button.target
+      ? (bot.flows || []).find(
+          (entry) => entry.id === button.target || String(entry.name || '').toLowerCase() === String(button.target).toLowerCase(),
+        )
+      : null;
+    const nextBlock = button.next || block.next;
+    if (!targetFlow && !nextBlock) {
+      await interaction.reply({ content: 'Ce bouton n’a pas encore d’action configurée.', ephemeral: true });
+      return;
+    }
+    const executedFlow = targetFlow || flow;
+    const clicker = member?.displayName || interaction.user?.globalName || interaction.user?.username || '';
+    const buttonContext = peekPending(pendingButtons, pendingKey(flowId, blockId, interaction.user?.id));
+    const buttonVars = {
+      ...(buttonContext?.vars || {}),
+      button: button.label || '',
+      button_label: button.label || '',
+      button_value: button.value || button.label || '',
+      button_index: String(Number(rawIndex) + 1),
+      interaction: 'button',
+      clicker,
+      clicker_id: interaction.user?.id || '',
+      clicker_mention: interaction.user?.id ? `<@${interaction.user.id}>` : '',
+    };
+    const result = await executeFlow({
+      bot,
+      ws,
+      flow: executedFlow,
+      guild,
+      member,
+      channel,
+      message: null,
+      interaction,
+      startBlock: targetFlow ? undefined : nextBlock,
+      vars: buttonVars,
+    });
+    bumpFlow(ws, bot, executedFlow, targetFlow ? 'discord:button-flow' : 'discord:button', interaction.user);
+    if (!result.interactionUsed && !interaction.replied && !interaction.deferred) {
+      await interaction.reply({ content: 'Action exécutée ✅', ephemeral: true }).catch(() => {});
+    }
+  }
+}
+
+async function sendLog(guild, bot, text) {
+  const channel = resolveChannel(guild, bot.discord?.logChannel || 'logs');
+  if (channel) await channel.send({ content: String(text).slice(0, 2000) }).catch(() => {});
+}
+
+async function handleMessage(botId, message) {
+  if (!message || message.author?.bot) return;
+  const context = getBotContext(botId);
+  if (!context) return;
+  const { ws, bot } = context;
+  const member = message.member || (message.guild ? await message.guild.members.fetch(message.author.id).catch(() => null) : null);
+  const guild = message.guild;
+  const channel = message.channel;
+  const runtime = ensureRuntime(botId);
+
+  const pendingMessageAwait = takePendingAwait({
+    botId: bot.id,
+    userId: message.author.id,
+    channelId: channel.id,
+    kind: 'message',
+  });
+  if (pendingMessageAwait) {
+    const flow = (bot.flows || []).find((entry) => entry.id === pendingMessageAwait.flowId);
+    if (flow) {
+      if (!pendingMessageAwait.next) return;
+      await executeFlow({
+        bot,
+        ws,
+        flow,
+        guild,
+        member,
+        channel,
+        message,
+        interaction: null,
+        startBlock: pendingMessageAwait.next,
+        vars: { ...(pendingMessageAwait.vars || {}), response: message.content, interaction: 'message' },
+      });
+      bumpFlow(ws, bot, flow, 'discord:await', message.author);
+      return;
+    }
+  }
+
+  if (!guild) {
+    await runTriggeredFlows({ bot, ws, type: 'dm', guild: null, member: null, channel, message, interaction: null });
+    return;
+  }
+
+  const prefix = String(bot.prefix || '!');
+  if (message.content.startsWith(prefix)) {
+    const [rawName] = message.content.slice(prefix.length).trim().split(/\s+/);
+    const command = (bot.commands || []).find((entry) => entry.name === String(rawName || '').toLowerCase() && entry.enabled !== false);
+    if (command) {
+      const remaining = cooldownRemaining(bot.id, message.author.id, command.name, command.cooldown);
+      if (remaining > 0) {
+        await message.reply({ content: `Patiente encore ${remaining}s avant de réutiliser ${prefix}${command.name}.` }).catch(() => {});
+        return;
+      }
+      await message
+        .reply(commandPayload(command, { guild, member, interaction: null, client: runtime.client }))
+        .catch((error) => log(runtime, 'error', `Réponse commande : ${error.message}`));
+      bumpCommand(ws, bot, command, 'discord:prefix', message.author);
+      return;
+    }
+  }
+
+  const automod = (bot.automations || []).find((entry) => entry.enabled && entry.type === 'autoMod' && entry.config?.blockLinks);
+  if (automod && /(https?:\/\/|discord\.gg\/)/i.test(message.content)) {
+    await message.delete().catch(() => {});
+    await channel.send({ content: `${message.author}, les liens ne sont pas autorisés ici.` }).catch(() => {});
+    await sendLog(guild, bot, `Lien supprimé pour ${message.author.tag}`);
+    return;
+  }
+
+  const antiSpam = (bot.automations || []).find(
+    (entry) => entry.enabled && (entry.type === 'antiSpam' || (entry.type === 'moderation' && entry.config?.antiSpam)),
+  );
+  if (antiSpam) {
+    const key = `${bot.id}:${message.author.id}`;
+    const now = Date.now();
+    const bucket = (spamBuckets.get(key) || []).filter((time) => now - time < 10000);
+    bucket.push(now);
+    spamBuckets.set(key, bucket);
+    const threshold = Math.max(2, Number(antiSpam.config?.threshold) || 5);
+    if (bucket.length >= threshold) {
+      spamBuckets.delete(key);
+      await message.delete().catch(() => {});
+      if (member?.moderatable) await member.timeout(60000, 'Spam détecté par KyllBot Studio').catch(() => {});
+      await channel.send({ content: `${message.author}, le spam n’est pas autorisé.` }).catch(() => {});
+      await sendLog(guild, bot, `Spam détecté pour ${message.author.tag}`);
+      return;
+    }
+  }
+
+  await runTriggeredFlows({ bot, ws, type: 'keyword', guild, member, channel, message, interaction: null });
+}
+
+async function handleMemberAdd(botId, member) {
+  const context = getBotContext(botId);
+  if (!context) return;
+  const { ws, bot } = context;
+  const guild = member.guild;
+  const welcome = (bot.automations || []).find((entry) => entry.enabled && entry.type === 'welcome');
+  if (welcome) {
+    const channel = resolveChannel(guild, welcome.config?.channel) || guild.systemChannel;
+    if (channel) {
+      const text = renderTemplate(welcome.config?.message || 'Bienvenue {user} sur **{server}** !', {
+        guild,
+        member,
+        client: ensureRuntime(botId).client,
+      });
+      await channel
+        .send({ content: text.slice(0, 2000), allowedMentions: { parse: ['users'] } })
+        .catch((error) => log(ensureRuntime(botId), 'error', `Message d’accueil : ${error.message}`));
+    }
+  }
+  const autorole = (bot.automations || []).find((entry) => entry.enabled && entry.type === 'autorole');
+  if (autorole) {
+    const role = resolveRole(guild, autorole.config?.role);
+    if (role) {
+      await member.roles
+        .add(role, 'KyllBot Studio — autorole')
+        .catch((error) => log(ensureRuntime(botId), 'error', `Autorole : ${error.message}`));
+    }
+  }
+  await runTriggeredFlows({
+    bot,
+    ws,
+    type: member.user?.bot ? 'botJoin' : 'join',
+    guild,
+    member,
+    channel: guild.systemChannel,
+    message: null,
+    interaction: null,
+  });
+}
+
+async function handleMemberRemove(botId, member) {
+  const context = getBotContext(botId);
+  if (!context) return;
+  const { ws, bot } = context;
+  await runTriggeredFlows({
+    bot,
+    ws,
+    type: 'leave',
+    guild: member.guild,
+    member,
+    channel: member.guild.systemChannel,
+    message: null,
+    interaction: null,
+  });
+}
+
+async function handleReaction(botId, reaction, user) {
+  if (!reaction || user?.bot) return;
+  const context = getBotContext(botId);
+  if (!context) return;
+  const { ws, bot } = context;
+  if (reaction.partial) await reaction.fetch().catch(() => null);
+  const message = reaction.message;
+  if (!message?.guild) return;
+  const member = message.guild.members.cache.get(user.id) || (await message.guild.members.fetch(user.id).catch(() => null));
+  const pendingReactionAwait = takePendingAwait({
+    botId: bot.id,
+    userId: user.id,
+    channelId: message.channel.id,
+    messageId: message.id,
+    kind: 'reaction',
+  });
+  if (pendingReactionAwait) {
+    const flow = (bot.flows || []).find((entry) => entry.id === pendingReactionAwait.flowId);
+    if (flow) {
+      if (!pendingReactionAwait.next) return;
+      await executeFlow({
+        bot,
+        ws,
+        flow,
+        guild: message.guild,
+        member,
+        channel: message.channel,
+        message,
+        interaction: null,
+        startBlock: pendingReactionAwait.next,
+        vars: {
+          ...(pendingReactionAwait.vars || {}),
+          reaction: reaction.emoji?.name || reaction.emoji?.toString() || '',
+          interaction: 'reaction',
+        },
+      });
+      bumpFlow(ws, bot, flow, 'discord:await', user);
+      return;
+    }
+  }
+  await runTriggeredFlows({
+    bot,
+    ws,
+    type: 'reaction',
+    guild: message.guild,
+    member,
+    channel: message.channel,
+    message,
+    interaction: null,
+    match: reaction.emoji?.name || reaction.emoji?.toString(),
+  });
+}
+
+function attachHandlers(client, botId) {
+  const runtime = ensureRuntime(botId);
+  const safe = (handler, label) => (...args) =>
+    Promise.resolve(handler(...args)).catch((error) => {
+      runtime.lastError = error.message;
+      log(runtime, 'error', `${label} : ${error.message}`);
+    });
+
+  client.on(Events.ClientReady, async () => {
+    const context = getBotContext(botId);
+    if (!context) {
+      await client.destroy().catch(() => {});
+      return;
+    }
+    runtime.status = 'online';
+    runtime.tag = client.user.tag;
+    runtime.userId = client.user.id;
+    runtime.startedAt = new Date().toISOString();
+    runtime.lastError = null;
+    runtime.guilds = client.guilds.cache.map((guild) => ({ id: guild.id, name: guild.name }));
+    runtime.warning = null;
+    setPresence(client, context.bot);
+    log(runtime, 'info', `Connecté en tant que ${client.user.tag} (${client.guilds.cache.size} serveur(s)).`);
+    try {
+      const metadata = await syncDiscordMetadata(botId);
+      log(
+        runtime,
+        'info',
+        `${metadata.channels} salon(s), ${metadata.categories} catégorie(s) et ${metadata.roles} rôle(s) synchronisés depuis ${metadata.guildName || 'Discord'}.`,
+      );
+    } catch (error) {
+      runtime.warning = `Connexion OK, mais synchronisation des salons/rôles impossible : ${error.message}`;
+      log(runtime, 'warn', runtime.warning);
+    }
+    try {
+      const result = await syncBotCommands(botId);
+      log(runtime, 'info', `${result.count} commande(s) synchronisée(s)${result.guildId ? ` sur le serveur ${result.guildId}` : ' globalement'}.`);
+    } catch (error) {
+      runtime.warning = `Connexion OK, mais synchronisation des commandes impossible : ${error.message}`;
+      log(runtime, 'warn', runtime.warning);
+    }
+  });
+  client.on(Events.ShardDisconnect, (event) => {
+    runtime.status = 'error';
+    runtime.lastError = `Déconnecté de Discord (code ${event?.code || 'inconnu'}).`;
+    log(runtime, 'warn', runtime.lastError);
+  });
+  client.on(Events.ShardReconnecting, () => {
+    runtime.status = 'starting';
+    runtime.warning = 'Reconnexion à Discord…';
+  });
+  client.on(Events.ShardResume, () => {
+    runtime.status = 'online';
+    runtime.warning = null;
+    log(runtime, 'info', 'Connexion Discord rétablie.');
+  });
+  client.on(Events.Error, (error) => {
+    runtime.lastError = error.message;
+    log(runtime, 'error', error.message);
+  });
+  client.on(Events.Warn, (message) => log(runtime, 'warn', message));
+  client.on(Events.InteractionCreate, safe((interaction) => handleInteraction(botId, interaction), 'Interaction'));
+  client.on(Events.MessageCreate, safe((message) => handleMessage(botId, message), 'Message'));
+  client.on(Events.GuildMemberAdd, safe((member) => handleMemberAdd(botId, member), 'Arrivée membre'));
+  client.on(Events.GuildMemberRemove, safe((member) => handleMemberRemove(botId, member), 'Départ membre'));
+  client.on(Events.MessageReactionAdd, safe((reaction, user) => handleReaction(botId, reaction, user), 'Réaction'));
+}
+
+export async function stopBot(botId) {
+  const runtime = runtimes.get(botId);
+  if (!runtime) return;
+  runtime.status = 'stopping';
+  if (runtime.client) {
+    runtime.client.removeAllListeners();
+    await runtime.client.destroy().catch(() => {});
+  }
+  runtime.client = null;
+  runtime.status = 'offline';
+  runtime.tag = null;
+  runtime.userId = null;
+  runtime.guilds = [];
+  runtime.mode = null;
+  runtime.intents = [];
+  runtime.startedAt = null;
+  for (const key of chronos.keys()) if (key.startsWith(`${botId}:`)) chronos.delete(key);
+  log(runtime, 'info', 'Bot déconnecté.');
+}
+
+export async function startBot(botId, { force = false } = {}) {
+  const context = getBotContext(botId);
+  if (!context) return null;
+  const { bot } = context;
+  const runtime = ensureRuntime(botId);
+  if (!bot.tokenEnc) {
+    runtime.status = 'offline';
+    runtime.lastError = 'Aucun token Discord enregistré.';
+    return getBotRuntime(botId);
+  }
+  if (!force && (runtime.status === 'online' || runtime.status === 'starting')) return getBotRuntime(botId);
+  if (runtime.client) await stopBot(botId);
+
+  let token;
+  try {
+    token = decryptSecret(bot.tokenEnc);
+  } catch (error) {
+    runtime.status = 'error';
+    runtime.lastError = `Token illisible : ${error.message}. Réenregistre le token.`;
+    log(runtime, 'error', runtime.lastError);
+    return getBotRuntime(botId);
+  }
+
+  runtime.status = 'starting';
+  runtime.lastError = null;
+  runtime.warning = null;
+  runtime.logs = [];
+  log(runtime, 'info', 'Connexion à Discord…');
+
+  const preferred =
+    bot.discord?.privilegedIntents === false || process.env.DISCORD_PRIVILEGED_INTENTS === '0' ? ['safe'] : ['full', 'safe'];
+  for (const mode of preferred) {
+    const client = new Client({
+      intents: mode === 'full' ? fullIntents() : safeIntents(),
+      partials: [Partials.Channel, Partials.Message, Partials.Reaction, Partials.GuildMember, Partials.User],
+    });
+    runtime.client = client;
+    runtime.mode = mode;
+    runtime.intents = intentNames(mode);
+    attachHandlers(client, botId);
+    try {
+      await client.login(token);
+      runtime.status = runtime.status === 'starting' ? 'online' : runtime.status;
+      if (mode === 'safe' && preferred[0] === 'full') {
+        runtime.warning =
+          'Intents privilégiés non activés sur le portail Discord : les commandes fonctionnent, mais l’accueil et la lecture des messages peuvent être limités.';
+      }
+      return getBotRuntime(botId);
+    } catch (error) {
+      client.removeAllListeners();
+      await client.destroy().catch(() => {});
+      runtime.client = null;
+      if (mode === 'full' && isDisallowedIntents(error)) {
+        log(runtime, 'warn', 'Intents privilégiés refusés par Discord, nouvelle tentative en mode sûr.');
+        continue;
+      }
+      runtime.status = 'error';
+      runtime.lastError = error.message;
+      log(runtime, 'error', `Connexion impossible : ${error.message}`);
+      return getBotRuntime(botId);
+    }
+  }
+  return getBotRuntime(botId);
+}
+
+export async function restartBot(botId) {
+  await stopBot(botId);
+  return startBot(botId, { force: true });
+}
+
+function normalizeCommandName(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9_-]/g, '')
+    .slice(0, 32);
+}
+
+function commandList(bot) {
+  const commands = new Map();
+  for (const command of bot.commands || []) {
+    if (command.enabled === false) continue;
+    const name = normalizeCommandName(command.name);
+    if (!name) continue;
+    commands.set(name, { name, description: String(command.description || 'Commande KyllBot').slice(0, 100) });
+  }
+  for (const flow of bot.flows || []) {
+    if (flow.enabled === false || flow.trigger?.type !== 'slash') continue;
+    const name = normalizeCommandName(flow.trigger?.command);
+    if (!name || commands.has(name)) continue;
+    commands.set(name, { name, description: String(flow.description || flow.name || 'Flux KyllBot').slice(0, 100) });
+  }
+  return [...commands.values()];
+}
+
+export async function syncBotCommands(botId) {
+  const context = getBotContext(botId);
+  if (!context) throw new Error('Bot introuvable.');
+  const { bot } = context;
+  if (!bot.tokenEnc) throw new Error('Aucun token Discord enregistré.');
+  const token = decryptSecret(bot.tokenEnc);
+  const appId = bot.discordAccount?.id || (await discordRequest(token, '/users/@me')).id;
+  const guildId = String(bot.discord?.guildId || '').trim();
+  const commands = commandList(bot);
+  const pathName = guildId ? `/applications/${appId}/guilds/${guildId}/commands` : `/applications/${appId}/commands`;
+  const data = await discordRequest(token, pathName, { method: 'PUT', body: commands });
+  const runtime = ensureRuntime(botId);
+  runtime.lastSyncAt = new Date().toISOString();
+  runtime.commandCount = Array.isArray(data) ? data.length : commands.length;
+  runtime.lastError = null;
+  if (!guildId) {
+    runtime.warning =
+      'Commandes enregistrées globalement : Discord peut mettre jusqu’à 1 h à les afficher. Renseigne l’ID du serveur pour une synchronisation instantanée.';
+  } else if (runtime.warning?.startsWith('Commandes enregistrées globalement')) {
+    runtime.warning = null;
+  }
+  return { ok: true, count: runtime.commandCount, guildId: guildId || null, global: !guildId, commands };
+}
+
+export async function testBotConnection(botId) {
+  const context = getBotContext(botId);
+  if (!context) throw new Error('Bot introuvable.');
+  const { bot } = context;
+  if (!bot.tokenEnc) throw new Error('Aucun token Discord enregistré.');
+  const token = decryptSecret(bot.tokenEnc);
+  const account = await validateDiscordToken(token);
+  bot.discordAccount = account;
+  if (!bot.discord?.guildId && account.guilds.length) {
+    bot.discord = { ...(bot.discord || {}), guildId: account.guilds[0].id, guildName: account.guilds[0].name };
+  }
+  persist();
+  let metadata = null;
+  try {
+    metadata = await syncDiscordMetadata(botId);
+  } catch (error) {
+    ensureRuntime(botId).warning = `Connexion OK, mais synchronisation des salons/rôles impossible : ${error.message}`;
+  }
+  return { ok: true, account, guilds: account.guilds, metadata, runtime: getBotRuntime(botId) };
+}
+
+export async function sendTestMessage(botId, channelRef) {
+  const context = getBotContext(botId);
+  if (!context) throw new Error('Bot introuvable.');
+  const { bot } = context;
+  if (!bot.tokenEnc) throw new Error('Aucun token Discord enregistré.');
+  const guildId = String(bot.discord?.guildId || '').trim();
+  if (!guildId) throw new Error('Renseigne d’abord l’ID du serveur Discord dans les paramètres du bot.');
+  const token = decryptSecret(bot.tokenEnc);
+  const channels = await discordRequest(token, `/guilds/${guildId}/channels`);
+  const wanted = String(channelRef || '').trim().replace(/^#/, '').toLowerCase();
+  const channel = wanted
+    ? channels.find((entry) => entry.id === wanted || entry.name?.toLowerCase() === wanted)
+    : channels.find((entry) => entry.type === ChannelType.GuildText) || channels.find((entry) => entry.type === ChannelType.GuildAnnouncement);
+  if (!channel) throw new Error('Aucun salon textuel accessible sur ce serveur.');
+  const message = await discordRequest(token, `/channels/${channel.id}/messages`, {
+    method: 'POST',
+    body: { content: '✅ **KyllBot Studio** est bien connecté à Discord. Ceci est un message de test réel.' },
+  });
+  return { ok: true, channel: { id: channel.id, name: channel.name }, messageId: message?.id || null };
+}
+
+async function resolveTargetChannel(bot, target, token) {
+  const idRef = String(target.channelId || '').trim();
+  const nameRef = String(target.channelName || '').trim();
+  const ref = /^\d{17,20}$/.test(idRef) ? idRef : nameRef || idRef;
+  if (!ref) throw new Error('Aucun salon configuré pour ce message.');
+  if (/^\d{17,20}$/.test(ref)) return { id: ref, name: target.channelName || ref };
+
+  const guildId = String(bot.discord?.guildId || '').trim();
+  if (!guildId) throw new Error('Renseigne l’ID du serveur Discord dans les paramètres du bot.');
+  const wanted = ref.replace(/^#/, '').toLowerCase();
+  const known = (bot.discord?.channels || []).find(
+    (channel) => channel.id === ref || String(channel.name || '').toLowerCase() === wanted,
+  );
+  if (known && /^\d{17,20}$/.test(known.id)) return { id: known.id, name: known.name };
+
+  const channels = await discordRequest(token, `/guilds/${guildId}/channels`);
+  const channel = channels.find(
+    (entry) => entry.id === ref || String(entry.name || '').toLowerCase() === wanted,
+  );
+  if (!channel) throw new Error(`Salon Discord introuvable : ${ref}`);
+  return { id: channel.id, name: channel.name };
+}
+
+async function sendScheduledMessage(bot, scheduled) {
+  if (!bot.tokenEnc) throw new Error('Aucun token Discord enregistré.');
+  if (!scheduled.content) throw new Error('Le message programmé est vide.');
+  const token = decryptSecret(bot.tokenEnc);
+  const channel = await resolveTargetChannel(bot, scheduled, token);
+  const message = await discordRequest(token, `/channels/${channel.id}/messages`, {
+    method: 'POST',
+    body: { content: scheduled.content, allowed_mentions: { parse: [] } },
+  });
+  return { channel, messageId: message?.id || null };
+}
+
+export async function sendScheduledMessageNow(botId, scheduledId) {
+  const context = getBotContext(botId);
+  if (!context) throw new Error('Bot introuvable.');
+  const scheduled = (context.bot.scheduledMessages || []).find((entry) => entry.id === scheduledId);
+  if (!scheduled) throw new Error('Message programmé introuvable.');
+  const result = await sendScheduledMessage(context.bot, scheduled);
+  const due = scheduledMessageDue(scheduled, new Date());
+  scheduled.lastSentAt = new Date().toISOString();
+  if (due) scheduled.lastSentKey = due.key;
+  scheduled.lastError = null;
+  persist();
+  recordEvent(context.ws, 'scheduled.run', {
+    botId,
+    scheduledId: scheduled.id,
+    channelId: result.channel.id,
+  });
+  log(ensureRuntime(botId), 'info', `Message programmé « ${scheduled.label} » envoyé manuellement dans #${result.channel.name}.`);
+  return { ok: true, channel: result.channel, messageId: result.messageId };
+}
+
+function savedMessagePayload(saved) {
+  const payload = { allowed_mentions: { parse: [] } };
+  if (saved.content) payload.content = String(saved.content).slice(0, 2000);
+  if (savedMessageHasEmbed(saved)) payload.embeds = [toEmbed(saved.embed).toJSON()];
+  const buttons = (saved.buttons || []).slice(0, 5);
+  if (buttons.length) {
+    const row = new ActionRowBuilder();
+    buttons.forEach((entry, index) => {
+      const button = new ButtonBuilder().setLabel(String(entry.label || 'Bouton').slice(0, 80));
+      if (entry.emoji) button.setEmoji(entry.emoji);
+      if (entry.url) {
+        button.setStyle(ButtonStyle.Link).setURL(entry.url);
+      } else {
+        const style =
+          entry.style === 'secondary'
+            ? ButtonStyle.Secondary
+            : entry.style === 'success'
+              ? ButtonStyle.Success
+              : entry.style === 'danger'
+                ? ButtonStyle.Danger
+                : ButtonStyle.Primary;
+        button.setStyle(style).setCustomId(`km:${saved.id}:${index}`.slice(0, 100));
+      }
+      row.addComponents(button);
+    });
+    payload.components = [row.toJSON()];
+  }
+  if (!payload.content && !payload.embeds && !payload.components) {
+    throw new Error('Ce message sauvegardé est vide.');
+  }
+  return payload;
+}
+
+async function sendSavedMessage(bot, saved) {
+  if (!bot.tokenEnc) throw new Error('Aucun token Discord enregistré.');
+  const token = decryptSecret(bot.tokenEnc);
+  const channel = await resolveTargetChannel(bot, saved, token);
+  const message = await discordRequest(token, `/channels/${channel.id}/messages`, {
+    method: 'POST',
+    body: savedMessagePayload(saved),
+  });
+  return { channel, messageId: message?.id || null };
+}
+
+export async function sendSavedMessageNow(botId, messageId) {
+  const context = getBotContext(botId);
+  if (!context) throw new Error('Bot introuvable.');
+  const saved = (context.bot.savedMessages || []).find((entry) => entry.id === messageId);
+  if (!saved) throw new Error('Message sauvegardé introuvable.');
+  const result = await sendSavedMessage(context.bot, saved);
+  saved.lastSentAt = new Date().toISOString();
+  persist();
+  recordEvent(context.ws, 'message.sent', {
+    botId,
+    messageId: saved.id,
+    channelId: result.channel.id,
+  });
+  log(ensureRuntime(botId), 'info', `Message « ${saved.name || 'sans nom'} » envoyé dans #${result.channel.name}.`);
+  return { ok: true, channel: result.channel, messageId: result.messageId };
+}
+
+let scheduledTickRunning = false;
+
+async function processScheduledMessages() {
+  if (scheduledTickRunning) return;
+  scheduledTickRunning = true;
+  try {
+    for (const [botId, runtime] of runtimes) {
+      if (runtime.status !== 'online' || !runtime.client) continue;
+      const context = getBotContext(botId);
+      if (!context) continue;
+      const { bot, ws } = context;
+      for (const scheduled of bot.scheduledMessages || []) {
+        const due = scheduledMessageDue(scheduled, new Date());
+        if (!due) continue;
+        const attemptAt = new Date().toISOString();
+        if (
+          scheduled.lastAttemptKey === due.key &&
+          scheduled.lastAttemptAt &&
+          Date.now() - new Date(scheduled.lastAttemptAt).getTime() < 120000
+        ) {
+          continue;
+        }
+        scheduled.lastAttemptKey = due.key;
+        scheduled.lastAttemptAt = attemptAt;
+        try {
+          const result = await sendScheduledMessage(bot, scheduled);
+          scheduled.lastSentKey = due.key;
+          scheduled.lastSentAt = attemptAt;
+          scheduled.lastError = null;
+          persist();
+          recordEvent(ws, 'scheduled.sent', {
+            botId,
+            scheduledId: scheduled.id,
+            channelId: result.channel.id,
+          });
+          log(runtime, 'info', `Message programmé « ${scheduled.label} » envoyé dans #${result.channel.name}.`);
+        } catch (error) {
+          scheduled.lastError = String(error.message || error).slice(0, 240);
+          persist();
+          log(runtime, 'error', `Message programmé « ${scheduled.label} » : ${scheduled.lastError}`);
+        }
+      }
+    }
+  } finally {
+    scheduledTickRunning = false;
+  }
+}
+
+setInterval(() => {
+  processScheduledMessages().catch((error) => console.error('[scheduler]', error.message));
+}, 20000).unref();
+
+export function autostartBots() {
+  if (process.env.DISCORD_AUTOSTART === '0') return;
+  const bots = [];
+  for (const ws of Object.values(db.workspaces || {})) {
+    for (const bot of ws.bots || []) {
+      if (bot.tokenEnc && bot.status !== 'offline') bots.push(bot);
+    }
+  }
+  for (const bot of bots) startBot(bot.id).catch((error) => console.error(`[Discord ${bot.id.slice(0, 8)}]`, error.message));
+  if (bots.length) console.log(`  Discord : ${bots.length} bot(s) en cours de connexion.`);
+}
+
+export async function shutdownBots() {
+  await Promise.allSettled([...runtimes.keys()].map((botId) => stopBot(botId)));
+}
+
+export { getBotContext };
+
+export { buildModal, buildServicePenaltyModal, parseModalFields, executeFlow };

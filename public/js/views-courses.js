@@ -10,6 +10,25 @@ function courseAverage(courseId) {
   return Math.round(learners.reduce((sum, learner) => sum + learner.progress, 0) / learners.length);
 }
 
+function courseHelpPanel() {
+  return `<div class="panel info-panel">
+    <div class="info-head">
+      <span class="info-ic">${icon('book')}</span>
+      <div>
+        <h3>À quoi sert le côté Formation ?</h3>
+        <p>Un parcours mesurable pour votre communauté : modules, leçons, quiz, progression réelle et certificats.</p>
+      </div>
+      <button class="btn btn-ghost btn-sm" data-action="course-help">En savoir plus</button>
+    </div>
+    <div class="info-grid">
+      <div><b>Onboarder</b><p>Accueillir les nouveaux membres avec les règles, les rôles et un quiz de validation.</p></div>
+      <div><b>Former une équipe</b><p>Documenter les procédures internes, la modération et les bonnes pratiques.</p></div>
+      <div><b>Certifier</b><p>Attribuer un certificat automatique aux apprenants qui atteignent 100 %.</p></div>
+      <div><b>Suivre et relancer</b><p>Voir la progression réelle par apprenant et envoyer des rappels via le bot.</p></div>
+    </div>
+  </div>`;
+}
+
 function viewCourses() {
   const query = state.search.toLowerCase();
   const courses = state.ws.courses.filter(
@@ -60,6 +79,7 @@ function viewCourses() {
         <button class="btn btn-primary" data-action="new-course">${icon('plus')} Nouvelle formation</button>
       </div>
     </div>
+    ${courseHelpPanel()}
     ${
       courses.length
         ? `<div class="course-grid">${cards}</div>`
@@ -213,7 +233,7 @@ function viewLearners() {
         <td>
           <div class="cell-user">
             <span class="avatar" style="width:30px;height:30px;border-radius:9px;font-size:10.5px">${esc(initials(learner.name))}</span>
-            <div><b>${esc(learner.name)}</b><span>${esc(learner.email)}</span></div>
+            <div><b>${esc(learner.name)}</b><span style="display:flex;align-items:center;gap:6px">${esc(learner.email)}${learner.hasAccount ? '<span class="pill cyan">Compte lié</span>' : '<span class="pill gray">Pas encore de compte</span>'}</span></div>
           </div>
         </td>
         <td>${esc(course?.title || '—')}</td>
@@ -227,6 +247,7 @@ function viewLearners() {
         <td style="color:var(--muted-2);font-size:11.5px">${esc(timeAgo(learner.lastActive))}</td>
         <td>
           <div style="display:flex;gap:4px;justify-content:flex-end">
+            ${learner.hasAccount ? '' : `<button class="mini-btn" data-action="check-learner" data-id="${esc(learner.id)}" title="Vérifier le compte">${icon('check')}</button>`}
             <button class="mini-btn" data-action="edit-learner" data-id="${esc(learner.id)}" title="Modifier">${icon('edit')}</button>
             <button class="mini-btn danger" data-action="delete-learner" data-id="${esc(learner.id)}" title="Retirer">${icon('trash')}</button>
           </div>
@@ -263,6 +284,34 @@ function viewLearners() {
 /* ------------------------------------------------------------------ */
 /* modales & actions : formations                                      */
 /* ------------------------------------------------------------------ */
+
+onAction('course-help', () => {
+  openModal({
+    title: 'Le côté Formation, concrètement',
+    subtitle: 'Un parcours structuré, mesuré et automatisé.',
+    submitLabel: 'Fermer',
+    body: `
+      <div class="help-block">
+        <h4>1. Structurer</h4>
+        <p>Créez des modules et des leçons. Chaque leçon peut contenir du texte, une vidéo ou un exercice.</p>
+      </div>
+      <div class="help-block">
+        <h4>2. Vérifier</h4>
+        <p>Ajoutez un quiz. Le score est enregistré par apprenant et la progression est calculée à partir des leçons terminées.</p>
+      </div>
+      <div class="help-block">
+        <h4>3. Certifier</h4>
+        <p>À 100 %, le studio génère un certificat vérifiable. Pratique pour les formations internes ou les parcours clients.</p>
+      </div>
+      <div class="help-block">
+        <h4>4. Automatiser</h4>
+        <p>Le bot peut accueillir les apprenants, envoyer les rappels et attribuer un rôle Discord à la fin du parcours.</p>
+      </div>
+      <p class="hint">Les statistiques affichées sont calculées à partir des vraies inscriptions et des vrais scores. Aucune donnée de démonstration n’est ajoutée.</p>
+    `,
+    onSubmit: () => {},
+  });
+});
 
 onAction('new-course', () => {
   openModal({
@@ -529,18 +578,22 @@ onAction('new-learner', () => {
     submitLabel: 'Inscrire',
     body: `
       <div class="form-row">
-        <div class="field"><label for="nlName">Nom complet</label><input class="input" id="nlName" name="name" placeholder="Emma Petit" required></div>
-        <div class="field"><label for="nlEmail">Email</label><input class="input" id="nlEmail" name="email" type="email" placeholder="emma@exemple.com" required></div>
+        <div class="field"><label for="nlName">Nom complet</label><input class="input" id="nlName" name="name" placeholder="Nom de l’apprenant" required></div>
+        <div class="field"><label for="nlEmail">Email</label><input class="input" id="nlEmail" name="email" type="email" placeholder="apprenant@exemple.com" required></div>
       </div>
       <div class="field"><label for="nlCourse">Formation</label><select class="select" id="nlCourse" name="courseId">${options}</select></div>
+      <p class="hint">Si cet email correspond à un compte KyllBot, l’apprenant sera lié automatiquement et signalé « Compte lié ».</p>
     `,
     onSubmit: async (formData) => {
-      await api('/api/learners', {
+      const { learner } = await api('/api/learners', {
         method: 'POST',
         body: JSON.stringify({ name: formData.get('name'), email: formData.get('email'), courseId: formData.get('courseId') }),
       });
       await refresh();
-      toast('Apprenant inscrit.');
+      toast(
+        learner.hasAccount ? 'Compte trouvé : apprenant lié.' : 'Aucun compte trouvé : apprenant ajouté en attente.',
+        learner.hasAccount ? 'success' : 'info',
+      );
     },
   });
 });
@@ -577,6 +630,17 @@ onAction('edit-learner', (el) => {
       toast('Apprenant mis à jour.');
     },
   });
+});
+
+onAction('check-learner', async (el) => {
+  const learner = state.ws.learners.find((entry) => entry.id === el.dataset.id);
+  if (!learner) return;
+  await refresh();
+  const updated = state.ws.learners.find((entry) => entry.id === el.dataset.id);
+  toast(
+    updated?.hasAccount ? `Compte trouvé pour ${learner.email}.` : `Aucun compte trouvé pour ${learner.email}.`,
+    updated?.hasAccount ? 'success' : 'info',
+  );
 });
 
 onAction('delete-learner', (el) => {
