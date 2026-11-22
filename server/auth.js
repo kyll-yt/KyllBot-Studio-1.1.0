@@ -201,11 +201,13 @@ export function findOrCreateUser(email, { name, avatar, googleId, provider } = {
       lastLoginAt: new Date().toISOString(),
     };
     db.users.push(user);
-    db.workspaces[user.id] = seedWorkspace(user);
+    db.workspaces[user.id] = seedWorkspace(user, { includeBots: user.provider === 'demo' });
   } else {
     user.lastLoginAt = new Date().toISOString();
     if (googleId && !user.googleId) user.googleId = googleId;
-    if (!db.workspaces[user.id]) db.workspaces[user.id] = seedWorkspace(user);
+    if (!db.workspaces[user.id]) {
+      db.workspaces[user.id] = seedWorkspace(user, { includeBots: user.provider === 'demo' });
+    }
   }
   persist();
   return user;

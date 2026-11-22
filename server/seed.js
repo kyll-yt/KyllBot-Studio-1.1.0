@@ -27,12 +27,12 @@ function automation(type, label, enabled, config = {}) {
   return { id: newId(), type, label, enabled, config };
 }
 
-export function seedWorkspace(user) {
+export function seedWorkspace(user, { includeBots = true } = {}) {
   const c1 = newId();
   const c2 = newId();
   const c3 = newId();
 
-  const bots = [
+  const bots = includeBots ? [
     {
       id: newId(),
       name: 'KyllBot Communauté',
@@ -116,7 +116,7 @@ export function seedWorkspace(user) {
       scheduledMessages: [],
       savedMessages: [],
     },
-  ];
+  ] : [];
 
   const courses = [
     {

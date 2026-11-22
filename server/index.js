@@ -248,7 +248,7 @@ function migrateWorkspace(ws) {
 function getWorkspace(userId) {
   if (!db.workspaces[userId]) {
     const user = findUserById(userId);
-    db.workspaces[userId] = seedWorkspace(user);
+    db.workspaces[userId] = seedWorkspace(user, { includeBots: user?.provider === 'demo' });
     persist();
   }
   if (migrateWorkspace(db.workspaces[userId])) persist();

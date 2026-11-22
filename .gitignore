@@ -4,3 +4,5 @@ server.log
 .env
 .DS_Store
 public/previews/
+
+public/kyllbot-studio-deploy.zip
