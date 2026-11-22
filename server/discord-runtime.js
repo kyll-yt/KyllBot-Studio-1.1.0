@@ -10,6 +10,7 @@ import {
   Events,
   GatewayIntentBits,
   LabelBuilder,
+  MessageFlags,
   ModalBuilder,
   Partials,
   PermissionsBitField,
@@ -376,9 +377,18 @@ function resolveRole(guild, ref) {
   return guild.roles.cache.find((role) => role.name?.toLowerCase() === lower && !role.managed) || null;
 }
 
+async function resolveMember(guild, ref) {
+  if (!guild) return null;
+  const raw = String(ref || '').trim();
+  const id = raw.match(/\d{17,20}/)?.[0];
+  if (!id) return null;
+  return guild.members.cache.get(id) || (await guild.members.fetch(id).catch(() => null));
+}
+
 function toEmbed(input = {}) {
   const embed = new EmbedBuilder();
   if (input.title) embed.setTitle(String(input.title).slice(0, 256));
+  if (input.url) embed.setURL(String(input.url).slice(0, 2048));
   if (input.description) embed.setDescription(String(input.description).slice(0, 4096));
   if (/^#[0-9a-f]{6}$/i.test(String(input.color || ''))) embed.setColor(Number.parseInt(input.color.slice(1), 16));
   if (input.footer) embed.setFooter({ text: String(input.footer).slice(0, 2048) });
@@ -527,6 +537,14 @@ function buildModal(flow, block) {
         .setRequired(field.required)
         .addOptions(field.options.slice(0, 25).map((option) => ({ label: option.slice(0, 100), value: option.slice(0, 100) })));
       label.setCheckboxGroupComponent(group);
+    } else if (field.type === 'info') {
+      const input = new TextInputBuilder()
+        .setCustomId(field.customId)
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(false);
+      if (field.value) input.setValue(field.value.slice(0, 4000));
+      if (field.placeholder) input.setPlaceholder(field.placeholder.slice(0, 100));
+      label.setTextInputComponent(input);
     } else {
       const input = new TextInputBuilder()
         .setCustomId(field.customId)
@@ -744,6 +762,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
               allowedMentions: { parse: output.ping === false ? [] : ['users', 'roles'] },
             };
             if (output.tts) payload.tts = true;
+            if (output.silent) payload.flags = MessageFlags.SuppressNotifications;
             if (output.reply && message?.id) payload.reply = { messageReference: message.id, failIfNotExists: false };
             lastMessage = await target.send(payload);
             lastChannel = target;
@@ -754,14 +773,33 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
         case 'embed': {
           const target = resolveChannel(guild, output.channel) || channel;
           if (!target) break;
-          lastMessage = await target.send({ embeds: [toEmbed(output.embed)] });
-          lastChannel = target;
+          const payload = { embeds: [toEmbed(output.embed)] };
+          if (output.silent) payload.flags = MessageFlags.SuppressNotifications;
+          if (output.ephemeral && interaction) {
+            payload.ephemeral = true;
+            if (interaction.deferred && !interactionUsed) {
+              await interaction.editReply(payload);
+              interactionUsed = true;
+            } else if (interaction.replied || interactionUsed) {
+              await interaction.followUp(payload);
+            } else {
+              await interaction.reply(payload);
+              interactionUsed = true;
+            }
+          } else {
+            lastMessage = await target.send(payload);
+            lastChannel = target;
+          }
           sent = true;
           break;
         }
         case 'dm': {
-          if (member) {
-            await member.send({ content: String(output.text || '').slice(0, 2000) });
+          const dmTarget = output.target ? (await resolveMember(guild, output.target)) || member : member;
+          if (dmTarget) {
+            const payload = output.embed
+              ? { embeds: [toEmbed(output.embed)] }
+              : { content: String(output.text || '').slice(0, 2000) };
+            await dmTarget.send(payload);
             sent = true;
           }
           break;
@@ -1710,16 +1748,31 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
           break;
         }
         case 'invite': {
-          const target = resolveChannel(guild, output.channel) || channel;
-          if (target?.createInvite) {
+          let url = '';
+          if (output.action === 'view') {
+            const raw = String(output.invite || '').trim();
+            if (!raw) break;
+            url = /^https?:\/\//i.test(raw) ? raw : `https://discord.gg/${raw.replace(/^\/+/, '')}`;
+          } else {
+            const target = resolveChannel(guild, output.channel) || channel;
+            if (!target?.createInvite) break;
             const invite = await target.createInvite({
               maxUses: Number(output.maxUses) || 0,
               maxAge: (Number(output.maxAge) || 0) * 3600,
+              temporary: Boolean(output.temporary),
               reason: 'KyllBot Studio',
             });
-            await (channel || target).send({ content: `Invitation : ${invite.url}` });
-            sent = true;
+            url = invite.url;
           }
+          if (output.variable) result.variables[output.variable] = url;
+          const message = String(output.message || 'Invitation : {{invite}}').replace(/\{\{invite\}\}/g, url);
+          if (output.delivery === 'dm') {
+            if (member) await member.send({ content: message.slice(0, 2000) }).catch(() => {});
+          } else if (output.delivery !== 'none') {
+            const sendTarget = resolveChannel(guild, output.channel) || channel;
+            if (sendTarget?.send) await sendTarget.send({ content: message.slice(0, 2000) });
+          }
+          sent = true;
           break;
         }
         case 'channel':

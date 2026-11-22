@@ -345,6 +345,18 @@ async function connectBot(bot) {
   return runtime;
 }
 
+const AUTOMATION_TYPE_LABELS = {
+  welcome: "Message d'accueil",
+  autorole: 'Rôle automatique',
+  levels: 'Niveaux et XP',
+  ticketPanel: 'Panneau de tickets',
+  moderation: 'Modération automatique',
+  antiSpam: 'Anti-spam',
+  autoMod: 'Auto-modération',
+  logs: 'Journaux de modération',
+  reminders: 'Rappels de formation',
+};
+
 const AUTOMATION_CONFIG_KEYS = new Set([
   'channel',
   'category',
@@ -1016,6 +1028,41 @@ app.delete(
     persist();
     if (bot.tokenEnc) await syncBotCommands(bot.id).catch(() => {});
     res.json({ ok: true, runtime: getBotRuntime(bot.id) });
+  }),
+);
+
+app.post(
+  '/api/bots/:id/automations',
+  requireAuth,
+  wrap(async (req, res) => {
+    const ws = getWorkspace(req.user.id);
+    const bot = findOr404(ws.bots, req.params.id, 'Bot');
+    const type = str(req.body?.type, 40);
+    if (!Object.hasOwn(AUTOMATION_TYPE_LABELS, type)) throw bad('Type d’automatisation inconnu.');
+    const automation = {
+      id: newId(),
+      type,
+      label: str(req.body?.label, 80) || AUTOMATION_TYPE_LABELS[type],
+      enabled: false,
+      config: sanitizeAutomationConfig(req.body?.config, {}),
+    };
+    bot.automations.push(automation);
+    pushActivity(ws, 'bot', `Automatisation « ${automation.label} » ajoutée à ${bot.name}`);
+    persist();
+    res.status(201).json({ automation });
+  }),
+);
+
+app.delete(
+  '/api/bots/:id/automations/:automationId',
+  requireAuth,
+  wrap(async (req, res) => {
+    const ws = getWorkspace(req.user.id);
+    const bot = findOr404(ws.bots, req.params.id, 'Bot');
+    findOr404(bot.automations, req.params.automationId, 'Automatisation');
+    bot.automations = bot.automations.filter((entry) => entry.id !== req.params.automationId);
+    persist();
+    res.json({ ok: true });
   }),
 );
 

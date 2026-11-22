@@ -1347,8 +1347,8 @@ input[type='color'].input { width: 56px; max-width: 56px; height: 42px; padding:
 .bp-item .blk-ic { width: 24px; height: 24px; border-radius: 7px; }
 .bp-item .blk-ic svg { width: 13px; height: 13px; }
 
-.template-pick { display: flex; flex-direction: column; gap: 7px; }
-.tp-item { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+.template-pick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; max-height: 300px; overflow-y: auto; padding-right: 4px; }
+.tp-item { display: flex; gap: 9px; align-items: flex-start; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
 .tp-item:hover { border-color: rgba(124, 92, 255, 0.4); }
 .tp-item input { margin-top: 3px; accent-color: #7c5cff; }
 .tp-item b { display: block; font-size: 12.5px; }
@@ -1367,6 +1367,7 @@ input[type='color'].input { width: 56px; max-width: 56px; height: 42px; padding:
   .flow-test { position: static; }
 }
 @media (max-width: 900px) {
+  .template-pick { grid-template-columns: minmax(0, 1fr); max-height: 260px; }
   .flow-layout { grid-template-columns: minmax(0, 1fr); }
   .flow-side { flex-direction: column; }
   .branches { grid-template-columns: 1fr; }
@@ -1650,6 +1651,16 @@ input[type='color'].input { width: 56px; max-width: 56px; height: 42px; padding:
 .reward-kicker { font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted-2); }
 .reward-panel h3 { font-size: 20px; margin: 2px 0; }
 .reward-panel p { font-size: 11.5px; color: var(--muted); }
+.reward-days { display: flex; gap: 4px; margin-left: 8px; }
+.reward-day {
+  display: grid; gap: 1px; place-items: center; min-width: 38px; padding: 5px 4px;
+  border: 1px solid var(--line); border-radius: 8px; background: rgba(255, 255, 255, 0.02);
+}
+.reward-day small { font-size: 8.5px; color: var(--muted-2); letter-spacing: 0.04em; }
+.reward-day b { font-size: 11px; color: var(--muted); }
+.reward-day.done { border-color: rgba(124, 92, 255, 0.32); background: rgba(124, 92, 255, 0.08); }
+.reward-day.today { border-color: rgba(34, 211, 238, 0.55); background: rgba(34, 211, 238, 0.1); }
+.reward-day.today b { color: var(--cyan); }
 
 .auto-config { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; align-items: center; }
 .auto-detail { font-size: 10.5px; color: var(--muted-2); }
@@ -1741,6 +1752,8 @@ input[type='color'].input { width: 56px; max-width: 56px; height: 42px; padding:
 @media (max-width: 720px) {
   .reward-panel { flex-direction: column; align-items: flex-start; }
   .reward-panel .btn { width: 100%; justify-content: center; }
+  .reward-main { flex-wrap: wrap; }
+  .reward-days { width: 100%; margin-left: 0; overflow-x: auto; padding-bottom: 2px; }
   .info-head { flex-wrap: wrap; }
   .info-head .btn { width: 100%; justify-content: center; }
 }

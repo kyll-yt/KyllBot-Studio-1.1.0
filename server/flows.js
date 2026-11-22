@@ -43,6 +43,7 @@ export const BLOCKS = {
   typing: { label: 'Indicateur de saisie', group: 'technique' },
   webhook: { label: 'Requête HTTP', group: 'technique' },
   log: { label: 'Journaliser', group: 'technique' },
+  note: { label: 'Note', group: 'logique' },
   reply: { label: 'Répondre', group: 'message' },
   edit: { label: 'Modifier un message', group: 'message' },
   thread: { label: 'Créer un fil', group: 'message' },
@@ -62,7 +63,7 @@ export const BLOCKS = {
   ban: { label: 'Bannir', group: 'moderation' },
   nickname: { label: 'Changer le pseudo', group: 'moderation' },
   move: { label: 'Déplacer en vocal', group: 'gestion' },
-  invite: { label: 'Créer une invitation', group: 'gestion' },
+  invite: { label: 'Invitation', group: 'gestion' },
   ticket: { label: 'Gérer un ticket', group: 'gestion' },
   level: { label: 'Ajouter de l’XP', group: 'gestion' },
   randomNumber: { label: 'Nombre aléatoire', group: 'logique' },
@@ -148,7 +149,7 @@ const num = (value, min, max, fallback) => {
   return Math.min(max, Math.max(min, parsed));
 };
 
-const MODAL_FIELD_TYPES = new Set(['short', 'paragraph', 'select', 'checkbox', 'multi', 'role', 'user']);
+const MODAL_FIELD_TYPES = new Set(['short', 'paragraph', 'select', 'checkbox', 'multi', 'role', 'user', 'info']);
 
 function modalFieldTypeFromStyle(style) {
   const value = String(style || '').toLowerCase();
@@ -158,6 +159,7 @@ function modalFieldTypeFromStyle(style) {
   if (/user|membre|personne/.test(value)) return 'user';
   if (/select|liste|dropdown/.test(value)) return 'select';
   if (/check|case/.test(value)) return 'checkbox';
+  if (/info|information/.test(value)) return 'info';
   return 'short';
 }
 
@@ -169,6 +171,7 @@ function parseLegacyModalField(line, index) {
     required: !/optionnel|optional|non|false/i.test(rawRequired || ''),
     placeholder: rawPlaceholder || '',
     options: '',
+    value: '',
   };
 }
 
@@ -197,9 +200,10 @@ export function normalizeModalFields(raw) {
       id: str(field.id, 60) || `field_${index + 1}`,
       label: str(field.label, 45) || `Champ ${index + 1}`,
       type,
-      required: field.required !== false,
+      required: type === 'info' ? false : field.required !== false,
       placeholder: str(field.placeholder, 100),
       options: modalFieldOptions(field.options, type),
+      value: str(field.value, 1000),
     };
   });
 }
@@ -268,6 +272,7 @@ function normalizeBlock(block) {
         ephemeral: Boolean(block?.ephemeral),
         reply: Boolean(block?.reply),
         tts: Boolean(block?.tts),
+        silent: Boolean(block?.silent),
         suppressEmbeds: Boolean(block?.suppressEmbeds),
       };
     case 'embed':
@@ -275,7 +280,10 @@ function normalizeBlock(block) {
         ...base,
         channel: str(block?.channel, 60),
         title: str(block?.title, 120),
+        url: str(block?.url, 500),
         description: str(block?.description, 1800),
+        ephemeral: Boolean(block?.ephemeral),
+        silent: Boolean(block?.silent),
         color: /^#[0-9a-f]{6}$/i.test(String(block?.color || '')) ? block.color : '#7c5cff',
         footer: str(block?.footer, 80),
         author: str(block?.author, 100),
@@ -287,7 +295,15 @@ function normalizeBlock(block) {
         fields: Array.isArray(block?.fields) ? block.fields.slice(0, 5).map(normalizeEmbedField) : [],
       };
     case 'dm':
-      return { ...base, text: str(block?.text, 1200) };
+      return {
+        ...base,
+        text: str(block?.text, 1200),
+        target: str(block?.target, 80),
+        embed: Boolean(block?.embed),
+        title: str(block?.title, 120),
+        description: str(block?.description, 1800),
+        color: /^#[0-9a-f]{6}$/i.test(String(block?.color || '')) ? block.color : '#7c5cff',
+      };
     case 'button': {
       const source = Array.isArray(block?.buttons) && block.buttons.length
         ? block.buttons
@@ -308,8 +324,10 @@ function normalizeBlock(block) {
         ...base,
         channel: str(block?.channel, 60),
         ephemeral: Boolean(block?.ephemeral),
+        silent: Boolean(block?.silent),
         embed: Boolean(block?.embed),
         title: str(block?.title, 120),
+        url: str(block?.url, 500),
         description: str(block?.description, 1800),
         color: /^#[0-9a-f]{6}$/i.test(String(block?.color || '')) ? block.color : '#7c5cff',
         footer: str(block?.footer, 80),
@@ -453,6 +471,8 @@ function normalizeBlock(block) {
       };
     case 'log':
       return { ...base, text: str(block?.text, 300) };
+    case 'note':
+      return { ...base, title: str(block?.title, 80) || 'Note', text: str(block?.text, 4000) };
     case 'reply':
       return {
         ...base,
@@ -594,9 +614,15 @@ function normalizeBlock(block) {
     case 'invite':
       return {
         ...base,
+        action: ['create', 'view'].includes(block?.action) ? block.action : 'create',
         channel: str(block?.channel, 60),
+        invite: str(block?.invite, 200),
         maxUses: num(block?.maxUses, 0, 100, 0),
         maxAge: num(block?.maxAge, 0, 720, 24),
+        temporary: Boolean(block?.temporary),
+        delivery: ['channel', 'dm', 'none'].includes(block?.delivery) ? block.delivery : 'channel',
+        message: str(block?.message, 500) || 'Invitation : {{invite}}',
+        variable: str(block?.variable, 40).replace(/[^\w.-]/g, '') || 'invite',
       };
     case 'ticket':
       return {
@@ -1194,6 +1220,7 @@ export function runFlow(flow, input = {}) {
           ephemeral: block.ephemeral,
           reply: block.reply,
           tts: block.tts,
+          silent: block.silent,
           suppressEmbeds: block.suppressEmbeds,
         });
         entry.detail = `${block.channel || ctx.channel} · ${text.slice(0, 90)}`;
@@ -1202,6 +1229,7 @@ export function runFlow(flow, input = {}) {
       case 'embed': {
         const embed = {
           title: interpolate(block.title, ctx, vars),
+          url: interpolate(block.url, ctx, vars),
           description: interpolate(block.description, ctx, vars),
           color: block.color,
           footer: interpolate(block.footer, ctx, vars),
@@ -1217,14 +1245,22 @@ export function runFlow(flow, input = {}) {
             value: interpolate(field.value, ctx, vars),
           })),
         };
-        outputs.push({ kind: 'embed', channel: block.channel || ctx.channel, embed });
+        outputs.push({ kind: 'embed', channel: block.channel || ctx.channel, embed, ephemeral: block.ephemeral, silent: block.silent });
         entry.detail = embed.title || embed.description.slice(0, 80);
         break;
       }
       case 'dm': {
         const text = interpolate(block.text, ctx, vars);
-        outputs.push({ kind: 'dm', to: ctx.user.name, text });
-        entry.detail = `à ${ctx.user.name} · ${text.slice(0, 80)}`;
+        const target = interpolate(block.target, ctx, vars);
+        const embed = block.embed
+          ? {
+              title: interpolate(block.title, ctx, vars),
+              description: interpolate(block.description || block.text, ctx, vars),
+              color: block.color,
+            }
+          : null;
+        outputs.push({ kind: 'dm', to: target || ctx.user.name, text, embed, target });
+        entry.detail = `message privé à ${target || ctx.user.name} · ${text.slice(0, 80)}`;
         break;
       }
       case 'button': {
@@ -1255,6 +1291,7 @@ export function runFlow(flow, input = {}) {
             channel: block.channel || ctx.channel,
             embed: {
               title: interpolate(block.title, ctx, vars),
+              url: interpolate(block.url, ctx, vars),
               description: interpolate(block.description || variant.text, ctx, vars),
               color: block.color,
               footer: interpolate(block.footer, ctx, vars),
@@ -1270,6 +1307,8 @@ export function runFlow(flow, input = {}) {
                 value: interpolate(field.value, ctx, vars),
               })),
             },
+            ephemeral: block.ephemeral,
+            silent: block.silent,
             variant: variant.id,
           });
         } else {
@@ -1278,6 +1317,7 @@ export function runFlow(flow, input = {}) {
             channel: block.channel || ctx.channel,
             text,
             ephemeral: block.ephemeral,
+            silent: block.silent,
             variant: variant.id,
           });
         }
@@ -1511,6 +1551,10 @@ export function runFlow(flow, input = {}) {
         entry.detail = text;
         break;
       }
+      case 'note': {
+        entry.detail = block.text ? `${block.title} · ${block.text.slice(0, 80)}` : block.title;
+        break;
+      }
       case 'reply': {
         const text = interpolate(block.text, ctx, vars);
         outputs.push({
@@ -1727,8 +1771,22 @@ export function runFlow(flow, input = {}) {
         break;
       }
       case 'invite': {
-        outputs.push({ kind: 'invite', channel: block.channel, maxUses: block.maxUses, maxAge: block.maxAge });
-        entry.detail = `invitation ${block.channel} · ${block.maxAge} h`;
+        const action = block.action === 'view' ? 'view' : 'create';
+        outputs.push({
+          kind: 'invite',
+          action,
+          channel: block.channel,
+          invite: interpolate(block.invite, ctx, vars),
+          maxUses: block.maxUses,
+          maxAge: block.maxAge,
+          temporary: block.temporary,
+          delivery: block.delivery,
+          message: interpolate(block.message, ctx, vars),
+          variable: block.variable,
+        });
+        entry.detail = action === 'view'
+          ? `voir le lien ${block.invite || '—'} · ${block.delivery === 'dm' ? 'message privé' : block.delivery === 'none' ? 'sans envoi' : 'dans le salon'}`
+          : `invitation ${block.channel} · ${block.maxAge} h · ${block.delivery === 'dm' ? 'message privé' : block.delivery === 'none' ? 'sans envoi' : 'dans le salon'}`;
         break;
       }
       case 'ticket': {

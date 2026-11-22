@@ -15,9 +15,9 @@ const FLOW_TRIGGERS = {
 };
 
 const FLOW_BLOCKS = {
-  message: { label: 'Message', icon: 'message', tone: 'violet', group: 'message', hint: 'Texte, TTS et options de réponse' },
+  message: { label: 'Message', icon: 'message', tone: 'violet', group: 'message', hint: 'Texte, vocal et options de réponse' },
   embed: { label: 'Embed', icon: 'layers', tone: 'cyan', group: 'message', hint: 'Carte enrichie avec champs et images' },
-  dm: { label: 'Message privé', icon: 'mail', tone: 'cyan', group: 'message', hint: 'Envoie un MP au membre' },
+  dm: { label: 'Message privé', icon: 'mail', tone: 'cyan', group: 'message', hint: 'Envoie un message privé au membre' },
   button: { label: 'Boutons', icon: 'cursor', tone: 'violet', group: 'message', hint: 'Jusqu’à 5 boutons cliquables' },
   react: { label: 'Réaction', icon: 'smile', tone: 'grey', group: 'message', hint: 'Ajoute un emoji' },
   random: { label: 'Variantes', icon: 'shuffle', tone: 'pink', group: 'message', hint: 'Réponses aléatoires pondérées' },
@@ -41,6 +41,7 @@ const FLOW_BLOCKS = {
   typing: { label: 'Saisie', icon: 'keyboard', tone: 'grey', group: 'technique', hint: 'Affiche « écrit… »' },
   webhook: { label: 'HTTP', icon: 'plug', tone: 'cyan', group: 'technique', hint: 'Appelle une API externe' },
   log: { label: 'Journal', icon: 'terminal', tone: 'grey', group: 'technique', hint: 'Note dans les logs' },
+  note: { label: 'Note', icon: 'edit', tone: 'grey', group: 'logique', hint: 'Note interne, stockée mais jamais envoyée' },
   reply: { label: 'Répondre', icon: 'message', tone: 'violet', group: 'message', hint: 'Répond au message déclencheur' },
   edit: { label: 'Modifier un message', icon: 'edit', tone: 'cyan', group: 'message', hint: 'Édite un message envoyé par le bot' },
   thread: { label: 'Créer un fil', icon: 'message', tone: 'cyan', group: 'message', hint: 'Ouvre un fil de discussion' },
@@ -61,7 +62,7 @@ const FLOW_BLOCKS = {
   ban: { label: 'Bannir', icon: 'shield', tone: 'pink', group: 'moderation', hint: 'Bannit le membre du serveur' },
   nickname: { label: 'Changer le pseudo', icon: 'edit', tone: 'green', group: 'moderation', hint: 'Modifie le surnom du membre' },
   move: { label: 'Déplacer en vocal', icon: 'video', tone: 'green', group: 'gestion', hint: 'Déplace le membre dans un salon vocal' },
-  invite: { label: 'Créer une invitation', icon: 'link', tone: 'green', group: 'gestion', hint: 'Génère un lien d’invitation' },
+  invite: { label: 'Invitation', icon: 'link', tone: 'green', group: 'gestion', hint: 'Créer, voir ou envoyer un lien d’invitation' },
   ticket: { label: 'Gérer un ticket', icon: 'ticket', tone: 'green', group: 'gestion', hint: 'Ouvre, réclame ou ferme un ticket' },
   level: { label: 'Ajouter de l’XP', icon: 'zap', tone: 'green', group: 'gestion', hint: 'Ajoute ou retire de l’XP' },
   randomNumber: { label: 'Nombre aléatoire', icon: 'shuffle', tone: 'violet', group: 'logique', hint: 'Tire un nombre entre deux bornes' },
@@ -100,11 +101,11 @@ const FLOW_OPERATORS = {
 
 const FLOW_TEMPLATES = [
   { value: '', label: 'Flux vide', hint: 'Vous ajoutez les blocs vous-même.' },
-  { value: 'welcome', label: 'Bienvenue', hint: 'Saisie, message, condition, rôle et MP.' },
+  { value: 'welcome', label: 'Bienvenue', hint: 'Saisie, message, condition, rôle et message privé.' },
   { value: 'ticket', label: 'Ticket support', hint: 'Message éphémère, embed, bouton et rôle.' },
   { value: 'quiz', label: 'Quiz', hint: 'Variantes, attente, condition et score.' },
   { value: 'moderation', label: 'Filtre anti-spam', hint: 'Anti-spam, condition et sanction.' },
-  { value: 'support', label: 'Relance support', hint: 'HTTP, MP, attente et épinglage.' },
+  { value: 'support', label: 'Relance support', hint: 'HTTP, message privé, attente et épinglage.' },
   { value: 'botjoin', label: 'Arrivée d’un bot', hint: 'Message, rôle et journal pour un nouveau bot.' },
   { value: 'verification', label: 'Vérification', hint: 'Bouton, formulaire, rôle et journal.' },
   { value: 'giveaway', label: 'Giveaway', hint: 'Tirage, sondage, attente et annonce.' },
@@ -341,9 +342,9 @@ function flowNewBlock(type, x = 120, y = 120) {
   const base = { id: flowUid(), type, x, y, next: null };
   switch (type) {
     case 'embed':
-      return { ...base, channel: '', title: 'Titre', description: '', color: '#7c5cff', footer: '', footerIcon: '', author: '', authorIcon: '', image: '', thumbnail: '', timestamp: false, fields: [] };
+      return { ...base, channel: '', title: 'Titre', url: '', description: '', color: '#7c5cff', footer: '', footerIcon: '', author: '', authorIcon: '', image: '', thumbnail: '', timestamp: false, ephemeral: false, silent: false, fields: [] };
     case 'dm':
-      return { ...base, text: '' };
+      return { ...base, text: '', target: '', embed: false, title: '', description: '', color: '#7c5cff' };
     case 'button':
       return {
         ...base,
@@ -442,6 +443,7 @@ function flowNewBlock(type, x = 120, y = 120) {
         ...base,
         channel: '',
         ephemeral: false,
+        silent: false,
         embed: false,
         title: '',
         description: '',
@@ -522,7 +524,20 @@ function flowNewBlock(type, x = 120, y = 120) {
     case 'move':
       return { ...base, channel: '#vocal' };
     case 'invite':
-      return { ...base, channel: '#général', maxUses: 0, maxAge: 24 };
+      return {
+        ...base,
+        action: 'create',
+        channel: '#général',
+        invite: '',
+        maxUses: 0,
+        maxAge: 24,
+        temporary: false,
+        delivery: 'channel',
+        message: 'Invitation : {{invite}}',
+        variable: 'invite',
+      };
+    case 'note':
+      return { ...base, title: 'Note', text: '' };
     case 'ticket':
       return { ...base, action: 'open', category: '', reason: '' };
     case 'level':
@@ -542,7 +557,7 @@ function flowNewBlock(type, x = 120, y = 120) {
     case 'captcha':
       return { ...base, kind: 'button', timeout: 120, role: '' };
     default:
-      return { ...base, channel: '', text: '', ephemeral: false };
+      return { ...base, channel: '', text: '', ephemeral: false, reply: false, tts: false, silent: false, suppressEmbeds: false };
   }
 }
 
@@ -893,6 +908,7 @@ const MODAL_FIELD_TYPES = {
   multi: { label: 'Cases multiples', shortLabel: 'multi', hint: 'Plusieurs choix possibles' },
   role: { label: 'Choisir un rôle', shortLabel: 'rôle', hint: 'Sélection d’un rôle du serveur' },
   user: { label: 'Choisir une personne', shortLabel: 'membre', hint: 'Sélection d’un membre du serveur' },
+  info: { label: 'Informations', shortLabel: 'info', hint: 'Texte affiché dans le formulaire, sans saisie obligatoire' },
 };
 
 function modalFieldType(type) {
@@ -942,13 +958,16 @@ function normalizeModalFields(block) {
               ? 'select'
               : /check|case/.test(style)
                 ? 'checkbox'
-                : 'short';
+                : /info|information/.test(style)
+                  ? 'info'
+                  : 'short';
         return {
           label: rawLabel,
           type,
           required: !/optionnel|optional|non|false/.test(String(rawRequired || '')),
           placeholder: rawPlaceholder || '',
           options: '',
+          value: '',
         };
       });
   }
@@ -962,9 +981,10 @@ function normalizeModalFields(block) {
       id: entry?.id || flowUid(),
       label: String(entry?.label || `Champ ${index + 1}`).slice(0, 45),
       type,
-      required: entry?.required !== false,
+      required: type === 'info' ? false : entry?.required !== false,
       placeholder: String(entry?.placeholder || '').slice(0, 100),
       options: options || modalFieldDefaultOptions(type),
+      value: String(entry?.value || '').slice(0, 1000),
     };
   });
 }
@@ -989,12 +1009,12 @@ function flowBlockRows(block) {
         ['Salon', block.channel || '#général'],
         ['Message', block.text],
         ['Mode', block.ephemeral ? 'éphémère' : 'normal'],
-        ['Options', [block.reply ? 'réponse' : '', block.tts ? 'TTS' : '', block.suppressEmbeds ? 'sans embeds' : ''].filter(Boolean).join(' · ') || 'standard'],
+        ['Options', [block.reply ? 'réponse' : '', block.tts ? 'vocal' : '', block.silent ? 'silencieux' : '', block.suppressEmbeds ? 'sans embeds' : ''].filter(Boolean).join(' · ') || 'standard'],
       ]);
     case 'embed':
       return flowSummaryRows([['Titre', block.title || 'Sans titre'], ['Description', block.description], ['Auteur', block.author], ['Champs', `${(block.fields || []).length}`], ['Couleur', block.color]]);
     case 'dm':
-      return flowSummaryRows([['Message privé', block.text]]);
+      return flowSummaryRows([['Message privé', block.text], ['Destinataire', block.target || 'membre déclencheur'], ['Embed', block.embed ? 'oui' : 'non']]);
     case 'button': {
       const buttons = blockButtons(block);
       return flowSummaryRows([
@@ -1123,7 +1143,15 @@ function flowBlockRows(block) {
     case 'move':
       return flowSummaryRows([['Salon vocal', block.channel]]);
     case 'invite':
-      return flowSummaryRows([['Salon', block.channel], ['Utilisations', `${block.maxUses || '∞'}`], ['Expiration', `${block.maxAge || 24} h`]]);
+      return flowSummaryRows([
+        ['Action', block.action === 'view' ? 'voir le lien' : 'créer une invitation'],
+        block.action === 'view' ? ['Lien', block.invite] : ['Salon', block.channel],
+        block.action === 'view' ? null : ['Utilisations', `${block.maxUses || '∞'}`],
+        block.action === 'view' ? null : ['Expiration', `${block.maxAge || 24} h`],
+        ['Livraison', block.delivery === 'dm' ? 'message privé' : block.delivery === 'none' ? 'aucune' : 'salon'],
+      ].filter(Boolean));
+    case 'note':
+      return flowSummaryRows([['Titre', block.title || 'Note'], ['Texte', block.text]]);
     case 'ticket':
       return flowSummaryRows([['Action', block.action || 'open'], ['Raison', block.reason]]);
     case 'level':
@@ -1151,17 +1179,31 @@ function previewOutput(block) {
   const channel = block.channel || '#général';
   switch (block.type) {
     case 'message':
-      return { kind: 'message', channel, text: block.text || 'Votre message…', ephemeral: block.ephemeral, reply: block.reply, tts: block.tts, suppressEmbeds: block.suppressEmbeds };
+      return { kind: 'message', channel, text: block.text || 'Votre message…', ephemeral: block.ephemeral, reply: block.reply, tts: block.tts, silent: block.silent, suppressEmbeds: block.suppressEmbeds };
     case 'dm':
-      return { kind: 'message', channel: 'MP', text: block.text || 'Votre message privé…' };
+      return { kind: 'dm', to: block.target || 'membre déclencheur', text: block.text || 'Votre message privé…', embed: block.embed };
+    case 'invite':
+      return {
+        kind: 'invite',
+        action: block.action === 'view' ? 'view' : 'create',
+        channel: block.channel,
+        invite: block.invite,
+        maxUses: block.maxUses,
+        maxAge: block.maxAge,
+        delivery: block.delivery,
+        message: block.message,
+      };
     case 'reply':
       return { kind: 'message', channel, text: block.text || 'Votre réponse…', reply: true, ping: block.ping, ephemeral: block.ephemeral };
     case 'embed':
       return {
         kind: 'embed',
         channel,
+        ephemeral: block.ephemeral,
+        silent: block.silent,
         embed: {
           title: block.title,
+          url: block.url,
           description: block.description || 'Description de l’embed…',
           color: block.color,
           footer: block.footer,
@@ -1180,8 +1222,11 @@ function previewOutput(block) {
         return {
           kind: 'embed',
           channel,
+          ephemeral: block.ephemeral,
+          silent: block.silent,
           embed: {
             title: block.title,
+            url: block.url,
             description: block.description || variant,
             color: block.color,
             footer: block.footer,
@@ -1196,7 +1241,7 @@ function previewOutput(block) {
           variant: 'aperçu',
         };
       }
-      return { kind: 'message', channel, text: variant, ephemeral: block.ephemeral, variant: 'aperçu' };
+      return { kind: 'message', channel, text: variant, ephemeral: block.ephemeral, silent: block.silent, variant: 'aperçu' };
     }
     case 'button':
       return { kind: 'buttons', buttons: blockButtons(block) };
@@ -1304,6 +1349,7 @@ function flowVariableGroups(block) {
   for (const entry of flow.blocks || []) {
     if (entry.type !== 'modal' || entry.id === block?.id) continue;
     normalizeModalFields(entry).forEach((field, index) => {
+      if (field.type === 'info') return;
       const key = formVarKey(field.label, index);
       const baseLabel = `${entry.title || 'Formulaire'} · ${field.label || `Champ ${index + 1}`}`;
       forms.push({
@@ -1702,6 +1748,7 @@ function nodeField(label, inner, extra = '') {
 function renderModalField(block, field, index) {
   const bind = (key) => `data-node="${block.id}" data-form-index="${index}" data-form-key="${key}"`;
   const choice = field.type === 'select' || field.type === 'multi';
+  const isInfo = field.type === 'info';
   const note = field.type === 'checkbox'
     ? 'Case oui/non · pas de choix à saisir'
     : field.type === 'select'
@@ -1721,10 +1768,12 @@ function renderModalField(block, field, index) {
       <button type="button" class="mini-btn danger" data-action="flow-del-form-field" data-id="${block.id}" data-index="${index}" title="Supprimer ce champ">${icon('x')}</button>
     </div>
     <div class="form-field-options${choice ? ' has-choice' : ''}">
-      <input class="input" ${bind('placeholder')} value="${esc(field.placeholder)}" placeholder="Aide (optionnel)" maxlength="100">
+      ${isInfo
+        ? `<label class="form-field-choice"><span>Texte d’information <small>affiché dans le formulaire</small></span><textarea class="textarea" rows="2" ${bind('value')} placeholder="Ex : Ce formulaire sert à rejoindre le serveur.">${esc(field.value || '')}</textarea></label>`
+        : `<input class="input" ${bind('placeholder')} value="${esc(field.placeholder)}" placeholder="Aide (optionnel)" maxlength="100">
       ${choice
         ? `<label class="form-field-choice"><span>Choix / variantes <small>une par ligne</small></span><textarea class="textarea" rows="2" ${bind('options')} placeholder="Option 1\nOption 2">${esc(field.options)}</textarea></label>`
-        : `<span class="form-field-note">${note}</span>`}
+        : `<span class="form-field-note">${note}</span>`}`}
     </div>
   </div>`;
 }
@@ -1765,15 +1814,19 @@ function renderNodeFields(block) {
         ${nodeField('Message', `<textarea class="textarea" rows="3" ${bind('text')} placeholder="Bienvenue {{user.mention}} !">${esc(block.text)}</textarea>`)}
         <div class="fld-row">
           ${nodeField('Répondre au message', `<button class="switch ${block.reply ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="reply"></button>`, 'shrink')}
-          ${nodeField('TTS', `<button class="switch ${block.tts ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="tts"></button>`, 'shrink')}
+          ${nodeField('Vocal', `<button class="switch ${block.tts ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="tts"></button>`, 'shrink')}
+          ${nodeField('Silencieux', `<button class="switch ${block.silent ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="silent"></button>`, 'shrink')}
           ${nodeField('Masquer les embeds', `<button class="switch ${block.suppressEmbeds ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="suppressEmbeds"></button>`, 'shrink')}
         </div>`;
     case 'embed':
       return `<div class="fld-row">
           ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel), 'grow')}
+          ${nodeField('Éphémère', `<button class="switch ${block.ephemeral ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="ephemeral"></button>`, 'shrink')}
+          ${nodeField('Silencieux', `<button class="switch ${block.silent ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="silent"></button>`, 'shrink')}
         </div>
         <div class="fld-row">
           ${nodeField('Titre', `<input class="input" ${bind('title')} value="${esc(block.title || '')}">`, 'grow')}
+          ${nodeField('Lien du titre', `<input class="input" ${bind('url')} value="${esc(block.url || '')}" placeholder="https://…">`, 'grow')}
           ${nodeField('Couleur', `<input class="input color-mini" type="color" ${bind('color')} value="${esc(block.color || '#7c5cff')}">`, 'shrink')}
         </div>
         ${nodeField('Description', `<textarea class="textarea" rows="3" ${bind('description')}>${esc(block.description || '')}</textarea>`)}
@@ -1792,7 +1845,16 @@ function renderNodeFields(block) {
         </div>
         ${renderEmbedFields(block)}`;
     case 'dm':
-      return nodeField('Message privé', `<textarea class="textarea" rows="3" ${bind('text')} placeholder="Salut {{user.name}} !">${esc(block.text)}</textarea>`);
+      return `<div class="fld-row">
+          ${nodeField('Destinataire', `<input class="input" ${bind('target')} value="${esc(block.target || '')}" placeholder="Vide = membre déclencheur, sinon ID ou mention">`, 'grow')}
+          ${nodeField('Envoyer en embed', `<button class="switch ${block.embed ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="embed"></button>`, 'shrink')}
+        </div>
+        ${block.embed ? `<div class="fld-row">
+          ${nodeField('Titre', `<input class="input" ${bind('title')} value="${esc(block.title || '')}" placeholder="Message privé">`, 'grow')}
+          ${nodeField('Couleur', `<input class="input color-mini" type="color" ${bind('color')} value="${esc(block.color || '#7c5cff')}">`, 'shrink')}
+        </div>
+        ${nodeField('Description', `<textarea class="textarea" rows="3" ${bind('description')} placeholder="Salut {{user.name}} !">${esc(block.description || '')}</textarea>`)}` : nodeField('Message privé', `<textarea class="textarea" rows="3" ${bind('text')} placeholder="Salut {{user.name}} !">${esc(block.text)}</textarea>`)}
+        <p class="hint">Le message privé n’est visible que par la personne concernée. Laisse le destinataire vide pour écrire au membre qui a déclenché le flux.</p>`;
     case 'button': {
       const buttons = blockButtons(block);
       const buttonBind = (index, field) => `data-node="${block.id}" data-button="${index}" data-button-field="${field}"`;
@@ -1839,6 +1901,7 @@ function renderNodeFields(block) {
       return `<div class="fld-row">
           ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel), 'grow')}
           ${nodeField('Éphémère', `<button class="switch ${block.ephemeral ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="ephemeral"></button>`, 'shrink')}
+          ${nodeField('Silencieux', `<button class="switch ${block.silent ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="silent"></button>`, 'shrink')}
         </div>
         <div class="fld-row">
           ${nodeField('Réponse en embed', `<button class="switch ${block.embed ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="embed"></button>`, 'grow')}
@@ -1992,7 +2055,7 @@ function renderNodeFields(block) {
           ${nodeField('Volume (%)', `<input class="input" type="number" min="0" max="200" ${bind('volume')} value="${block.volume ?? 80}">`, 'shrink')}
           ${nodeField('Boucle', `<button class="switch ${block.loop ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="loop"></button>`, 'shrink')}
         </div>` : ''}
-        <p class="hint">Mode vocal : le bot rejoint le salon et joue pour tout le monde. Mode privé : envoie le lien en éphémère ou en MP, donc seule la personne qui a lancé le flux l’entend.</p>`;
+        <p class="hint">Mode vocal : le bot rejoint le salon et joue pour tout le monde. Mode privé : envoie le lien en éphémère ou en message privé, donc seule la personne qui a lancé le flux l’entend.</p>`;
     }
     case 'poll':
       return `<div class="fld-row">
@@ -2219,6 +2282,12 @@ function renderNodeFieldsB(block) {
         ${nodeField('Corps JSON', `<textarea class="textarea" rows="2" ${bind('body')} placeholder='{"membre":"{{user.name}}"}'>${esc(block.body)}</textarea>`)}`;
     case 'log':
       return nodeField('Note de journal', `<input class="input" ${bind('text')} value="${esc(block.text || '')}" placeholder="Ticket créé par {{user.name}}">`);
+    case 'note':
+      return `<div class="fld-row">
+          ${nodeField('Titre', `<input class="input" ${bind('title')} value="${esc(block.title || '')}" placeholder="Note">`, 'grow')}
+        </div>
+        ${nodeField('Texte', `<textarea class="textarea" rows="4" ${bind('text')} placeholder="Écris ici une note pour l’équipe…">${esc(block.text || '')}</textarea>`)}
+        <p class="hint">Cette note est enregistrée avec le flux mais n’envoie rien sur Discord.</p>`;
     case 'accountCheck':
       return `<div class="fld-row">
           ${nodeField('Âge minimum (jours)', `<input class="input" type="number" min="0" max="365" ${bind('minAgeDays')} value="${block.minAgeDays ?? 7}">`, 'shrink')}
@@ -2251,12 +2320,31 @@ function renderNodeFieldsB(block) {
       return nodeField('Nouveau pseudo', `<input class="input" ${bind('nickname')} value="${esc(block.nickname || '')}" placeholder="{{user.name}}">`);
     case 'move':
       return nodeField('Salon vocal', flowChannelSelect(bind('channel'), block.channel, { types: ['voice'], emptyLabel: 'Choisir un vocal…' }));
-    case 'invite':
+    case 'invite': {
+      const action = block.action === 'view' ? 'view' : 'create';
       return `<div class="fld-row">
-          ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel, { types: ['text'], emptyLabel: 'Choisir un salon…' }), 'grow')}
-          ${nodeField('Utilisations max', `<input class="input" type="number" min="0" max="100" ${bind('maxUses')} value="${block.maxUses || 0}">`, 'shrink')}
-          ${nodeField('Expiration (heures)', `<input class="input" type="number" min="0" max="720" ${bind('maxAge')} value="${block.maxAge || 24}">`, 'shrink')}
-        </div>`;
+          ${nodeField('Action', `<select class="select" ${bind('action')}>
+            <option value="create" ${action === 'create' ? 'selected' : ''}>Créer une invitation</option>
+            <option value="view" ${action === 'view' ? 'selected' : ''}>Voir le lien</option>
+          </select>`, 'grow')}
+          ${nodeField('Livraison', `<select class="select" ${bind('delivery')}>
+            <option value="channel" ${block.delivery !== 'dm' && block.delivery !== 'none' ? 'selected' : ''}>Dans le salon</option>
+            <option value="dm" ${block.delivery === 'dm' ? 'selected' : ''}>Message privé</option>
+            <option value="none" ${block.delivery === 'none' ? 'selected' : ''}>Ne pas envoyer</option>
+          </select>`, 'grow')}
+        </div>
+        ${action === 'view'
+          ? nodeField('Lien ou code d’invitation', `<input class="input" ${bind('invite')} value="${esc(block.invite || '')}" placeholder="https://discord.gg/… ou code">`)
+          : `<div class="fld-row">
+              ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel, { types: ['text'], emptyLabel: 'Choisir un salon…' }), 'grow')}
+              ${nodeField('Utilisations max', `<input class="input" type="number" min="0" max="100" ${bind('maxUses')} value="${block.maxUses || 0}">`, 'shrink')}
+              ${nodeField('Expiration (heures)', `<input class="input" type="number" min="0" max="720" ${bind('maxAge')} value="${block.maxAge || 24}">`, 'shrink')}
+              ${nodeField('Membre temporaire', `<button class="switch ${block.temporary ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="temporary"></button>`, 'shrink')}
+            </div>`}
+        ${block.delivery !== 'none' ? nodeField('Message envoyé', `<textarea class="textarea" rows="2" ${bind('message')} placeholder="Invitation : {{invite}}">${esc(block.message || '')}</textarea>`) : ''}
+        ${nodeField('Variable du lien', `<input class="input" ${bind('variable')} value="${esc(block.variable || '')}" placeholder="invite">`, 'shrink')}
+        <p class="hint">« Voir le lien » réutilise une invitation existante. « Message privé » envoie le lien uniquement à la personne concernée.</p>`;
+    }
     case 'ticket':
       return `<div class="fld-row">
           ${nodeField('Action', `<select class="select" ${bind('action')}>
@@ -2427,7 +2515,7 @@ function renderOutput(output) {
     return `<div class="dc-msg">
       <span class="dc-av">K</span>
       <div class="dc-body">
-        <div class="dc-head"><b>KyllBot</b><span class="dc-bot">BOT</span><span class="dc-time">${esc(output.channel)}</span>${output.reply ? '<span class="dc-tag">réponse</span>' : ''}${output.ping ? '<span class="dc-tag">mention</span>' : ''}${output.ephemeral ? '<span class="dc-tag">éphémère</span>' : ''}${output.tts ? '<span class="dc-tag">TTS</span>' : ''}${output.suppressEmbeds ? '<span class="dc-tag">sans embeds</span>' : ''}</div>
+        <div class="dc-head"><b>KyllBot</b><span class="dc-bot">BOT</span><span class="dc-time">${esc(output.channel)}</span>${output.reply ? '<span class="dc-tag">réponse</span>' : ''}${output.ping ? '<span class="dc-tag">mention</span>' : ''}${output.ephemeral ? '<span class="dc-tag">éphémère</span>' : ''}${output.tts ? '<span class="dc-tag">vocal</span>' : ''}${output.silent ? '<span class="dc-tag">silencieux</span>' : ''}${output.suppressEmbeds ? '<span class="dc-tag">sans embeds</span>' : ''}</div>
         <p>${flowFormatDiscord(output.text)}</p>
       </div>
     </div>`;
@@ -2471,7 +2559,7 @@ function renderOutput(output) {
     </div>`;
   }
   if (output.kind === 'dm') {
-    return `<div class="dc-effect">${icon('mail')} <span><b>MP à ${esc(output.to)}</b> — ${esc(output.text)}</span></div>`;
+    return `<div class="dc-effect">${icon('mail')} <span><b>Message privé à ${esc(output.to)}</b> — ${esc(output.text)}</span></div>`;
   }
   if (output.kind === 'role') {
     const duration = output.temporary ? `${output.duration} ${output.durationUnit || 'minutes'}` : 'permanent';
@@ -2598,7 +2686,9 @@ function renderOutput(output) {
     return `<div class="dc-effect">${icon('video')} ${esc(output.user)} déplacé vers ${esc(output.channel)}</div>`;
   }
   if (output.kind === 'invite') {
-    return `<div class="dc-effect">${icon('link')} Invitation ${esc(output.channel)} · ${output.maxUses || '∞'} utilisation(s) · ${output.maxAge || '∞'} h</div>`;
+    const delivery = output.delivery === 'dm' ? ' · message privé' : output.delivery === 'none' ? '' : ' · dans le salon';
+    const label = output.action === 'view' ? 'Voir le lien' : 'Créer une invitation';
+    return `<div class="dc-effect">${icon('link')} ${label} ${esc(output.channel || output.invite || '')} · ${output.maxUses || '∞'} utilisation(s) · ${output.maxAge || '∞'} h${delivery}</div>`;
   }
   if (output.kind === 'ticket') {
     return `<div class="dc-effect">${icon('ticket')} Ticket ${esc(output.action)}${output.reason ? ` · ${esc(output.reason)}` : ''}</div>`;
@@ -3224,7 +3314,7 @@ onAction('flow-add-form-field', (el) => {
   if (!block) return;
   const fields = normalizeModalFields(block);
   if (fields.length >= 5) return toast('5 champs maximum par formulaire.', 'error');
-  fields.push({ id: flowUid(), label: `Champ ${fields.length + 1}`, type: 'short', required: false, placeholder: '', options: '' });
+  fields.push({ id: flowUid(), label: `Champ ${fields.length + 1}`, type: 'short', required: false, placeholder: '', options: '', value: '' });
   block.fields = fields;
   flowEditor.dirty = true;
   refreshBlockEditor(block.id);
@@ -3622,7 +3712,7 @@ document.addEventListener('change', (event) => {
   else if (el.dataset.field === 'seconds' || el.dataset.field === 'count') block[el.dataset.field] = Number(el.value) || 1;
   else if (el.dataset.field) block[el.dataset.field] = el.value;
   flowEditor.dirty = true;
-  if (el.dataset.field === 'action' || el.dataset.field === 'mode') {
+  if (el.dataset.field === 'action' || el.dataset.field === 'mode' || el.dataset.field === 'delivery') {
     refreshBlockEditor(block.id);
     return;
   }

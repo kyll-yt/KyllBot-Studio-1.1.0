@@ -98,6 +98,8 @@ function dailyRewardCard() {
   const reward = state.billing?.dailyReward;
   if (!reward) return '';
   const credits = state.ws.credits || 0;
+  const activeDay = Math.min(reward.claimedToday ? reward.streak : reward.nextStreak, 7);
+  const schedule = reward.schedule || [];
   return `<div class="panel reward-panel">
     <div class="reward-main">
       <span class="rw-ic">${icon('spark')}</span>
@@ -109,6 +111,15 @@ function dailyRewardCard() {
             ? `Déjà récupérée aujourd’hui · série de ${reward.streak} jour(s)`
             : `Récupérez ${reward.amount} crédits aujourd’hui · série de ${reward.nextStreak} jour(s)`
         }</p>
+      </div>
+      <div class="reward-days">
+        ${schedule
+          .map(
+            (entry) => `<span class="reward-day ${entry.day <= activeDay ? 'done' : ''} ${entry.day === activeDay ? 'today' : ''}">
+              <small>J${entry.day}</small><b>${entry.amount}</b>
+            </span>`,
+          )
+          .join('')}
       </div>
     </div>
     <button class="btn btn-primary" data-action="claim-reward" ${reward.claimedToday ? 'disabled' : ''}>
@@ -192,6 +203,18 @@ const AUTOMATION_DESCRIPTIONS = {
   logs: 'Journalise les actions de modération.',
   reminders: 'Envoie des rappels de cours aux apprenants.',
 };
+
+const AUTOMATION_TYPES = [
+  { type: 'welcome', label: "Message d'accueil" },
+  { type: 'autorole', label: 'Rôle automatique' },
+  { type: 'levels', label: 'Niveaux et XP' },
+  { type: 'ticketPanel', label: 'Panneau de tickets' },
+  { type: 'moderation', label: 'Modération automatique' },
+  { type: 'antiSpam', label: 'Anti-spam' },
+  { type: 'autoMod', label: 'Auto-modération' },
+  { type: 'logs', label: 'Journaux de modération' },
+  { type: 'reminders', label: 'Rappels de formation' },
+];
 
 const AUTOMATION_FIELDS = {
   welcome: [
@@ -291,6 +314,18 @@ function automationFieldControl(field, value, discord = {}) {
   }
   return `<div class="field"><label for="auto-${esc(field.key)}">${esc(field.label)}</label>
     <input class="input" ${common} type="${field.type || 'text'}" ${field.min !== undefined ? `min="${field.min}"` : ''} ${field.max !== undefined ? `max="${field.max}"` : ''} placeholder="${esc(field.placeholder || '')}" value="${esc(value ?? '')}"></div>`;
+}
+
+function bindAutomationPickers(form) {
+  form.querySelectorAll('[data-fill-target]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const input = form.querySelector(`#${select.dataset.fillTarget}`);
+      if (input && select.value) {
+        input.value = select.value;
+        input.focus();
+      }
+    });
+  });
 }
 
 function automationIcon(type) {
@@ -451,7 +486,7 @@ function viewBotDetail(id) {
     body = viewBotScheduled(bot);
   } else if (state.botTab === 'automations') {
     body = `<div class="panel">
-      <div class="panel-head"><h3>Automatisations</h3><div class="ph-actions"><span class="pill violet">${bot.automations.filter((a) => a.enabled).length} active(s)</span></div></div>
+      <div class="panel-head"><h3>Automatisations</h3><div class="ph-actions"><span class="pill violet">${bot.automations.filter((a) => a.enabled).length} active(s)</span><button class="btn btn-primary btn-sm" data-action="new-automation" data-id="${esc(bot.id)}">${icon('plus')} Ajouter</button></div></div>
       <div class="panel-body">
         ${
           bot.automations.length
@@ -465,11 +500,17 @@ function viewBotDetail(id) {
                       ${automationSummary(automation)}
                     </div>
                     <button class="btn btn-ghost btn-sm" data-action="config-automation" data-id="${esc(bot.id)}" data-auto="${esc(automation.id)}">${icon('gear')} Configurer</button>
+                    <button class="mini-btn danger" data-action="delete-automation" data-id="${esc(bot.id)}" data-auto="${esc(automation.id)}" title="Supprimer">${icon('trash')}</button>
                     <button class="switch ${automation.enabled ? 'on' : ''}" data-action="toggle-automation" data-id="${esc(bot.id)}" data-auto="${esc(automation.id)}" aria-label="Activer ${esc(automation.label)}"></button>
                   </div>`,
                 )
                 .join('')
-            : '<p style="font-size:12.5px;color:var(--muted-2)">Aucune automatisation disponible.</p>'
+            : `<div class="empty" style="padding:38px 20px">
+                <div class="ic">${icon('zap')}</div>
+                <h3>Aucune automatisation</h3>
+                <p>Choisissez un salon ou une catégorie, puis activez l’automatisation.</p>
+                <button class="btn btn-primary" data-action="new-automation" data-id="${esc(bot.id)}">Ajouter une automatisation</button>
+              </div>`
         }
       </div>
     </div>`;
@@ -1050,6 +1091,46 @@ const COMMAND_PRESETS = [
     response: '',
     embed: { title: '📢 Annonce', description: 'Votre annonce ici.', color: '#7c5cff', footer: 'Staff' },
   },
+  {
+    key: 'verification',
+    label: 'Vérification',
+    name: 'verifier',
+    description: 'Demande au membre de valider les règles',
+    response: '',
+    embed: { title: '✅ Vérification', description: 'Clique sur le bouton ci-dessous pour confirmer que tu as lu les règles.', color: '#22d3ee', footer: 'KyllBot Studio' },
+  },
+  {
+    key: 'giveaway',
+    label: 'Giveaway',
+    name: 'giveaway',
+    description: 'Lance un tirage au sort',
+    response: '',
+    embed: { title: '🎁 Giveaway', description: 'Réagis avec 🎉 pour participer. Fin dans 24 h !', color: '#f472b6', footer: 'KyllBot Studio' },
+  },
+  {
+    key: 'dm',
+    label: 'Message privé',
+    name: 'mp',
+    description: 'Envoie un message privé au membre',
+    response: 'Un message privé vient de t’être envoyé.',
+    embed: { title: '💬 Message privé', description: 'Ce message est visible uniquement par toi.', color: '#a3e635', footer: 'KyllBot Studio' },
+  },
+  {
+    key: 'stats',
+    label: 'Statistiques',
+    name: 'stats',
+    description: 'Affiche les statistiques du serveur',
+    response: '**{server}** · Niveau **{level}** · **{xp} XP**',
+    embed: { title: '📊 Statistiques', description: 'Membres actifs, messages et progression de la communauté.', color: '#7c5cff', footer: 'KyllBot Studio' },
+  },
+  {
+    key: 'invite',
+    label: 'Invitation',
+    name: 'invitation',
+    description: 'Partage le lien d’invitation du serveur',
+    response: 'Rejoins-nous sur **{server}** !',
+    embed: { title: '🔗 Invitation', description: 'Partage ce lien avec tes amis.', color: '#fbbf24', footer: 'KyllBot Studio' },
+  },
 ];
 
 function commandModal(bot, command) {
@@ -1374,6 +1455,78 @@ onAction('toggle-command', async (el) => {
   await refresh();
 });
 
+onAction('new-automation', (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  if (!bot) return;
+  const datalists = `
+    <datalist id="channelSuggestions">${(bot.discord?.channels?.length ? bot.discord.channels.filter((channel) => channel.type !== 'voice').map((channel) => `#${channel.name}`) : CHANNEL_SUGGESTIONS).map((item) => `<option value="${esc(item)}"></option>`).join('')}</datalist>
+    <datalist id="categorySuggestions">${(bot.discord?.categories?.length ? bot.discord.categories : CATEGORY_SUGGESTIONS).map((item) => `<option value="${esc(item)}"></option>`).join('')}</datalist>
+    <datalist id="roleSuggestions">${(bot.discord?.roles || FLOW_ROLES_FALLBACK.map((name) => ({ name }))).map((role) => `<option value="${esc(role.name)}"></option>`).join('')}</datalist>`;
+  const form = openModal({
+    title: 'Ajouter une automatisation',
+    subtitle: 'Choisissez le type, le salon ou la catégorie, puis activez-la.',
+    submitLabel: 'Ajouter l’automatisation',
+    body: `
+      <div class="field"><label for="autoType">Type d’automatisation</label>
+        <select class="select" id="autoType" name="type">
+          ${AUTOMATION_TYPES.map((entry) => `<option value="${esc(entry.type)}">${esc(entry.label)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label for="autoLabel">Nom</label>
+        <input class="input" id="autoLabel" name="label" value="${esc(AUTOMATION_TYPES[0].label)}" maxlength="80">
+      </div>
+      <div id="autoFields"></div>
+      ${datalists}
+      <p class="hint">Le salon et la catégorie sont utilisés dès que le bot est connecté avec son token.</p>
+    `,
+    onSubmit: async (formData) => {
+      const type = String(formData.get('type') || 'welcome');
+      const config = {};
+      for (const field of automationFields(type)) {
+        if (field.type === 'boolean') config[field.key] = formData.get(field.key) === 'on';
+        else if (field.type === 'number') config[field.key] = Number(formData.get(field.key)) || 0;
+        else config[field.key] = String(formData.get(field.key) || '').trim();
+      }
+      await api(`/api/bots/${bot.id}/automations`, {
+        method: 'POST',
+        body: JSON.stringify({ type, label: formData.get('label'), config }),
+      });
+      await refresh();
+      toast('Automatisation ajoutée.');
+    },
+  });
+  const typeSelect = form.querySelector('#autoType');
+  const fieldsHost = form.querySelector('#autoFields');
+  const labelInput = form.querySelector('#autoLabel');
+  const renderFields = () => {
+    const type = typeSelect.value;
+    const preset = AUTOMATION_TYPES.find((entry) => entry.type === type);
+    if (labelInput && preset) labelInput.value = preset.label;
+    if (fieldsHost) {
+      fieldsHost.innerHTML = automationFields(type).map((field) => automationFieldControl(field, '', bot.discord || {})).join('');
+      bindAutomationPickers(fieldsHost);
+    }
+  };
+  typeSelect?.addEventListener('change', renderFields);
+  renderFields();
+});
+
+onAction('delete-automation', (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  const automation = bot?.automations.find((entry) => entry.id === el.dataset.auto);
+  if (!bot || !automation) return;
+  confirmDialog({
+    title: `Supprimer « ${automation.label} » ?`,
+    message: 'Cette automatisation sera retirée du bot. Vous pourrez en ajouter une autre à tout moment.',
+    confirmLabel: 'Supprimer',
+    onConfirm: async () => {
+      await api(`/api/bots/${bot.id}/automations/${automation.id}`, { method: 'DELETE' });
+      await refresh();
+      toast('Automatisation supprimée.', 'info');
+    },
+  });
+});
+
 onAction('config-automation', (el) => {
   const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
   const automation = bot?.automations.find((entry) => entry.id === el.dataset.auto);
@@ -1409,15 +1562,7 @@ onAction('config-automation', (el) => {
       toast('Automatisation configurée.');
     },
   });
-  form.querySelectorAll('[data-fill-target]').forEach((select) => {
-    select.addEventListener('change', () => {
-      const input = form.querySelector(`#${select.dataset.fillTarget}`);
-      if (input && select.value) {
-        input.value = select.value;
-        input.focus();
-      }
-    });
-  });
+  bindAutomationPickers(form);
 });
 
 onAction('toggle-automation', async (el) => {
