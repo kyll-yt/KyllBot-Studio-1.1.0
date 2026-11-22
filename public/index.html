@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KyllBot Studio Officiel — Bots Discord &amp; formations interactives</title>
+  <meta name="description" content="KyllBot Studio réunit un constructeur de bots Discord no-code et une plateforme de formation complète : commandes, embeds, automatisations, quiz, suivi des apprenants et certificats." />
+  <meta name="theme-color" content="#07060d" />
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/assets/icon-180.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="KyllBot" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/v17/site.css" />
+</head>
+<body>
+  <header class="site-nav" id="siteNav">
+    <div class="container nav-inner">
+      <a class="brand" href="/" aria-label="KyllBot Studio, accueil">
+        <img src="/assets/logo.svg" alt="" width="34" height="34" />
+        KyllBot Studio
+        <span class="brand-suffix">Officiel</span>
+      </a>
+      <nav class="nav-links" aria-label="Navigation principale">
+        <a href="#duo">Deux studios</a>
+        <a href="#features">Fonctionnalités</a>
+        <a href="#templates">Modèles</a>
+        <a href="#pricing">Tarifs</a>
+      </nav>
+      <div class="nav-actions">
+        <a class="link" href="/login">Se connecter</a>
+        <a class="btn btn-ghost btn-sm" href="/login">Créer un compte</a>
+        <a class="btn btn-primary btn-sm" href="/login">Ouvrir le studio</a>
+        <button class="nav-toggle" id="navToggle" aria-label="Ouvrir le menu" aria-expanded="false"><span></span></button>
+      </div>
+    </div>
+    <div class="mobile-menu" id="mobileMenu">
+      <a href="#duo">Deux studios</a>
+      <a href="#features">Fonctionnalités</a>
+      <a href="#templates">Modèles</a>
+      <a href="#pricing">Tarifs</a>
+      <a href="/login" style="color:#c2b4ff">Se connecter</a>
+      <a class="mm-cta" href="/login">Ouvrir le studio</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container hero-grid">
+        <div>
+          <span class="badge"><span class="dot"></span> KyllBot Studio Officiel · v2</span>
+          <h1>Créez vos bots Discord et vos <span class="gradient-text">formations interactives</span>. Sans coder.</h1>
+          <p class="lead">
+            Un seul studio pour construire des bots Discord, scénariser des cours, évaluer vos apprenants
+            et suivre chaque progression. Commandes, embeds, automatisations, quiz, certificats — tout est là.
+          </p>
+          <div class="hero-cta">
+            <a class="btn btn-primary btn-lg" href="/login">
+              Commencer gratuitement
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </a>
+            <button class="btn btn-ghost btn-lg" id="demoBtn" type="button">
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M5 3.5 12 8l-7 4.5v-9Z" fill="currentColor"/></svg>
+              Explorer la démo
+            </button>
+            <button class="btn btn-ghost btn-lg" type="button" data-install-app>
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2v7M5.5 6.5 8 9l2.5-2.5M3 11.5V13h10v-1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Installer l’application
+            </button>
+          </div>
+          <div class="hero-note">
+            <span><i class="check">✓</i> Google ou code par email</span>
+            <span><i class="check">✓</i> Sans carte bancaire</span>
+            <span><i class="check">✓</i> Prêt en 2 minutes</span>
+          </div>
+        </div>
+
+        <div class="hero-visual">
+          <div class="float-card one">
+            <span class="ic">
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2.5 8.5 6 12l7.5-8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
+            <div>Commande /bienvenue publiée<small>KyllBot Communauté · à l'instant</small></div>
+          </div>
+          <div class="float-card two">
+            <span class="ic">
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1.5 9.8 6l4.7.4-3.6 3.1 1.1 4.6L8 11.6l-4 2.5 1.1-4.6L1.5 6.4 6.2 6 8 1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+            </span>
+            <div>Certificat généré<small>Parcours terminé · certificat prêt</small></div>
+          </div>
+
+          <div class="studio-window" aria-hidden="true">
+            <div class="window-bar">
+              <div class="window-dots"><i></i><i></i><i></i></div>
+              <div class="window-url">studio.kyllbot.app</div>
+            </div>
+            <div class="window-body">
+              <div class="win-side">
+                <div class="win-logo"><img src="/assets/logo.svg" alt="" /><b>KyllBot</b></div>
+                <div class="win-item active"><i></i> Vue d'ensemble</div>
+                <div class="win-item"><i></i> Mes bots</div>
+                <div class="win-item"><i></i> Commandes</div>
+                <div class="win-item"><i></i> Formations</div>
+                <div class="win-item"><i></i> Apprenants</div>
+                <div class="win-item"><i></i> Statistiques</div>
+              </div>
+              <div class="win-main">
+                <div class="win-head">
+                  <h4>Aperçu du studio</h4>
+                  <span>Données d’exemple</span>
+                </div>
+                <div class="win-stats">
+                  <div class="win-stat"><small>Bots actifs</small><b>3</b><em>en ligne</em></div>
+                  <div class="win-stat"><small>Commandes</small><b>12</b><em>prêtes</em></div>
+                  <div class="win-stat"><small>Apprenants</small><b>8</b><em>suivis</em></div>
+                </div>
+                <div class="win-chart">
+                  <i style="height:38%"></i><i style="height:56%"></i><i style="height:44%"></i><i style="height:72%"></i>
+                  <i style="height:61%"></i><i style="height:88%"></i><i style="height:70%"></i><i style="height:96%"></i>
+                  <i style="height:78%"></i><i style="height:64%"></i><i style="height:90%"></i><i style="height:100%"></i>
+                </div>
+                <div class="win-embed">
+                  <strong>Bienvenue chez nous</strong>
+                  <p>Passe lire les règles, puis présente-toi dans #présentations !</p>
+                  <span>KyllBot Studio · aujourd'hui à 14:02</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="metrics">
+        <div class="container metrics-inner">
+          <div class="metric reveal"><b>2 min</b><span>pour créer votre premier bot</span></div>
+          <div class="metric reveal"><b>4 plans</b><span>dont un plan gratuit</span></div>
+          <div class="metric reveal"><b>CSV / JSON</b><span>exports de vos données</span></div>
+          <div class="metric reveal"><b>RGPD</b><span>données contrôlées par vous</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="duo">
+      <div class="container">
+        <div class="section-head center reveal">
+          <span class="eyebrow">Deux studios, une plateforme</span>
+          <h2>Le meilleur de BotGhost et de Hurix, réuni.</h2>
+          <p>Construisez votre communauté et formez-la au même endroit. Plus de copier-coller entre dix outils.</p>
+        </div>
+        <div class="duo-grid">
+          <article class="duo-card reveal">
+            <span class="duo-tag">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="3" stroke="currentColor" stroke-width="1.5"/><circle cx="6" cy="8" r="1.2" fill="currentColor"/><circle cx="10" cy="8" r="1.2" fill="currentColor"/></svg>
+              Bot Studio
+            </span>
+            <h3>Vos bots Discord, sans une ligne de code</h3>
+            <p>Commandes slash, réponses en embed, automatisations et modération : composez, prévisualisez, publiez.</p>
+            <ul class="duo-list">
+              <li><i class="check">✓</i> Commandes illimitées</li>
+              <li><i class="check">✓</i> Embeds visuels</li>
+              <li><i class="check">✓</i> Accueil &amp; autorôle</li>
+              <li><i class="check">✓</i> Tickets support</li>
+              <li><i class="check">✓</i> Niveaux &amp; XP</li>
+              <li><i class="check">✓</i> Anti-spam</li>
+            </ul>
+            <div class="duo-visual">
+              <div><span class="c"># commande</span> <span class="k">/bienvenue</span></div>
+              <div><span class="c">déclencheur</span> <span class="t">nouveau membre</span></div>
+              <div><span class="c">réponse</span> <span class="s">embed</span> <span class="c">·</span> <span class="k">#7c5cff</span></div>
+              <div><span class="c">automatisation</span> rôle <span class="s">@Membre</span></div>
+            </div>
+          </article>
+
+          <article class="duo-card cyan reveal">
+            <span class="duo-tag">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 3.5h12v9H2z" stroke="currentColor" stroke-width="1.5"/><path d="M5 2v3M11 2v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+              Learning Studio
+            </span>
+            <h3>Des formations qui se suivent et se mesurent</h3>
+            <p>Modules, leçons, quiz notés, certificats et suivi individuel. Vos apprenants progressent, vous le voyez.</p>
+            <ul class="duo-list">
+              <li><i class="check">✓</i> Modules &amp; leçons</li>
+              <li><i class="check">✓</i> Quiz notés</li>
+              <li><i class="check">✓</i> Progression live</li>
+              <li><i class="check">✓</i> Certificats</li>
+              <li><i class="check">✓</i> Export SCORM / xAPI</li>
+              <li><i class="check">✓</i> Classes live</li>
+            </ul>
+            <div class="duo-visual">
+              <div>Module 1 · Fondamentaux <span class="s">3/3</span></div>
+              <div>Module 2 · Commandes <span class="t">2/4</span></div>
+              <div>Quiz final <span class="k">88 %</span></div>
+              <div>Certificat <span class="s">prêt à délivrer</span></div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="features" style="padding-top:20px">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="eyebrow">Fonctionnalités</span>
+          <h2>Tout ce qu'il faut pour lancer, animer et former.</h2>
+          <p>Une interface pensée pour aller vite, des données pensées pour décider.</p>
+        </div>
+        <div class="features-grid">
+          <article class="feature reveal">
+            <div class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2" y="3" width="16" height="14" rx="3" stroke="currentColor" stroke-width="1.6"/><path d="M5.5 7h6M5.5 10h9M5.5 13h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+            <h3>Éditeur visuel</h3>
+            <p>Composez commandes, embeds et parcours à la souris, avec un aperçu Discord fidèle en direct.</p>
+          </article>
+          <article class="feature reveal">
+            <div class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M11 2 4 11h5l-1 7 8-9.5h-5L11 2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
+            <h3>Automatisations</h3>
+            <p>Accueil, autorôle, niveaux, anti-spam, tickets : activez un scénario en un clic, sans code.</p>
+          </article>
+          <article class="feature reveal">
+            <div class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="1.6"/><path d="M7 10.5 9 12.5l4-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <h3>Quiz &amp; évaluations</h3>
+            <p>Questions à choix multiples, points, seuils de réussite et certificats délivrés automatiquement.</p>
+          </article>
+          <article class="feature reveal">
+            <div class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 16V9M8 16V4M13 16v-5M18 16v-9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></div>
+            <h3>Suivi des apprenants</h3>
+            <p>Progression, scores et dernière activité : chaque apprenant est mesuré, exportable en un clic.</p>
+          </article>
+          <article class="feature reveal">
+            <div class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.5 16 5v5c0 3.8-2.5 6.5-6 7.5-3.5-1-6-3.7-6-7.5V5l6-2.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
+            <h3>Analytics unifiées</h3>
+            <p>Commandes exécutées, taux de complétion, activité par bot : des décisions, pas des devinettes.</p>
+          </article>
+          <article class="feature reveal">
+            <div class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="3" stroke="currentColor" stroke-width="1.6"/><path d="M2 17c0-2.8 2.2-5 5-5s5 2.2 5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M13 6.5a2.5 2.5 0 1 1 0 5M15 16.5c0-2-.8-3.4-2-4.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+            <h3>Équipe &amp; API</h3>
+            <p>Invitez vos collaborateurs, attribuez les rôles et branchez l'API à vos propres outils.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="templates" style="padding-top:10px">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="eyebrow">Modèles prêts à l'emploi</span>
+          <h2>Démarrez avec un modèle, personnalisez tout.</h2>
+          <p>Bots complets et formations clés en main : dupliquez, adaptez votre marque, publiez.</p>
+        </div>
+        <div class="templates-grid">
+          <article class="tpl-card reveal">
+            <div class="tpl-cover c0"><span><svg width="46" height="46" viewBox="0 0 20 20" fill="none"><circle cx="7" cy="7.5" r="2.6" stroke="#fff" stroke-width="1.4"/><path d="M2.5 16c0-2.5 2-4.4 4.5-4.4S11.5 13.5 11.5 16" stroke="#fff" stroke-width="1.4" stroke-linecap="round"/><circle cx="14" cy="7" r="2" stroke="#fff" stroke-width="1.4"/></svg></span></div>
+            <div class="tpl-body">
+              <div class="tpl-kicker">Bot Discord</div>
+              <h3>Communauté &amp; accueil</h3>
+              <p>Accueil personnalisé, autorôle, niveaux et panneau de tickets.</p>
+              <div class="tpl-meta"><span>12 commandes</span><span>5 automatisations</span></div>
+            </div>
+          </article>
+          <article class="tpl-card reveal">
+            <div class="tpl-cover c1"><span><svg width="46" height="46" viewBox="0 0 20 20" fill="none"><path d="M10 4.5 2.8 7.6 10 10.7l7.2-3.1L10 4.5Z" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.2 9.4v4.1c0 1.2 2.1 2.4 4.8 2.4s4.8-1.2 4.8-2.4V9.4" stroke="#fff" stroke-width="1.4" stroke-linecap="round"/></svg></span></div>
+            <div class="tpl-body">
+              <div class="tpl-kicker">Formation</div>
+              <h3>Onboarding produit</h3>
+              <p>3 modules, 9 leçons, quiz final et certificat automatique.</p>
+              <div class="tpl-meta"><span>3 modules</span><span>Quiz noté</span></div>
+            </div>
+          </article>
+          <article class="tpl-card reveal">
+            <div class="tpl-cover c2"><span><svg width="46" height="46" viewBox="0 0 20 20" fill="none"><path d="M10 2.5 16 5v5c0 3.8-2.5 6.5-6 7.5-3.5-1-6-3.7-6-7.5V5l6-2.5Z" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg></span></div>
+            <div class="tpl-body">
+              <div class="tpl-kicker">Bot Discord</div>
+              <h3>Modération avancée</h3>
+              <p>Anti-spam, anti-raid, sanctions graduées et journal des actions.</p>
+              <div class="tpl-meta"><span>9 commandes</span><span>4 automatisations</span></div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" style="padding-top:20px">
+      <div class="container">
+        <div class="section-head center reveal">
+          <span class="eyebrow">Comment ça marche</span>
+          <h2>Trois étapes, zéro friction.</h2>
+        </div>
+        <div class="steps">
+          <article class="step reveal">
+            <div class="num">01</div>
+            <h3>Créez votre compte</h3>
+            <p>Connectez-vous avec Google ou recevez un code à 6 chiffres par email. Pas de mot de passe à retenir.</p>
+          </article>
+          <article class="step reveal">
+            <div class="num">02</div>
+            <h3>Choisissez un modèle</h3>
+            <p>Bot communautaire, modération, onboarding : partez d'une base solide et adaptez-la à votre univers.</p>
+          </article>
+          <article class="step reveal">
+            <div class="num">03</div>
+            <h3>Publiez et suivez</h3>
+            <p>Activez vos automatisations, publiez vos formations et suivez la progression en temps réel.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="pricing">
+      <div class="container">
+        <div class="section-head center reveal">
+          <span class="eyebrow">Tarifs</span>
+          <h2>Un prix simple. Toute la plateforme.</h2>
+          <p>Commencez gratuitement, puis activez un plan avec vos crédits quotidiens.</p>
+        </div>
+        <div class="pricing-grid">
+          <article class="price-card reveal">
+            <div class="price-name">Gratuit</div>
+            <div class="price-amount"><b>0 €</b><span>/ mois</span></div>
+            <p class="price-desc">Pour découvrir le studio et lancer un premier bot.</p>
+            <ul class="price-list">
+              <li><i class="check">✓</i> 3 bots Discord</li>
+              <li><i class="check">✓</i> 3 formations</li>
+              <li><i class="check">✓</i> 100 apprenants</li>
+              <li><i class="check">✓</i> 50 commandes par bot</li>
+              <li><i class="check">✓</i> Récompense quotidienne</li>
+            </ul>
+            <a class="btn btn-ghost" href="/login">Commencer</a>
+          </article>
+          <article class="price-card reveal">
+            <div class="price-name">Essentiel</div>
+            <div class="price-amount"><b>9 €</b><span>/ mois</span></div>
+            <p class="price-desc">Pour animer une communauté active.</p>
+            <ul class="price-list">
+              <li><i class="check">✓</i> 6 bots Discord</li>
+              <li><i class="check">✓</i> 15 formations</li>
+              <li><i class="check">✓</i> 500 apprenants</li>
+              <li><i class="check">✓</i> 80 commandes par bot</li>
+              <li><i class="check">✓</i> Certificats &amp; exports</li>
+            </ul>
+            <a class="btn btn-ghost" href="/login">Choisir Essentiel</a>
+          </article>
+          <article class="price-card featured reveal">
+            <div class="price-name">Pro</div>
+            <div class="price-amount"><b>19 €</b><span>/ mois</span></div>
+            <p class="price-desc">Pour les communautés actives et les formateurs indépendants.</p>
+            <ul class="price-list">
+              <li><i class="check">✓</i> 15 bots Discord</li>
+              <li><i class="check">✓</i> 60 formations</li>
+              <li><i class="check">✓</i> 3 000 apprenants</li>
+              <li><i class="check">✓</i> 150 commandes par bot</li>
+              <li><i class="check">✓</i> Webhooks &amp; API</li>
+              <li><i class="check">✓</i> Support sous 48 h</li>
+            </ul>
+            <a class="btn btn-primary" href="/login">Choisir Pro</a>
+          </article>
+          <article class="price-card reveal">
+            <div class="price-name">Studio</div>
+            <div class="price-amount"><b>49 €</b><span>/ mois</span></div>
+            <p class="price-desc">Pour les équipes et les organismes de formation.</p>
+            <ul class="price-list">
+              <li><i class="check">✓</i> Bots et formations illimités</li>
+              <li><i class="check">✓</i> Apprenants illimités</li>
+              <li><i class="check">✓</i> 300 commandes par bot</li>
+              <li><i class="check">✓</i> Marque blanche</li>
+              <li><i class="check">✓</i> API avancée</li>
+              <li><i class="check">✓</i> Support prioritaire</li>
+            </ul>
+            <a class="btn btn-ghost" href="/login">Choisir Studio</a>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" style="padding-top:0">
+      <div class="container">
+        <div class="cta-band reveal">
+          <span class="badge"><span class="dot"></span> Nouveau compte : 14 jours de Pro offerts</span>
+          <h2 style="margin-top:20px">Votre studio vous attend.</h2>
+          <p>Créez votre premier bot et votre première formation en moins de deux minutes.</p>
+          <div class="hero-cta">
+            <a class="btn btn-primary btn-lg" href="/login">Ouvrir KyllBot Studio</a>
+            <a class="btn btn-ghost btn-lg" href="#duo">Revoir les fonctionnalités</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="/">
+            <img src="/assets/logo.svg" alt="" width="34" height="34" />
+            KyllBot Studio <span class="brand-suffix">Officiel</span>
+          </a>
+          <p>Le studio tout-en-un pour vos bots Discord et vos formations interactives.</p>
+        </div>
+        <div class="footer-col">
+          <h4>Produit</h4>
+          <a href="#duo">Bot Studio</a>
+          <a href="#duo">Learning Studio</a>
+          <a href="#templates">Modèles</a>
+          <a href="#pricing">Tarifs</a>
+        </div>
+        <div class="footer-col">
+          <h4>Ressources</h4>
+          <a href="/login">Documentation</a>
+          <a href="/login">Centre d'aide</a>
+          <a href="/login">Statut du service</a>
+          <a href="/login">Nouveautés</a>
+        </div>
+        <div class="footer-col">
+          <h4>Entreprise</h4>
+          <a href="/legal#contact">À propos</a>
+          <a href="/legal#privacy">Confidentialité</a>
+          <a href="/legal#terms">Conditions</a>
+          <a href="/legal#contact">Contact</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>© <span id="year">2026</span> KyllBot Studio Officiel. Tous droits réservés.</span>
+        <span>Conçu pour les créateurs et les formateurs.</span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/js/pwa.js"></script>
+  <script src="/js/v17/landing.js"></script>
+</body>
+</html>

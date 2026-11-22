@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Site/application déconnecté — KyllBot Studio</title>
+  <meta name="theme-color" content="#07060d" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background:
+        radial-gradient(60% 70% at 50% 0%, rgba(124, 92, 255, 0.24), transparent 70%),
+        #07060d;
+      color: #f4f1ff;
+      font-family: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+      text-align: center;
+    }
+    .card {
+      width: min(470px, 100%);
+      padding: 34px 28px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 22px;
+      background: rgba(18, 15, 34, 0.9);
+      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+    }
+    .mark {
+      width: 58px;
+      height: 58px;
+      margin: 0 auto 16px;
+      display: grid;
+      place-items: center;
+      border-radius: 18px;
+      background: linear-gradient(135deg, #7c5cff, #b45cff 55%, #22d3ee);
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -0.06em;
+    }
+    h1 { margin: 0 0 10px; font-size: 24px; letter-spacing: -0.03em; }
+    p { margin: 0 0 22px; color: #a9a1c4; font-size: 14px; line-height: 1.65; }
+    button {
+      width: 100%;
+      border: 0;
+      border-radius: 11px;
+      padding: 13px 18px;
+      font: inherit;
+      font-weight: 700;
+      color: #fff;
+      cursor: pointer;
+      background: linear-gradient(135deg, #7c5cff, #b45cff 55%, #22d3ee);
+    }
+    button:disabled { cursor: wait; opacity: 0.7; }
+    .status { min-height: 20px; margin: 14px 0 0; font-size: 12px; color: #a9a1c4; }
+    .status.error { color: #ff9b9b; }
+    .hint { margin: 18px 0 0; font-size: 11px; color: #6f6a8f; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="mark" aria-hidden="true">K</div>
+    <h1>Le site/application est déconnecté</h1>
+    <p>Le processus s’est arrêté ou n’a pas encore démarré. Clique sur le bouton pour le relancer. La page se rechargera automatiquement dès que le site/application sera disponible.</p>
+    <button type="button" id="restart">Redémarrer le site/application</button>
+    <p class="status" id="status" role="status" aria-live="polite"></p>
+    <p class="hint">Si le problème continue, vérifie que le serveur et le gateway sont bien lancés.</p>
+  </main>
+  <script>
+    const button = document.getElementById('restart');
+    const status = document.getElementById('status');
+    let busy = false;
+
+    function setStatus(message, error = false) {
+      status.textContent = message;
+      status.classList.toggle('error', error);
+    }
+
+    async function restart() {
+      if (busy) return;
+      busy = true;
+      button.disabled = true;
+      setStatus('Redémarrage du site/application…');
+      try {
+        const response = await fetch('/__restart', {
+          method: 'POST',
+          headers: { Accept: 'application/json' },
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.ok) throw new Error(data.error || 'Le redémarrage a échoué.');
+        setStatus('Site/application redémarré. Rechargement…');
+        setTimeout(() => location.reload(), 700);
+      } catch (error) {
+        setStatus(error.message || 'Redémarrage impossible. Réessaie dans quelques secondes.', true);
+        button.disabled = false;
+        busy = false;
+      }
+    }
+
+    async function watch() {
+      try {
+        const response = await fetch('/__gateway/health', { cache: 'no-store' });
+        const data = await response.json();
+        if (data.app === 'up' && location.pathname !== '/server-down.html') location.reload();
+      } catch {
+        /* le gateway ne répond pas encore */
+      }
+    }
+
+    button.addEventListener('click', restart);
+    setInterval(watch, 4000);
+  </script>
+</body>
+</html>
