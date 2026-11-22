@@ -105,7 +105,16 @@ app.use((req, res, next) => {
 
 app.get('/healthz', (req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json({ ok: true, pid: process.pid, uptime: Math.round(process.uptime()), storage: storageMode });
+  res.json({
+    ok: true,
+    pid: process.pid,
+    uptime: Math.round(process.uptime()),
+    storage: storageMode,
+    env: {
+      supabaseUrl: Boolean(process.env.SUPABASE_URL),
+      supabaseServiceRoleKey: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
+    },
+  });
 });
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
