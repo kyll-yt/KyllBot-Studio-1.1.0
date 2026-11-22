@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
-import { db, findUserByEmail, findUserById, flushPersistence, newId, persist, storageMode } from './db.js';
+import { db, findUserByEmail, findUserById, flushPersistence, newId, persist, storageError, storageMode } from './db.js';
 import {
   clearCookie,
   createSession,
@@ -110,6 +110,7 @@ app.get('/healthz', (req, res) => {
     pid: process.pid,
     uptime: Math.round(process.uptime()),
     storage: storageMode,
+    storageError: storageError || null,
     env: {
       supabaseUrl: Boolean(process.env.SUPABASE_URL),
       supabaseServiceRoleKey: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),

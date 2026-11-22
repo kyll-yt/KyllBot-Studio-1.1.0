@@ -30,6 +30,7 @@ function load() {
 const localState = load();
 let initialState = localState;
 let remoteWritesEnabled = remoteStoreEnabled;
+export let storageError = null;
 
 if (remoteStoreEnabled) {
   try {
@@ -38,6 +39,7 @@ if (remoteStoreEnabled) {
     console.log(`[db] stockage Supabase activé (${remoteState ? 'état chargé' : 'nouvel état'})`);
   } catch (error) {
     remoteWritesEnabled = false;
+    storageError = error.message;
     console.error(`[db] Supabase indisponible : ${error.message}`);
     console.error('[db] démarrage avec le fichier local ; écritures Supabase désactivées.');
   }

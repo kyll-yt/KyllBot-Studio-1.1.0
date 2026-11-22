@@ -1,7 +1,8 @@
-const SUPABASE_URL = String(process.env.SUPABASE_URL || '').replace(/\/+$/, '');
-const SUPABASE_KEY = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '');
-const TABLE = String(process.env.SUPABASE_STATE_TABLE || 'kyll_state');
-const STATE_ID = String(process.env.SUPABASE_STATE_ID || 'default');
+const RAW_URL = String(process.env.SUPABASE_URL || '').trim().replace(/\/+$/, '');
+const SUPABASE_URL = RAW_URL.replace(/\/rest\/v1$/i, '');
+const SUPABASE_KEY = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+const TABLE = String(process.env.SUPABASE_STATE_TABLE || 'kyll_state').trim();
+const STATE_ID = String(process.env.SUPABASE_STATE_ID || 'default').trim();
 
 export const remoteStoreEnabled = Boolean(SUPABASE_URL && SUPABASE_KEY);
 
