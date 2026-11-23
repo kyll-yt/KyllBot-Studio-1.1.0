@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadRemoteState, remoteStoreEnabled, saveRemoteState } from './supabase-store.js';
+import { loadRemoteState, remoteStoreEnabled, remoteStoreInfo, saveRemoteState } from './supabase-store.js';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
@@ -30,11 +30,28 @@ function load() {
 const localState = load();
 let initialState = localState;
 let remoteWritesEnabled = remoteStoreEnabled;
+let lastRemoteSaveAt = null;
+let remotePending = 0;
 export let storageError = null;
+if (!remoteStoreEnabled && remoteStoreInfo.configError) storageError = remoteStoreInfo.configError;
+
+async function loadRemoteWithRetry() {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await loadRemoteState();
+    } catch (error) {
+      if (attempt === 3) throw error;
+      console.warn(`[db] Supabase tentative ${attempt}/3 échouée : ${error.message}`);
+      await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+    }
+  }
+  return null;
+}
 
 if (remoteStoreEnabled) {
   try {
-    const remoteState = await loadRemoteState();
+    console.log(`[db] Supabase cible ${remoteStoreInfo.host}/${remoteStoreInfo.table} (clé ${remoteStoreInfo.keyRole})`);
+    const remoteState = await loadRemoteWithRetry();
     initialState = remoteState ? { ...emptyState(), ...remoteState } : emptyState();
     console.log(`[db] stockage Supabase activé (${remoteState ? 'état chargé' : 'nouvel état'})`);
   } catch (error) {
@@ -66,9 +83,20 @@ async function saveRemoteWithRetry(snapshot) {
 function queueRemoteSave() {
   if (!remoteWritesEnabled) return;
   const snapshot = structuredClone(db);
+  remotePending += 1;
   remoteQueue = remoteQueue
     .then(() => saveRemoteWithRetry(snapshot))
-    .catch((error) => console.error(`[db] échec de sauvegarde Supabase : ${error.message}`));
+    .then(() => {
+      storageError = null;
+      lastRemoteSaveAt = new Date().toISOString();
+    })
+    .catch((error) => {
+      storageError = error.message;
+      console.error(`[db] échec de sauvegarde Supabase : ${error.message}`);
+    })
+    .finally(() => {
+      remotePending = Math.max(0, remotePending - 1);
+    });
 }
 
 function writeLocalState() {
@@ -78,11 +106,19 @@ function writeLocalState() {
   fs.renameSync(tmp, DB_FILE);
 }
 
+function saveLocalSafely() {
+  try {
+    writeLocalState();
+  } catch (error) {
+    console.error(`[db] écriture locale impossible : ${error.message}`);
+  }
+}
+
 export function persist() {
   if (timer) return;
   timer = setTimeout(() => {
     timer = null;
-    writeLocalState();
+    saveLocalSafely();
     queueRemoteSave();
   }, 60);
 }
@@ -91,10 +127,19 @@ export async function flushPersistence() {
   if (timer) {
     clearTimeout(timer);
     timer = null;
-    writeLocalState();
+    saveLocalSafely();
     queueRemoteSave();
   }
   await remoteQueue;
+}
+
+export function storageStatus() {
+  return {
+    mode: storageMode,
+    error: storageError,
+    lastSaveAt: lastRemoteSaveAt,
+    pending: remotePending,
+  };
 }
 
 export function newId() {

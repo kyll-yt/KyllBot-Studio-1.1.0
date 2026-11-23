@@ -44,6 +44,17 @@ function encryptionKey() {
   return cachedKey;
 }
 
+export function tokenKeySource() {
+  try {
+    if (parseKey(process.env.TOKEN_ENCRYPTION_KEY)) return 'env';
+  } catch {
+    return 'invalid-env';
+  }
+  const authSecret = String(process.env.AUTH_SECRET || '').trim();
+  if (authSecret && authSecret !== 'change-me-in-production') return 'auth-secret';
+  return 'file';
+}
+
 export function encryptSecret(value) {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', encryptionKey(), iv);

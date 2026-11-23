@@ -1037,3 +1037,15 @@ body.pwa-standalone .auth-install { display: none; }
 }
 
 body.pwa-standalone [data-install-app] { display: none !important; }
+
+/* Liste des serveurs Discord d'un bot */
+.server-list-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:10px; }
+.server-list { display:grid; gap:8px; margin-bottom:12px; }
+.server-card { display:flex; align-items:center; gap:11px; width:100%; padding:11px 12px; border:1px solid rgba(255,255,255,.08); border-radius:13px; background:rgba(255,255,255,.025); color:inherit; text-align:left; cursor:pointer; transition:border-color .15s, background .15s; }
+.server-card:hover { border-color:rgba(124,92,255,.45); background:rgba(124,92,255,.08); }
+.server-card.active { border-color:rgba(124,92,255,.7); background:rgba(124,92,255,.12); box-shadow:0 0 0 1px rgba(124,92,255,.15) inset; }
+.server-avatar { width:34px; height:34px; border-radius:10px; display:grid; place-items:center; flex:0 0 auto; font-weight:800; color:#c2b4ff; background:rgba(124,92,255,.16); }
+.server-main { display:flex; flex-direction:column; gap:2px; min-width:0; flex:1; }
+.server-main b { font-size:13px; }
+.server-main small { color:var(--muted-2); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.server-connect { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px; }

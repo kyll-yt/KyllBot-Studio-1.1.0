@@ -202,6 +202,8 @@ const AUTOMATION_DESCRIPTIONS = {
   autoMod: 'Filtre automatiquement les contenus indésirables.',
   logs: 'Journalise les actions de modération.',
   reminders: 'Envoie des rappels de cours aux apprenants.',
+  antiRaid: 'Détecte les vagues d’arrivées, sanctionne les comptes suspects et verrouille le serveur.',
+  repair: 'Restaure automatiquement les salons, rôles et messages du bot après une suppression massive.',
 };
 
 const AUTOMATION_TYPES = [
@@ -212,6 +214,8 @@ const AUTOMATION_TYPES = [
   { type: 'moderation', label: 'Modération automatique' },
   { type: 'antiSpam', label: 'Anti-spam' },
   { type: 'autoMod', label: 'Auto-modération' },
+  { type: 'antiRaid', label: 'Anti-raid' },
+  { type: 'repair', label: 'Réparation salons / rôles' },
   { type: 'logs', label: 'Journaux de modération' },
   { type: 'reminders', label: 'Rappels de formation' },
 ];
@@ -247,6 +251,33 @@ const AUTOMATION_FIELDS = {
     { key: 'category', label: 'Catégorie', placeholder: 'Modération', list: 'categorySuggestions' },
     { key: 'blockLinks', label: 'Bloquer les liens', type: 'boolean' },
   ],
+  antiRaid: [
+    { key: 'joinThreshold', label: 'Arrivées avant déclenchement', type: 'number', min: 2, max: 100, default: 10 },
+    { key: 'joinWindow', label: 'Fenêtre de détection (secondes)', type: 'number', min: 5, max: 300, default: 10 },
+    { key: 'minAccountAgeDays', label: 'Âge minimum du compte (jours, 0 = tous)', type: 'number', min: 0, max: 365, default: 7 },
+    {
+      key: 'action',
+      label: 'Sanction',
+      type: 'select',
+      default: 'kick',
+      options: [
+        ['kick', 'Expulser'],
+        ['ban', 'Bannir'],
+        ['timeout', 'Exclure 10 minutes'],
+      ],
+    },
+    { key: 'lockdown', label: 'Renforcer la vérification du serveur', type: 'boolean', default: true },
+    { key: 'logChannel', label: 'Salon des alertes', placeholder: '#logs', list: 'channelSuggestions' },
+  ],
+  repair: [
+    { key: 'channelDeleteThreshold', label: 'Salons supprimés avant réparation', type: 'number', min: 1, max: 50, default: 3 },
+    { key: 'roleDeleteThreshold', label: 'Rôles supprimés avant réparation', type: 'number', min: 1, max: 50, default: 2 },
+    { key: 'windowSeconds', label: 'Fenêtre de détection (secondes)', type: 'number', min: 10, max: 300, default: 60 },
+    { key: 'restoreMessages', label: 'Restaurer les derniers messages du bot', type: 'boolean', default: true },
+    { key: 'repairChannels', label: 'Restaurer les salons', type: 'boolean', default: true },
+    { key: 'repairRoles', label: 'Restaurer les rôles', type: 'boolean', default: true },
+    { key: 'logChannel', label: 'Salon des alertes', placeholder: '#logs', list: 'channelSuggestions' },
+  ],
   logs: [{ key: 'channel', label: 'Salon des logs', placeholder: '#logs', list: 'channelSuggestions' }],
   reminders: [
     { key: 'channel', label: 'Salon des rappels', placeholder: '#annonces', list: 'channelSuggestions' },
@@ -256,7 +287,7 @@ const AUTOMATION_FIELDS = {
 
 const CHANNEL_SUGGESTIONS = ['#bienvenue', '#général', '#annonces', '#logs', '#support', '#niveaux', '#règles'];
 const CATEGORY_SUGGESTIONS = ['Accueil', 'Support', 'Modération', 'Formation', 'Logs', 'Annonces'];
-const FLOW_ROLES_FALLBACK = ['Membre', 'Modérateur', 'Administrateur', 'Bot', 'VIP'];
+const FLOW_ROLES_FALLBACK = ['everyone', 'Membre', 'Modérateur', 'Administrateur', 'Bot', 'VIP'];
 
 function automationFields(type) {
   return (
@@ -283,12 +314,19 @@ function automationSummary(automation) {
 }
 
 function automationFieldControl(field, value, discord = {}) {
+  value = value ?? field.default;
   const channelOptions = (discord.channels || [])
     .filter((channel) => channel.type !== 'voice')
     .map((channel) => `#${channel.name}`);
   const categoryOptions = discord.categories || [];
-  const roleOptions = (discord.roles || []).map((role) => role.name);
+  const roleOptions = [...new Set(['everyone', ...(discord.roles || []).map((role) => role.name)])];
   const common = `name="${esc(field.key)}" id="auto-${esc(field.key)}"`;
+  if (field.type === 'select') {
+    return `<div class="field"><label for="auto-${esc(field.key)}">${esc(field.label)}</label>
+      <select class="select" ${common}>
+        ${(field.options || []).map(([optionValue, label]) => `<option value="${esc(optionValue)}" ${optionValue === String(value ?? '') ? 'selected' : ''}>${esc(label)}</option>`).join('')}
+      </select></div>`;
+  }
   if (field.type === 'boolean') {
     return `<label class="check-row"><input type="checkbox" ${common} ${value ? 'checked' : ''}> <span>${esc(field.label)}</span></label>`;
   }
@@ -500,6 +538,7 @@ function viewBotDetail(id) {
                       ${automationSummary(automation)}
                     </div>
                     <button class="btn btn-ghost btn-sm" data-action="config-automation" data-id="${esc(bot.id)}" data-auto="${esc(automation.id)}">${icon('gear')} Configurer</button>
+                    ${automation.enabled ? `<button class="btn btn-ghost btn-sm" data-action="run-automation" data-id="${esc(bot.id)}" data-auto="${esc(automation.id)}" title="Déclencher les flux liés à cette automatisation">${icon('play')} Déclencher</button>` : ''}
                     <button class="mini-btn danger" data-action="delete-automation" data-id="${esc(bot.id)}" data-auto="${esc(automation.id)}" title="Supprimer">${icon('trash')}</button>
                     <button class="switch ${automation.enabled ? 'on' : ''}" data-action="toggle-automation" data-id="${esc(bot.id)}" data-auto="${esc(automation.id)}" aria-label="Activer ${esc(automation.label)}"></button>
                   </div>`,
@@ -516,6 +555,8 @@ function viewBotDetail(id) {
     </div>`;
   } else {
     const discord = bot.discord || { name: '', channels: [], categories: [], roles: [], guildId: '' };
+    const servers = Array.isArray(discord.servers) && discord.servers.length ? discord.servers : [discord];
+    const activeServerId = discord.activeGuildId || discord.guildId || servers[0]?.id || '';
     const runtime = bot.runtime || { status: 'offline', logs: [], guilds: [] };
     const runtimeClass =
       runtime.status === 'online' ? 'green' : runtime.status === 'error' ? 'red' : runtime.status === 'starting' ? 'amber' : 'gray';
@@ -561,10 +602,44 @@ function viewBotDetail(id) {
         </div>
       </div>
       <div class="panel-body">
+        <div class="server-list-head">
+          <div>
+            <b>Serveurs connectés</b>
+            <p class="hint" style="margin:3px 0 0">Choisis un serveur : les salons, catégories et rôles affichés ensuite sont uniquement ceux de ce serveur.</p>
+          </div>
+          <span class="pill violet">${servers.length} serveur(s)</span>
+        </div>
+        <div class="server-list">
+          ${servers
+            .map(
+              (server) => `<button type="button" class="server-card ${server.id === activeServerId ? 'active' : ''}" data-action="bot-select-server" data-id="${esc(bot.id)}" data-guild="${esc(server.guildId || server.id)}">
+                <span class="server-avatar">${esc((server.name || 'S').slice(0, 1).toUpperCase())}</span>
+                <span class="server-main">
+                  <b>${esc(server.name || 'Serveur Discord')}</b>
+                  <small>${server.guildId ? `ID ${esc(server.guildId)}` : 'Non connecté à Discord'} · ${server.channels?.length || 0} salon(s) · ${server.roles?.length || 0} rôle(s)</small>
+                </span>
+                ${server.id === activeServerId ? '<span class="pill green">Actif</span>' : '<span class="pill gray">Choisir</span>'}
+              </button>`,
+            )
+            .join('')}
+        </div>
+        ${
+          knownGuilds.filter((guild) => !servers.some((server) => server.guildId === guild.id)).length
+            ? `<div class="server-connect">
+                <span class="hint">Autres serveurs détectés avec ce token :</span>
+                ${knownGuilds
+                  .filter((guild) => !servers.some((server) => server.guildId === guild.id))
+                  .map(
+                    (guild) => `<button class="btn btn-ghost btn-sm" data-action="bot-connect-server" data-id="${esc(bot.id)}" data-guild="${esc(guild.id)}">${icon('plus')} Connecter ${esc(guild.name)}</button>`,
+                  )
+                  .join('')}
+              </div>`
+            : ''
+        }
         <p class="hint">${
           discord.syncedAt
-            ? `Dernière synchronisation Discord : ${esc(timeAgo(discord.syncedAt))}. Les listes ci-dessous viennent de ton serveur.`
-            : 'Ces listes sont des données de démonstration. Clique sur « Synchroniser depuis Discord » pour récupérer les vrais salons, catégories et rôles.'
+            ? `Dernière synchronisation Discord : ${esc(timeAgo(discord.syncedAt))}. Les listes ci-dessous viennent du serveur actif.`
+            : 'Ces listes sont des données de démonstration. Clique sur « Synchroniser depuis Discord » pour récupérer les vrais salons, catégories et rôles du serveur actif.'
         }</p>
         <form data-form="bot-discord" data-id="${esc(bot.id)}">
           <div class="field"><label for="bdName">Nom du serveur</label><input class="input" id="bdName" name="serverName" value="${esc(discord.name)}"></div>
@@ -1322,6 +1397,30 @@ onAction('bot-sync-discord', async (el) => {
   }
 });
 
+onAction('bot-select-server', async (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  if (!bot) return;
+  try {
+    await api(`/api/bots/${bot.id}/discord/server`, { method: 'POST', body: JSON.stringify({ guildId: el.dataset.guild }) });
+    await refresh();
+    toast('Serveur actif changé. Les salons et rôles affichés sont ceux de ce serveur.', 'info');
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+});
+
+onAction('bot-connect-server', async (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  if (!bot) return;
+  try {
+    const result = await api(`/api/bots/${bot.id}/discord/sync`, { method: 'POST', body: JSON.stringify({ guildId: el.dataset.guild }) });
+    toast(`${result.guildName || 'Serveur'} connecté : ${result.channels} salons et ${result.roles} rôles.`, 'success');
+    await refresh();
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+});
+
 onAction('bot-restart', async (el) => {
   const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
   if (!bot) return;
@@ -1563,6 +1662,23 @@ onAction('config-automation', (el) => {
     },
   });
   bindAutomationPickers(form);
+});
+
+onAction('run-automation', async (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  const automation = bot?.automations.find((entry) => entry.id === el.dataset.auto);
+  if (!bot || !automation) return;
+  try {
+    const result = await api(`/api/bots/${bot.id}/automations/${automation.id}/run`, { method: 'POST' });
+    toast(
+      result.count
+        ? `${result.count} flux déclenché(s) par « ${automation.label} ».`
+        : `Aucun flux n’est configuré sur le déclencheur « Automatisation » pour ${automation.label}.`,
+      result.count ? 'success' : 'info',
+    );
+  } catch (error) {
+    toast(error.message, 'error');
+  }
 });
 
 onAction('toggle-automation', async (el) => {

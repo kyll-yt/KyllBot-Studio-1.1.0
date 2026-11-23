@@ -12,6 +12,8 @@ const FLOW_TRIGGERS = {
   schedule: { label: 'Planification', icon: 'clock' },
   dm: { label: 'Message privé reçu', icon: 'mail' },
   botJoin: { label: 'Arrivée d’un bot', icon: 'bot' },
+  booster: { label: 'Boost du serveur', icon: 'spark' },
+  automation: { label: 'Automatisation', icon: 'zap' },
 };
 
 const FLOW_BLOCKS = {
@@ -109,6 +111,8 @@ const FLOW_TEMPLATES = [
   { value: 'botjoin', label: 'Arrivée d’un bot', hint: 'Message, rôle et journal pour un nouveau bot.' },
   { value: 'verification', label: 'Vérification', hint: 'Bouton, formulaire, rôle et journal.' },
   { value: 'giveaway', label: 'Giveaway', hint: 'Tirage, sondage, attente et annonce.' },
+  { value: 'booster', label: 'Remerciement boost', hint: 'Message automatique quand un membre booste le serveur.' },
+  { value: 'automation', label: 'Réaction automatisation', hint: 'Journal et annonce quand une automatisation se déclenche.' },
 ];
 
 
@@ -204,8 +208,11 @@ function flowDiscord() {
     .map((channel) => (typeof channel === 'string'
       ? { name: channel.replace(/^#/, ''), type: 'text', category: '' }
       : channel));
+  const seenRoles = new Set();
   const roles = (Array.isArray(source.roles) && source.roles.length ? source.roles : FLOW_ROLES)
-    .map((role) => (typeof role === 'string' ? { name: role, color: '#7c5cff' } : role));
+    .map((role) => (typeof role === 'string' ? { name: role, color: '#7c5cff' } : role))
+    .filter((role) => role?.name && !seenRoles.has(role.name) && seenRoles.add(role.name))
+    .concat([{ id: 'everyone', name: 'everyone', color: '#94a3b8' }]);
   const categories = Array.isArray(source.categories) && source.categories.length
     ? source.categories
     : [...new Set(channels.map((channel) => channel.category).filter(Boolean))];
@@ -444,6 +451,9 @@ function flowNewBlock(type, x = 120, y = 120) {
         channel: '',
         ephemeral: false,
         silent: false,
+        reply: false,
+        tts: false,
+        suppressEmbeds: false,
         embed: false,
         title: '',
         description: '',
@@ -460,6 +470,19 @@ function flowNewBlock(type, x = 120, y = 120) {
           { id: flowUid(), text: 'Première variante', weight: 1, next: null },
           { id: flowUid(), text: 'Deuxième variante', weight: 1, next: null },
         ],
+      };
+    case 'message':
+      return {
+        ...base,
+        channel: '',
+        text: '',
+        variantMode: false,
+        variants: [],
+        ephemeral: false,
+        reply: false,
+        tts: false,
+        silent: false,
+        suppressEmbeds: false,
       };
     case 'react':
       return { ...base, emoji: '👍' };
@@ -804,9 +827,29 @@ function renderTriggerCard(flow) {
     fields = `<div class="field"><label>Nom du bot (optionnel)</label>
       <input class="input" data-trigger="botName" value="${esc(trigger.botName || '')}" placeholder="Tous les bots"></div>
       <p class="hint">Laissez vide pour réagir à l’arrivée de n’importe quel bot.</p>`;
+  } else if (type === 'automation') {
+    const options = [
+      ['welcome', "Message d'accueil"],
+      ['autorole', 'Rôle automatique'],
+      ['levels', 'Niveaux et XP'],
+      ['ticketPanel', 'Panneau de tickets'],
+      ['moderation', 'Modération automatique'],
+      ['antiSpam', 'Anti-spam'],
+      ['autoMod', 'Auto-modération'],
+      ['antiRaid', 'Anti-raid'],
+      ['repair', 'Réparation salons / rôles'],
+      ['logs', 'Journaux de modération'],
+      ['reminders', 'Rappels de formation'],
+    ];
+    fields = `<div class="field"><label>Automatisation déclencheuse</label>
+      <select class="select" data-trigger="automationType">
+        <option value="">Toutes les automatisations</option>
+        ${options.map(([value, label]) => `<option value="${value}" ${trigger.automationType === value ? 'selected' : ''}>${label}</option>`).join('')}
+      </select></div>
+      <p class="hint">Le flux démarre quand cette automatisation est déclenchée (ou manuellement avec le bouton « Déclencher »).</p>`;
   }
 
-  if (['slash', 'keyword', 'join', 'leave', 'reaction', 'button'].includes(type)) {
+  if (['slash', 'keyword', 'join', 'leave', 'reaction', 'button', 'booster'].includes(type)) {
     fields += `<div class="form-row">
       <div class="field"><label>Salon (optionnel)</label>
         <input class="input" data-trigger="channel" list="flowChannelSuggestions" value="${esc(trigger.channel || '')}" placeholder="#général">
@@ -1806,18 +1849,49 @@ function renderNodeFields(block) {
   const bind = (name) => `data-node="${block.id}" data-field="${name}"`;
 
   switch (block.type) {
-    case 'message':
+    case 'message': {
+      const variants = Array.isArray(block.variants) ? block.variants : (block.variants = []);
+      const total = variants.reduce((sum, variant) => sum + (Number(variant.weight) || 1), 0);
       return `<div class="fld-row">
           ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel), 'grow')}
           ${nodeField('Éphémère', `<button class="switch ${block.ephemeral ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="ephemeral"></button>`, 'shrink')}
+          ${nodeField('Variantes aléatoires', `<button class="switch ${block.variantMode ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="variantMode"></button>`, 'shrink')}
         </div>
-        ${nodeField('Message', `<textarea class="textarea" rows="3" ${bind('text')} placeholder="Bienvenue {{user.mention}} !">${esc(block.text)}</textarea>`)}
+        ${block.variantMode
+          ? `<p class="hint">Le texte est tiré au hasard parmi les variantes ci-dessous. Le poids règle la probabilité.</p>
+            <div class="variant-editor-head">
+              <b>${variants.length} variante(s)</b>
+              <span>Total ${total} points</span>
+            </div>
+            <div class="variants">${variants
+              .map((variant, index) => {
+                const percent = total ? Math.round(((Number(variant.weight) || 1) / total) * 100) : 0;
+                return `<div class="variant-row">
+                  <span class="variant-badge">V${index + 1}</span>
+                  <div class="variant-main">
+                    <textarea class="textarea" rows="2" data-node="${block.id}" data-variant="${index}" data-variant-field="text" placeholder="Texte de la variante">${esc(variant.text)}</textarea>
+                    <div class="variant-meta">
+                      <label>Poids <input class="input weight" type="number" min="1" max="100" data-node="${block.id}" data-variant="${index}" data-variant-field="weight" value="${variant.weight}"></label>
+                      <span class="variant-percent">${percent} %</span>
+                    </div>
+                  </div>
+                  <button class="mini-btn danger" data-action="flow-del-variant" data-id="${block.id}" data-index="${index}" title="Supprimer">${icon('x')}</button>
+                </div>`;
+              })
+              .join('')}</div>
+            <div class="variant-actions">
+              <button class="link-btn" data-action="flow-add-variant" data-id="${block.id}">${icon('plus')} Ajouter une variante</button>
+              <button class="link-btn" data-action="flow-variant-bank" data-id="${block.id}">${icon('shuffle')} Banque (48)</button>
+              <button class="link-btn" data-action="flow-balance-variants" data-id="${block.id}">${icon('chart')} Répartir équitablement</button>
+            </div>`
+          : nodeField('Message', `<textarea class="textarea" rows="3" ${bind('text')} placeholder="Bienvenue {{user.mention}} !">${esc(block.text)}</textarea>`)}
         <div class="fld-row">
           ${nodeField('Répondre au message', `<button class="switch ${block.reply ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="reply"></button>`, 'shrink')}
           ${nodeField('Vocal', `<button class="switch ${block.tts ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="tts"></button>`, 'shrink')}
           ${nodeField('Silencieux', `<button class="switch ${block.silent ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="silent"></button>`, 'shrink')}
           ${nodeField('Masquer les embeds', `<button class="switch ${block.suppressEmbeds ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="suppressEmbeds"></button>`, 'shrink')}
         </div>`;
+    }
     case 'embed':
       return `<div class="fld-row">
           ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel), 'grow')}
@@ -1902,6 +1976,9 @@ function renderNodeFields(block) {
           ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel), 'grow')}
           ${nodeField('Éphémère', `<button class="switch ${block.ephemeral ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="ephemeral"></button>`, 'shrink')}
           ${nodeField('Silencieux', `<button class="switch ${block.silent ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="silent"></button>`, 'shrink')}
+          ${nodeField('Répondre', `<button class="switch ${block.reply ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="reply"></button>`, 'shrink')}
+          ${nodeField('Vocal', `<button class="switch ${block.tts ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="tts"></button>`, 'shrink')}
+          ${nodeField('Masquer les embeds', `<button class="switch ${block.suppressEmbeds ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="suppressEmbeds"></button>`, 'shrink')}
         </div>
         <div class="fld-row">
           ${nodeField('Réponse en embed', `<button class="switch ${block.embed ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="embed"></button>`, 'grow')}
@@ -3198,6 +3275,13 @@ onAction('flow-node-toggle', (el) => {
   const block = flowNode(el.dataset.id);
   if (!block) return;
   block[el.dataset.field] = !block[el.dataset.field];
+  if (el.dataset.field === 'variantMode' && block.variantMode && !Array.isArray(block.variants)) {
+    block.variants = [];
+  }
+  if (el.dataset.field === 'variantMode' && block.variantMode && !block.variants.length) {
+    block.variants.push({ id: flowUid(), text: block.text || 'Première variante', weight: 1, next: null });
+    block.variants.push({ id: flowUid(), text: 'Deuxième variante', weight: 1, next: null });
+  }
   flowEditor.dirty = true;
   if (flowEditor.editBlockId === block.id && document.getElementById('modalForm')) {
     refreshBlockEditor(block.id);
@@ -3389,6 +3473,7 @@ onAction('flow-button-toggle', (el) => {
 onAction('flow-add-variant', (el) => {
   const block = flowNode(el.dataset.id);
   if (!block) return;
+  if (!Array.isArray(block.variants)) block.variants = [];
   if (block.variants.length >= 20) return toast('20 variantes maximum par bloc.', 'error');
   block.variants.push({ id: flowUid(), text: '', weight: 1, next: null });
   flowEditor.dirty = true;
@@ -3401,7 +3486,9 @@ onAction('flow-add-variant', (el) => {
 
 onAction('flow-del-variant', (el) => {
   const block = flowNode(el.dataset.id);
-  if (!block || block.variants.length <= 1) return toast('Gardez au moins une variante.', 'error');
+  if (!block) return;
+  if (!Array.isArray(block.variants)) block.variants = [];
+  if (block.variants.length <= 1) return toast('Gardez au moins une variante.', 'error');
   block.variants.splice(Number(el.dataset.index), 1);
   flowEditor.dirty = true;
   if (flowEditor.editBlockId === block.id && document.getElementById('modalForm')) {
@@ -3414,6 +3501,7 @@ onAction('flow-del-variant', (el) => {
 onAction('flow-balance-variants', (el) => {
   const block = flowNode(el.dataset.id);
   if (!block) return;
+  if (!Array.isArray(block.variants)) block.variants = [];
   block.variants.forEach((variant) => (variant.weight = 1));
   flowEditor.dirty = true;
   if (flowEditor.editBlockId === block.id && document.getElementById('modalForm')) {
@@ -3455,6 +3543,7 @@ onAction('flow-bank-add', (el) => {
   const group = VARIANT_BANK[Number(el.dataset.group)];
   const text = group?.items[Number(el.dataset.index)];
   if (!block || !text) return;
+  if (!Array.isArray(block.variants)) block.variants = [];
   if (block.variants.length >= 20) return toast('20 variantes maximum par bloc.', 'error');
   block.variants.push({ id: flowUid(), text, weight: 1, next: null });
   flowEditor.dirty = true;
@@ -3471,6 +3560,7 @@ onAction('flow-bank-theme', (el) => {
   const block = flowNode(el.dataset.id);
   const group = VARIANT_BANK[Number(el.dataset.group)];
   if (!block || !group) return;
+  if (!Array.isArray(block.variants)) block.variants = [];
   const room = 20 - block.variants.length;
   const added = group.items.slice(0, Math.max(0, room));
   for (const text of added) block.variants.push({ id: flowUid(), text, weight: 1, next: null });
@@ -3675,6 +3765,7 @@ document.addEventListener('change', (event) => {
       schedule: '',
       emoji: '',
       botName: previous.botName || '',
+      automationType: previous.automationType || '',
     };
     flowEditor.dirty = true;
     render();

@@ -14,6 +14,8 @@ export const TRIGGERS = {
   schedule: { label: 'Planification' },
   dm: { label: 'Message privé reçu' },
   botJoin: { label: 'Arrivée d’un bot' },
+  booster: { label: 'Boost du serveur' },
+  automation: { label: 'Automatisation' },
 };
 
 export const BLOCKS = {
@@ -269,6 +271,10 @@ function normalizeBlock(block) {
         ...base,
         channel: str(block?.channel, 60),
         text: str(block?.text, 2000),
+        variantMode: Boolean(block?.variantMode),
+        variants: Array.isArray(block?.variants)
+          ? block.variants.slice(0, MAX_VARIANTS).map(normalizeVariant)
+          : [],
         ephemeral: Boolean(block?.ephemeral),
         reply: Boolean(block?.reply),
         tts: Boolean(block?.tts),
@@ -325,6 +331,9 @@ function normalizeBlock(block) {
         channel: str(block?.channel, 60),
         ephemeral: Boolean(block?.ephemeral),
         silent: Boolean(block?.silent),
+        reply: Boolean(block?.reply),
+        tts: Boolean(block?.tts),
+        suppressEmbeds: Boolean(block?.suppressEmbeds),
         embed: Boolean(block?.embed),
         title: str(block?.title, 120),
         url: str(block?.url, 500),
@@ -852,6 +861,7 @@ function normalizeTrigger(trigger) {
     schedule: str(trigger?.schedule, 60),
     emoji: str(trigger?.emoji, 8),
     botName: str(trigger?.botName, 60),
+    automationType: str(trigger?.automationType, 40),
   };
 }
 
@@ -885,6 +895,12 @@ export function describeTrigger(trigger) {
       return 'Déclenché par un message privé';
     case 'botJoin':
       return trigger.botName ? `Déclenché à l’arrivée du bot « ${trigger.botName} »` : 'Déclenché à l’arrivée d’un bot';
+    case 'booster':
+      return 'Déclenché quand un membre booste le serveur';
+    case 'automation':
+      return trigger.automationType
+        ? `Déclenché par l’automatisation « ${trigger.automationType} »`
+        : 'Déclenché par une automatisation';
     default:
       return 'Déclencheur à définir';
   }
@@ -1070,6 +1086,29 @@ export function flowTemplate(template, botName = 'KyllBot') {
     });
   }
 
+  if (template === 'booster') {
+    return sanitizeFlow({
+      ...base,
+      name: 'Remerciement boost',
+      trigger: { type: 'booster' },
+      blocks: [
+        { type: 'message', channel: '#général', text: 'Merci {{user.mention}} pour ton boost sur **{{server.name}}** ! 💜' },
+      ],
+    });
+  }
+
+  if (template === 'automation') {
+    return sanitizeFlow({
+      ...base,
+      name: 'Réaction automatisation',
+      trigger: { type: 'automation', automationType: 'antiRaid' },
+      blocks: [
+        { type: 'log', text: 'Automatisation {{automation}} déclenchée.' },
+        { type: 'message', channel: '#logs', text: '🛡️ Automatisation **{{automation}}** déclenchée sur {{server.name}}.' },
+      ],
+    });
+  }
+
   if (template === 'giveaway') {
     return sanitizeFlow({
       ...base,
@@ -1212,7 +1251,8 @@ export function runFlow(flow, input = {}) {
 
     switch (block.type) {
       case 'message': {
-        const text = interpolate(block.text, ctx, vars);
+        const variant = block.variantMode && block.variants?.length ? pickVariant(block.variants) : null;
+        const text = interpolate(variant?.text || block.text, ctx, vars);
         outputs.push({
           kind: 'message',
           channel: block.channel || ctx.channel,
@@ -1222,6 +1262,7 @@ export function runFlow(flow, input = {}) {
           tts: block.tts,
           silent: block.silent,
           suppressEmbeds: block.suppressEmbeds,
+          variant: variant?.id,
         });
         entry.detail = `${block.channel || ctx.channel} · ${text.slice(0, 90)}`;
         break;
@@ -1245,8 +1286,15 @@ export function runFlow(flow, input = {}) {
             value: interpolate(field.value, ctx, vars),
           })),
         };
-        outputs.push({ kind: 'embed', channel: block.channel || ctx.channel, embed, ephemeral: block.ephemeral, silent: block.silent });
-        entry.detail = embed.title || embed.description.slice(0, 80);
+        outputs.push({
+          kind: 'embed',
+          channel: block.channel || ctx.channel,
+          embed,
+          ephemeral: block.ephemeral,
+          silent: block.silent,
+          suppressEmbeds: block.suppressEmbeds,
+        });
+        entry.detail = embed.title || String(embed.description || '').slice(0, 80);
         break;
       }
       case 'dm': {
@@ -1309,6 +1357,9 @@ export function runFlow(flow, input = {}) {
             },
             ephemeral: block.ephemeral,
             silent: block.silent,
+            reply: block.reply,
+            tts: block.tts,
+            suppressEmbeds: block.suppressEmbeds,
             variant: variant.id,
           });
         } else {
@@ -1318,6 +1369,9 @@ export function runFlow(flow, input = {}) {
             text,
             ephemeral: block.ephemeral,
             silent: block.silent,
+            reply: block.reply,
+            tts: block.tts,
+            suppressEmbeds: block.suppressEmbeds,
             variant: variant.id,
           });
         }

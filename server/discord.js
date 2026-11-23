@@ -81,52 +81,102 @@ function presetFor(bot) {
   return { channels: COMMUNITY_CHANNELS, roles: COMMUNITY_ROLES };
 }
 
-export function defaultDiscordServer(bot = {}) {
-  const preset = presetFor(bot);
+const str = (value, max) => String(value ?? '').trim().slice(0, max);
+
+function normalizeChannel(channel, index) {
   return {
-    name: `Serveur ${bot.name || 'KyllBot'}`,
-    guildId: '',
-    guildName: '',
-    privilegedIntents: true,
-    logChannel: 'logs',
-    channels: preset.channels.map((channel) => ({ ...channel })),
-    categories: [...new Set(preset.channels.map((channel) => channel.category))],
-    roles: preset.roles.map((entry) => ({ ...entry })),
+    id: String(channel?.id || `ch-${index}`).slice(0, 60),
+    name: String(channel?.name || '').replace(/^#/, '').trim().slice(0, 60),
+    type: ['text', 'voice', 'forum'].includes(channel?.type) ? channel.type : 'text',
+    category: String(channel?.category || 'Général').slice(0, 60),
   };
 }
 
-export function normalizeDiscordServer(input, bot = {}) {
-  const fallback = defaultDiscordServer(bot);
-  const channels = Array.isArray(input?.channels) ? input.channels : fallback.channels;
-  const roles = Array.isArray(input?.roles) ? input.roles : fallback.roles;
-  const cleanChannels = channels
-    .map((channel, index) => ({
-      id: String(channel?.id || `ch-${index}`).slice(0, 60),
-      name: String(channel?.name || '').replace(/^#/, '').trim().slice(0, 60),
-      type: ['text', 'voice', 'forum'].includes(channel?.type) ? channel.type : 'text',
-      category: String(channel?.category || 'Général').slice(0, 60),
-    }))
-    .filter((channel) => channel.name);
+function normalizeRole(entry, index) {
+  return {
+    id: String(entry?.id || `role-${index}`).slice(0, 60),
+    name: String(entry?.name || '').trim().slice(0, 60),
+    color: /^#[0-9a-f]{6}$/i.test(String(entry?.color || '')) ? entry.color : '#7c5cff',
+  };
+}
+
+function normalizeServerEntry(input, bot, fallback, index = 0) {
+  const preset = fallback || presetFor(bot);
+  const channels = Array.isArray(input?.channels) ? input.channels : preset.channels;
+  const roles = Array.isArray(input?.roles) ? input.roles : preset.roles;
+  const cleanChannels = channels.map(normalizeChannel).filter((channel) => channel.name);
   const categories = [...new Set([
     ...(Array.isArray(input?.categories) ? input.categories : []),
     ...cleanChannels.map((channel) => channel.category),
   ].map((category) => String(category).trim()).filter(Boolean))].slice(0, 30);
-  const cleanRoles = roles
-    .map((entry, index) => ({
-      id: String(entry?.id || `role-${index}`).slice(0, 60),
-      name: String(entry?.name || '').trim().slice(0, 60),
-      color: /^#[0-9a-f]{6}$/i.test(String(entry?.color || '')) ? entry.color : '#7c5cff',
-    }))
-    .filter((entry) => entry.name);
+  const cleanRoles = roles.map(normalizeRole).filter((entry) => entry.name);
+  const guildId = /^\d{17,20}$/.test(String(input?.guildId || '').trim()) ? String(input.guildId).trim() : '';
   return {
-    name: String(input?.name || fallback.name).slice(0, 80),
-    guildId: /^\d{17,20}$/.test(String(input?.guildId || '').trim()) ? String(input.guildId).trim() : '',
-    guildName: String(input?.guildName || '').trim().slice(0, 100),
+    id: guildId || str(input?.id, 60) || `local-${index + 1}`,
+    name: str(input?.name, 80) || `Serveur ${bot?.name || 'KyllBot'}`,
+    guildId,
+    guildName: str(input?.guildName, 100),
     privilegedIntents: input?.privilegedIntents !== false,
     logChannel: String(input?.logChannel || 'logs').replace(/^#/, '').trim().slice(0, 60) || 'logs',
     channels: cleanChannels,
-    categories: categories.length ? categories : fallback.categories,
+    categories: categories.length ? categories : preset.categories,
     roles: cleanRoles,
     syncedAt: /^\d{4}-\d{2}-\d{2}T/.test(String(input?.syncedAt || '')) ? String(input.syncedAt).slice(0, 40) : '',
   };
+}
+
+export function defaultDiscordServer(bot = {}) {
+  const preset = presetFor(bot);
+  const server = normalizeServerEntry(
+    {
+      name: `Serveur ${bot.name || 'KyllBot'}`,
+      guildId: '',
+      guildName: '',
+      privilegedIntents: true,
+      logChannel: 'logs',
+      channels: preset.channels,
+      categories: [...new Set(preset.channels.map((channel) => channel.category))],
+      roles: preset.roles,
+    },
+    bot,
+    preset,
+  );
+  return { ...server, servers: [server], activeGuildId: server.id };
+}
+
+export function normalizeDiscordServer(input, bot = {}) {
+  const fallback = defaultDiscordServer(bot);
+  const rawServers = Array.isArray(input?.servers) ? input.servers : null;
+  const servers = (rawServers || [input])
+    .map((entry, index) => normalizeServerEntry(entry, bot, fallback, index))
+    .filter((entry) => entry.name);
+  if (!servers.length) servers.push(normalizeServerEntry({}, bot, fallback));
+  const activeKey = String(input?.activeGuildId || input?.guildId || '').trim();
+  const active = servers.find((entry) => entry.id === activeKey || entry.guildId === activeKey) || servers[0];
+  return { ...active, servers, activeGuildId: active.id };
+}
+
+export function activeDiscordServer(discord) {
+  const servers = Array.isArray(discord?.servers) ? discord.servers : [];
+  if (!servers.length) return discord || null;
+  const key = String(discord?.activeGuildId || discord?.guildId || '').trim();
+  return servers.find((entry) => entry.id === key || entry.guildId === key) || servers[0];
+}
+
+export function upsertDiscordServer(discord, serverInput, bot = {}) {
+  const current = normalizeDiscordServer(discord, bot);
+  const server = normalizeServerEntry(serverInput, bot, current);
+  const servers = current.servers.filter((entry) => {
+    if (server.guildId && !entry.guildId && String(entry.id).startsWith('local-')) return false;
+    return entry.id !== server.id && entry.guildId !== server.guildId;
+  });
+  servers.unshift(server);
+  return { ...server, servers, activeGuildId: server.id };
+}
+
+export function selectDiscordServer(discord, key, bot = {}) {
+  const current = normalizeDiscordServer(discord, bot);
+  const target = current.servers.find((entry) => entry.id === String(key) || entry.guildId === String(key));
+  if (!target) return current;
+  return { ...target, servers: current.servers, activeGuildId: target.id };
 }

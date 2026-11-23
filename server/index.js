@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
-import { db, findUserByEmail, findUserById, flushPersistence, newId, persist, storageError, storageMode } from './db.js';
+import { db, findUserByEmail, findUserById, flushPersistence, newId, persist, storageStatus } from './db.js';
+import { remoteStoreInfo } from './supabase-store.js';
 import {
   clearCookie,
   createSession,
@@ -24,11 +25,19 @@ import {
 } from './auth.js';
 import { seedWorkspace } from './seed.js';
 import { pushActivity, recordEvent } from './activity.js';
-import { defaultDiscordServer, normalizeDiscordServer } from './discord.js';
-import { encryptSecret } from './secrets.js';
+import {
+  activeDiscordServer,
+  defaultDiscordServer,
+  normalizeDiscordServer,
+  selectDiscordServer,
+  upsertDiscordServer,
+} from './discord.js';
+import { encryptSecret, tokenKeySource } from './secrets.js';
 import {
   autostartBots,
   getBotRuntime,
+  refreshBotSnapshots,
+  runAutomationTrigger,
   sendSavedMessageNow,
   sendScheduledMessageNow,
   sendTestMessage,
@@ -79,8 +88,23 @@ app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(express.json({ limit: '256kb' }));
 
+const apiHits = new Map();
 app.use('/api', (req, res, next) => {
   res.set('Cache-Control', 'no-store');
+  const now = Date.now();
+  const key = req.ip || 'unknown';
+  const bucket = (apiHits.get(key) || []).filter((time) => now - time < 60_000);
+  bucket.push(now);
+  apiHits.set(key, bucket);
+  if (apiHits.size > 5000) {
+    for (const [ip, times] of apiHits) {
+      if (!times.some((time) => now - time < 60_000)) apiHits.delete(ip);
+    }
+  }
+  if (bucket.length > 600) {
+    res.set('Retry-After', '60');
+    return res.status(429).json({ error: 'Trop de requêtes. Réessaie dans une minute.' });
+  }
   next();
 });
 
@@ -88,6 +112,12 @@ app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+  if (process.env.NODE_ENV === 'production' || req.secure) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
   res.setHeader(
     'Content-Security-Policy',
     [
@@ -104,16 +134,30 @@ app.use((req, res, next) => {
 });
 
 app.get('/healthz', (req, res) => {
+  const storage = storageStatus();
+  const keySource = tokenKeySource();
   res.set('Cache-Control', 'no-store');
   res.json({
     ok: true,
     pid: process.pid,
     uptime: Math.round(process.uptime()),
-    storage: storageMode,
-    storageError: storageError || null,
+    storage: storage.mode,
+    storageError: storage.error || null,
+    storageLastSaveAt: storage.lastSaveAt,
+    storagePending: storage.pending,
+    storageWarning:
+      keySource === 'invalid-env'
+        ? 'TOKEN_ENCRYPTION_KEY est invalide : utilise 32 octets en hex (64 caractères) ou en base64.'
+        : storage.mode === 'supabase' && keySource === 'file'
+          ? 'Ajoute TOKEN_ENCRYPTION_KEY dans Render : la clé locale data/.token-key disparaît au redéploiement.'
+          : null,
     env: {
-      supabaseUrl: Boolean(process.env.SUPABASE_URL),
-      supabaseServiceRoleKey: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
+      supabaseUrl: remoteStoreInfo.urlConfigured,
+      supabaseServiceRoleKey: remoteStoreInfo.keyConfigured,
+      supabaseTable: remoteStoreInfo.table,
+      supabaseKeyRole: remoteStoreInfo.keyRole,
+      supabaseConfigError: remoteStoreInfo.configError,
+      tokenKeySource: keySource,
     },
   });
 });
@@ -355,6 +399,8 @@ const AUTOMATION_TYPE_LABELS = {
   autoMod: 'Auto-modération',
   logs: 'Journaux de modération',
   reminders: 'Rappels de formation',
+  antiRaid: 'Anti-raid',
+  repair: 'Réparation des salons et rôles',
 };
 
 const AUTOMATION_CONFIG_KEYS = new Set([
@@ -368,6 +414,17 @@ const AUTOMATION_CONFIG_KEYS = new Set([
   'antiSpam',
   'blockLinks',
   'logChannel',
+  'joinThreshold',
+  'joinWindow',
+  'minAccountAgeDays',
+  'action',
+  'lockdown',
+  'channelDeleteThreshold',
+  'roleDeleteThreshold',
+  'windowSeconds',
+  'restoreMessages',
+  'repairChannels',
+  'repairRoles',
 ]);
 
 function sanitizeAutomationConfig(input, previous = {}) {
@@ -850,12 +907,29 @@ app.post(
     const ws = getWorkspace(req.user.id);
     const bot = findOr404(ws.bots, req.params.id, 'Bot');
     try {
-      const metadata = await syncDiscordMetadata(bot.id);
+      const metadata = await syncDiscordMetadata(bot.id, req.body?.guildId);
       res.json({ ...metadata, bot: publicBot(bot), runtime: getBotRuntime(bot.id) });
     } catch (error) {
       const status = error.code === 'DISCORD_NETWORK' || (error.status && error.status >= 500) ? 502 : 400;
       throw Object.assign(new Error(error.message), { status });
     }
+  }),
+);
+
+app.post(
+  '/api/bots/:id/discord/server',
+  requireAuth,
+  wrap(async (req, res) => {
+    const ws = getWorkspace(req.user.id);
+    const bot = findOr404(ws.bots, req.params.id, 'Bot');
+    const guildId = str(req.body?.guildId || req.body?.serverId, 30);
+    if (!guildId) throw bad('Choisis un serveur.');
+    const target = (bot.discord?.servers || []).find((server) => server.id === guildId || server.guildId === guildId);
+    if (!target) throw bad('Serveur introuvable dans ce bot.');
+    bot.discord = selectDiscordServer(bot.discord, target.id, bot);
+    persist();
+    const metadata = bot.tokenEnc && target.guildId ? await syncDiscordMetadata(bot.id, target.guildId).catch((error) => ({ ok: false, error: error.message })) : null;
+    res.json({ bot: publicBot(bot), metadata, runtime: getBotRuntime(bot.id) });
   }),
 );
 
@@ -908,7 +982,24 @@ app.patch(
     }
     if (body.color !== undefined) bot.color = pickColors(body.color);
     if (body.tags !== undefined && Array.isArray(body.tags)) bot.tags = body.tags.slice(0, 5).map((t) => str(t, 24));
-    if (body.discord !== undefined) bot.discord = normalizeDiscordServer(body.discord, bot);
+    if (body.discord !== undefined) {
+      const incoming = body.discord || {};
+      if (Array.isArray(incoming.servers)) {
+        bot.discord = normalizeDiscordServer(incoming, bot);
+      } else {
+        const active = activeDiscordServer(bot.discord) || {};
+        bot.discord = upsertDiscordServer(
+          bot.discord,
+          {
+            ...active,
+            ...incoming,
+            guildId: incoming.guildId !== undefined ? incoming.guildId : active.guildId,
+            guildName: incoming.guildName !== undefined ? incoming.guildName : active.guildName,
+          },
+          bot,
+        );
+      }
+    }
     persist();
     if (body.status !== undefined && bot.status !== previousStatus) {
       if (bot.status === 'offline') await stopBot(bot.id);
@@ -1079,7 +1170,23 @@ app.patch(
       automation.config = sanitizeAutomationConfig(req.body.config, automation.config);
     }
     persist();
+    if (automation.type === 'repair' && automation.enabled) {
+      refreshBotSnapshots(bot.id, { messages: automation.config?.restoreMessages !== false }).catch(() => {});
+    }
     res.json({ automation });
+  }),
+);
+
+app.post(
+  '/api/bots/:id/automations/:automationId/run',
+  requireAuth,
+  wrap(async (req, res) => {
+    const ws = getWorkspace(req.user.id);
+    const bot = findOr404(ws.bots, req.params.id, 'Bot');
+    const automation = findOr404(bot.automations, req.params.automationId, 'Automatisation');
+    if (!automation.enabled) throw bad('Active l’automatisation avant de la déclencher.');
+    const result = await runAutomationTrigger(bot.id, automation.type, { automationLabel: automation.label });
+    res.json({ ...result, automation });
   }),
 );
 

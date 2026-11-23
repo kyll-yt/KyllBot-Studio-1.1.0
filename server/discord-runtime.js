@@ -28,7 +28,7 @@ import { db, persist } from './db.js';
 import { recordEvent } from './activity.js';
 import { formatDuration, formatSignedDuration, normalizeModalFields, parseDurationInput, runFlow } from './flows.js';
 import { decryptSecret } from './secrets.js';
-import { normalizeDiscordServer } from './discord.js';
+import { activeDiscordServer, upsertDiscordServer } from './discord.js';
 import { savedMessageHasEmbed } from './messages.js';
 import { scheduledMessageDue } from './scheduled.js';
 import { addServicePenalty, applyServiceTokens, applyServiceTokensDeep, ensureServiceState, safeTimezone, serviceDisplayName, serviceEntry, servicePeriodLabel, serviceResetLabel, serviceTokens, serviceTotals } from './service.js';
@@ -108,6 +108,11 @@ function ensureRuntime(botId) {
       metadata: null,
       startedAt: null,
       logs: [],
+      snapshots: new Map(),
+      deletions: new Map(),
+      joins: new Map(),
+      raidLockUntil: 0,
+      lastRepairAt: null,
     };
     runtimes.set(botId, runtime);
   }
@@ -143,7 +148,7 @@ export function getBotRuntime(botId) {
       logs: [],
     };
   }
-  const { client, ...rest } = runtime;
+  const { client, snapshots: _snapshots, deletions: _deletions, joins: _joins, ...rest } = runtime;
   return { ...rest, logs: rest.logs.slice(0, 12) };
 }
 
@@ -210,13 +215,16 @@ function roleColor(value) {
   return color ? `#${color.toString(16).padStart(6, '0')}` : '#94a3b8';
 }
 
-export async function syncDiscordMetadata(botId) {
+export async function syncDiscordMetadata(botId, requestedGuildId = '') {
   const context = getBotContext(botId);
   if (!context) throw new Error('Bot introuvable.');
   const { bot } = context;
   if (!bot.tokenEnc) throw new Error('Aucun token Discord enregistré.');
   const token = decryptSecret(bot.tokenEnc);
-  let guildId = String(bot.discord?.guildId || '').trim();
+  const requested = String(requestedGuildId || '').trim();
+  const active = String(bot.discord?.activeGuildId || bot.discord?.guildId || '').trim();
+  let guildId = /^\d{17,20}$/.test(requested) ? requested : '';
+  if (!guildId && /^\d{17,20}$/.test(active)) guildId = active;
   if (!guildId) {
     const guilds = await discordRequest(token, '/users/@me/guilds');
     guildId = String(guilds?.[0]?.id || '');
@@ -259,11 +267,15 @@ export async function syncDiscordMetadata(botId) {
     .sort((a, b) => (Number(b.position) || 0) - (Number(a.position) || 0))
     .map((role) => ({ id: role.id, name: role.name, color: roleColor(role.color) }));
 
-  bot.discord = normalizeDiscordServer(
+  const current = activeDiscordServer(bot.discord) || {};
+  bot.discord = upsertDiscordServer(
+    bot.discord,
     {
-      ...(bot.discord || {}),
+      ...current,
+      id: guildId,
+      name: guild?.name || current.name || `Serveur ${bot.name}`,
       guildId,
-      guildName: guild?.name || bot.discord?.guildName || '',
+      guildName: guild?.name || current.guildName || '',
       channels,
       categories,
       roles,
@@ -275,7 +287,7 @@ export async function syncDiscordMetadata(botId) {
 
   const runtime = ensureRuntime(botId);
   runtime.lastMetadataSyncAt = bot.discord.syncedAt;
-  runtime.metadata = { channels: channels.length, categories: categories.length, roles: roles.length };
+  runtime.metadata = { channels: channels.length, categories: categories.length, roles: roles.length, servers: bot.discord.servers?.length || 1 };
   runtime.lastError = null;
   return {
     ok: true,
@@ -284,6 +296,7 @@ export async function syncDiscordMetadata(botId) {
     channels: channels.length,
     categories: categories.length,
     roles: roles.length,
+    servers: bot.discord.servers?.length || 1,
     syncedAt: bot.discord.syncedAt,
   };
 }
@@ -762,7 +775,11 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
               allowedMentions: { parse: output.ping === false ? [] : ['users', 'roles'] },
             };
             if (output.tts) payload.tts = true;
-            if (output.silent) payload.flags = MessageFlags.SuppressNotifications;
+            if (output.silent || output.suppressEmbeds) {
+              payload.flags =
+                (output.silent ? MessageFlags.SuppressNotifications : 0) |
+                (output.suppressEmbeds ? MessageFlags.SuppressEmbeds : 0);
+            }
             if (output.reply && message?.id) payload.reply = { messageReference: message.id, failIfNotExists: false };
             lastMessage = await target.send(payload);
             lastChannel = target;
@@ -774,7 +791,11 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
           const target = resolveChannel(guild, output.channel) || channel;
           if (!target) break;
           const payload = { embeds: [toEmbed(output.embed)] };
-          if (output.silent) payload.flags = MessageFlags.SuppressNotifications;
+          if (output.silent || output.suppressEmbeds) {
+            payload.flags =
+              (output.silent ? MessageFlags.SuppressNotifications : 0) |
+              (output.suppressEmbeds ? MessageFlags.SuppressEmbeds : 0);
+          }
           if (output.ephemeral && interaction) {
             payload.ephemeral = true;
             if (interaction.deferred && !interactionUsed) {
@@ -1823,17 +1844,39 @@ function matchReaction(trigger, emoji) {
   return String(emoji || '').toLowerCase() === expected.toLowerCase();
 }
 
-async function runTriggeredFlows({ bot, ws, type, guild, member, channel, message, interaction, match }) {
+async function runTriggeredFlows({ bot, ws, type, guild, member, channel, message, interaction, match, vars = {} }) {
   const flows = (bot.flows || []).filter((flow) => flow.enabled !== false && flow.trigger?.type === type);
   let count = 0;
   for (const flow of flows) {
     if (type === 'keyword' && !matchKeyword(flow.trigger, message?.content || '')) continue;
     if (type === 'reaction' && !matchReaction(flow.trigger, match)) continue;
-    await executeFlow({ bot, ws, flow, guild, member, channel, message, interaction });
+    if (type === 'automation' && flow.trigger?.automationType && flow.trigger.automationType !== match) continue;
+    await executeFlow({ bot, ws, flow, guild, member, channel, message, interaction, vars });
     bumpFlow(ws, bot, flow, `discord:${type}`, member?.user || interaction?.user);
     count += 1;
   }
   return count;
+}
+
+export async function runAutomationTrigger(botId, automationType, extraVars = {}) {
+  const context = getBotContext(botId);
+  if (!context) return { count: 0 };
+  const { ws, bot } = context;
+  const runtime = ensureRuntime(botId);
+  const guild = runtime.client?.guilds?.cache?.get(bot.discord?.guildId) || runtime.client?.guilds?.cache?.first() || null;
+  const count = await runTriggeredFlows({
+    bot,
+    ws,
+    type: 'automation',
+    guild,
+    member: null,
+    channel: guild?.systemChannel || null,
+    message: null,
+    interaction: null,
+    match: automationType,
+    vars: { automation: automationType, ...extraVars },
+  });
+  return { count };
 }
 
 async function memberFromInteraction(interaction) {
@@ -2336,9 +2379,331 @@ async function handleInteraction(botId, interaction) {
   }
 }
 
-async function sendLog(guild, bot, text) {
-  const channel = resolveChannel(guild, bot.discord?.logChannel || 'logs');
+async function sendLog(guild, bot, text, channelName = '') {
+  const channel = resolveChannel(guild, channelName || bot.discord?.logChannel || 'logs');
   if (channel) await channel.send({ content: String(text).slice(0, 2000) }).catch(() => {});
+}
+
+
+function enabledAutomation(bot, type) {
+  return (bot.automations || []).find((entry) => entry.enabled && entry.type === type) || null;
+}
+
+function channelSnapshot(channel) {
+  return {
+    id: channel.id,
+    name: channel.name,
+    type: channel.type,
+    parentId: channel.parentId || null,
+    position: Number(channel.rawPosition) || 0,
+    topic: channel.topic || '',
+    nsfw: Boolean(channel.nsfw),
+    rateLimitPerUser: Number(channel.rateLimitPerUser) || 0,
+    permissionOverwrites: channel.permissionOverwrites?.cache
+      ? [...channel.permissionOverwrites.cache.values()].map((overwrite) => ({
+          id: overwrite.id,
+          type: overwrite.type,
+          allow: overwrite.allow.bitfield.toString(),
+          deny: overwrite.deny.bitfield.toString(),
+        }))
+      : [],
+  };
+}
+
+async function captureGuildSnapshot(guild, client, { messages = true } = {}) {
+  const snapshot = {
+    at: Date.now(),
+    channels: [...guild.channels.cache.values()].map(channelSnapshot),
+    roles: [...guild.roles.cache.values()]
+      .filter((role) => role.id !== guild.id && !role.managed)
+      .map((role) => ({
+        id: role.id,
+        name: role.name,
+        color: role.color,
+        hoist: role.hoist,
+        mentionable: role.mentionable,
+        permissions: role.permissions.bitfield.toString(),
+        position: Number(role.rawPosition) || 0,
+      })),
+    messages: [],
+  };
+  if (messages) {
+    const textChannels = [...guild.channels.cache.values()].filter((channel) => channel.isTextBased?.() && channel.viewable);
+    for (const channel of textChannels.slice(0, 12)) {
+      if (!channel.messages?.fetch) continue;
+      const fetched = await channel.messages.fetch({ limit: 8 }).catch(() => null);
+      if (!fetched) continue;
+      for (const message of fetched.values()) {
+        if (message.author?.id !== client.user?.id) continue;
+        if (!message.content && !message.embeds?.length && !message.components?.length) continue;
+        snapshot.messages.push({
+          channelId: channel.id,
+          content: message.content || '',
+          embeds: message.embeds?.map((embed) => embed.toJSON()) || [],
+          components: message.components?.map((component) => component.toJSON()) || [],
+        });
+        if (snapshot.messages.length >= 60) break;
+      }
+      if (snapshot.messages.length >= 60) break;
+    }
+  }
+  return snapshot;
+}
+
+async function captureBotSnapshots(botId, client, { messages = true } = {}) {
+  const context = getBotContext(botId);
+  if (!context) return;
+  const runtime = ensureRuntime(botId);
+  for (const guild of client.guilds.cache.values()) {
+    const snapshot = await captureGuildSnapshot(guild, client, { messages });
+    runtime.snapshots.set(guild.id, snapshot);
+  }
+  log(runtime, 'info', `Sauvegarde anti-raid prête pour ${runtime.snapshots.size} serveur(s).`);
+}
+
+export async function refreshBotSnapshots(botId, { messages = true } = {}) {
+  const runtime = ensureRuntime(botId);
+  if (!runtime.client?.guilds?.cache?.size) return { ok: false, reason: 'Bot non connecté.' };
+  await captureBotSnapshots(botId, runtime.client, { messages });
+  return { ok: true, servers: runtime.snapshots.size };
+}
+
+async function repairGuild(guild, bot, runtime, { channels = true, roles = true, messages = true } = {}) {
+  const snapshot = runtime.snapshots.get(guild.id);
+  if (!snapshot) return { channels: 0, roles: 0, messages: 0, reason: 'Aucune sauvegarde disponible.' };
+  const roleIdMap = new Map();
+  const channelIdMap = new Map();
+  let createdRoles = 0;
+  let createdChannels = 0;
+  let restoredMessages = 0;
+
+  if (roles) {
+    for (const entry of snapshot.roles) {
+      if (guild.roles.cache.has(entry.id)) {
+        roleIdMap.set(entry.id, entry.id);
+        continue;
+      }
+      const created = await guild.roles
+        .create({
+          name: entry.name,
+          color: entry.color,
+          hoist: entry.hoist,
+          mentionable: entry.mentionable,
+          permissions: BigInt(entry.permissions || '0'),
+          position: entry.position,
+          reason: 'KyllBot Studio — réparation anti-raid',
+        })
+        .catch(() => null);
+      if (created) {
+        createdRoles += 1;
+        roleIdMap.set(entry.id, created.id);
+      }
+    }
+  }
+
+  const overwritePayload = (entry) =>
+    entry.permissionOverwrites
+      .map((overwrite) => ({
+        id: roleIdMap.get(overwrite.id) || overwrite.id,
+        type: overwrite.type,
+        allow: BigInt(overwrite.allow || '0'),
+        deny: BigInt(overwrite.deny || '0'),
+      }))
+      .filter((overwrite) => overwrite.id);
+
+  const categories = snapshot.channels.filter((entry) => entry.type === ChannelType.GuildCategory);
+  for (const entry of categories) {
+    if (guild.channels.cache.has(entry.id)) {
+      channelIdMap.set(entry.id, entry.id);
+      continue;
+    }
+    const created = await guild.channels
+      .create({
+        name: entry.name,
+        type: ChannelType.GuildCategory,
+        position: entry.position,
+        permissionOverwrites: overwritePayload(entry),
+        reason: 'KyllBot Studio — réparation anti-raid',
+      })
+      .catch(() => null);
+    if (created) {
+      createdChannels += 1;
+      channelIdMap.set(entry.id, created.id);
+    }
+  }
+
+  const restorableTypes = new Set([ChannelType.GuildText, ChannelType.GuildVoice, ChannelType.GuildForum, ChannelType.GuildAnnouncement]);
+  for (const entry of snapshot.channels.filter((item) => restorableTypes.has(item.type))) {
+    if (guild.channels.cache.has(entry.id)) {
+      channelIdMap.set(entry.id, entry.id);
+      continue;
+    }
+    const created = await guild.channels
+      .create({
+        name: entry.name,
+        type: entry.type,
+        parent: entry.parentId ? channelIdMap.get(entry.parentId) || null : null,
+        topic: entry.topic || undefined,
+        nsfw: entry.nsfw || undefined,
+        rateLimitPerUser: entry.rateLimitPerUser || undefined,
+        position: entry.position,
+        permissionOverwrites: overwritePayload(entry),
+        reason: 'KyllBot Studio — réparation anti-raid',
+      })
+      .catch(() => null);
+    if (created) {
+      createdChannels += 1;
+      channelIdMap.set(entry.id, created.id);
+    }
+  }
+
+  if (messages && snapshot.messages?.length) {
+    for (const entry of snapshot.messages.slice(0, 60)) {
+      const targetId = channelIdMap.get(entry.channelId) || entry.channelId;
+      const channel = guild.channels.cache.get(targetId);
+      if (!channel?.send) continue;
+      const sent = await channel
+        .send({
+          content: entry.content || undefined,
+          embeds: entry.embeds?.length ? entry.embeds : undefined,
+          components: entry.components?.length ? entry.components : undefined,
+          allowedMentions: { parse: [] },
+        })
+        .catch(() => null);
+      if (sent) restoredMessages += 1;
+    }
+  }
+
+  const fresh = await captureGuildSnapshot(guild, runtime.client, { messages: false });
+  runtime.snapshots.set(guild.id, { ...fresh, messages: snapshot.messages || [] });
+  runtime.lastRepairAt = new Date().toISOString();
+  return { channels: createdChannels, roles: createdRoles, messages: restoredMessages };
+}
+
+function noteDeletion(runtime, guildId, kind, config = {}) {
+  const key = `${guildId}:${kind}`;
+  const now = Date.now();
+  const windowMs = Math.max(10, Number(config.windowSeconds) || 60) * 1000;
+  const bucket = (runtime.deletions.get(key) || []).filter((time) => now - time < windowMs);
+  bucket.push(now);
+  runtime.deletions.set(key, bucket);
+  return bucket.length;
+}
+
+async function handleChannelDelete(botId, channel) {
+  const guild = channel?.guild;
+  if (!guild) return;
+  const context = getBotContext(botId);
+  if (!context) return;
+  const { bot } = context;
+  const repair = enabledAutomation(bot, 'repair');
+  if (!repair || repair.config?.repairChannels === false) return;
+  const runtime = ensureRuntime(botId);
+  const count = noteDeletion(runtime, guild.id, 'channels', repair.config);
+  const threshold = Math.max(1, Number(repair.config?.channelDeleteThreshold) || 3);
+  if (count < threshold) return;
+  runtime.deletions.set(`${guild.id}:channels`, []);
+  const result = await repairGuild(guild, bot, runtime, {
+    channels: true,
+    roles: repair.config?.repairRoles !== false,
+    messages: repair.config?.restoreMessages !== false,
+  });
+  log(runtime, 'warn', `Anti-raid salons : ${count} suppression(s). ${result.channels} salon(s), ${result.roles} rôle(s), ${result.messages} message(s) restauré(s).`);
+  await sendLog(guild, bot, `🛡️ Anti-raid : ${count} salons supprimés en moins d'une minute. ${result.channels} salon(s), ${result.roles} rôle(s) et ${result.messages} message(s) restauré(s).`, repair.config?.logChannel);
+  await runTriggeredFlows({ bot, ws: context.ws, type: 'automation', guild, member: null, channel: guild.systemChannel, message: null, interaction: null, match: 'repair', vars: { automation: 'repair', deletedChannels: count } });
+}
+
+async function handleRoleDelete(botId, role) {
+  const guild = role?.guild;
+  if (!guild) return;
+  const context = getBotContext(botId);
+  if (!context) return;
+  const { bot } = context;
+  const repair = enabledAutomation(bot, 'repair');
+  if (!repair || repair.config?.repairRoles === false) return;
+  const runtime = ensureRuntime(botId);
+  const count = noteDeletion(runtime, guild.id, 'roles', repair.config);
+  const threshold = Math.max(1, Number(repair.config?.roleDeleteThreshold) || 2);
+  if (count < threshold) return;
+  runtime.deletions.set(`${guild.id}:roles`, []);
+  const result = await repairGuild(guild, bot, runtime, {
+    channels: repair.config?.repairChannels !== false,
+    roles: true,
+    messages: repair.config?.restoreMessages !== false,
+  });
+  log(runtime, 'warn', `Anti-raid rôles : ${count} suppression(s). ${result.channels} salon(s), ${result.roles} rôle(s), ${result.messages} message(s) restauré(s).`);
+  await sendLog(guild, bot, `🛡️ Anti-raid : ${count} rôles supprimés en moins d'une minute. ${result.channels} salon(s), ${result.roles} rôle(s) et ${result.messages} message(s) restauré(s).`, repair.config?.logChannel);
+  await runTriggeredFlows({ bot, ws: context.ws, type: 'automation', guild, member: null, channel: guild.systemChannel, message: null, interaction: null, match: 'repair', vars: { automation: 'repair', deletedRoles: count } });
+}
+
+async function handleRaidJoin(botId, member) {
+  const context = getBotContext(botId);
+  if (!context) return false;
+  const { ws, bot } = context;
+  const antiRaid = enabledAutomation(bot, 'antiRaid');
+  if (!antiRaid) return false;
+  const runtime = ensureRuntime(botId);
+  const now = Date.now();
+  const config = antiRaid.config || {};
+  const windowMs = Math.max(5, Number(config.joinWindow) || 10) * 1000;
+  const key = `joins:${member.guild.id}`;
+  const bucket = (runtime.joins.get(key) || []).filter((entry) => now - entry.at < windowMs);
+  bucket.push({ at: now, memberId: member.id });
+  runtime.joins.set(key, bucket);
+  const threshold = Math.max(2, Number(config.joinThreshold) || 10);
+  if (bucket.length < threshold) return false;
+  if (now < runtime.raidLockUntil) return true;
+  runtime.raidLockUntil = now + 60_000;
+  runtime.joins.set(key, []);
+
+  const minAgeDays = config.minAccountAgeDays === undefined
+    ? 7
+    : Math.max(0, Number(config.minAccountAgeDays) || 0);
+  const action = ['kick', 'ban', 'timeout'].includes(config.action) ? config.action : 'kick';
+  const targets = [];
+  for (const entry of bucket) {
+    const target = member.guild.members.cache.get(entry.memberId) || (await member.guild.members.fetch(entry.memberId).catch(() => null));
+    if (!target) continue;
+    const ageDays = (Date.now() - target.user.createdTimestamp) / 86_400_000;
+    if (minAgeDays > 0 && ageDays >= minAgeDays) continue;
+    targets.push(target);
+  }
+  let punished = 0;
+  for (const target of targets.slice(0, 25)) {
+    if (!target.moderatable) continue;
+    if (action === 'ban') {
+      await target.ban({ reason: 'Anti-raid KyllBot Studio' }).catch(() => {});
+    } else if (action === 'timeout') {
+      await target.timeout(10 * 60_000, 'Anti-raid KyllBot Studio').catch(() => {});
+    } else {
+      await target.kick('Anti-raid KyllBot Studio').catch(() => {});
+    }
+    punished += 1;
+  }
+  if (config.lockdown) await member.guild.setVerificationLevel(4).catch(() => {});
+  log(runtime, 'warn', `Anti-raid : ${bucket.length} arrivées en ${Math.round(windowMs / 1000)} s. ${punished} membre(s) sanctionné(s).`);
+  await sendLog(member.guild, bot, `🛡️ Anti-raid déclenché : ${bucket.length} arrivées en ${Math.round(windowMs / 1000)} s. ${punished} membre(s) sanctionné(s)${config.lockdown ? ' · niveau de vérification renforcé' : ''}.`, config.logChannel);
+  await runTriggeredFlows({ bot, ws, type: 'automation', guild: member.guild, member, channel: member.guild.systemChannel, message: null, interaction: null, match: 'antiRaid', vars: { automation: 'antiRaid', raidJoins: bucket.length } });
+  return true;
+}
+
+async function handleMemberUpdate(botId, oldMember, newMember) {
+  if (!oldMember?.premiumSince && newMember?.premiumSince) {
+    const context = getBotContext(botId);
+    if (!context) return;
+    const { ws, bot } = context;
+    await runTriggeredFlows({
+      bot,
+      ws,
+      type: 'booster',
+      guild: newMember.guild,
+      member: newMember,
+      channel: newMember.guild.systemChannel,
+      message: null,
+      interaction: null,
+      vars: { boost: 'true', booster: newMember.user?.username || '' },
+    });
+  }
 }
 
 async function handleMessage(botId, message) {
@@ -2406,6 +2771,7 @@ async function handleMessage(botId, message) {
     await message.delete().catch(() => {});
     await channel.send({ content: `${message.author}, les liens ne sont pas autorisés ici.` }).catch(() => {});
     await sendLog(guild, bot, `Lien supprimé pour ${message.author.tag}`);
+    await runTriggeredFlows({ bot, ws, type: 'automation', guild, member, channel, message, interaction: null, match: 'autoMod', vars: { automation: 'autoMod' } });
     return;
   }
 
@@ -2425,6 +2791,7 @@ async function handleMessage(botId, message) {
       if (member?.moderatable) await member.timeout(60000, 'Spam détecté par KyllBot Studio').catch(() => {});
       await channel.send({ content: `${message.author}, le spam n’est pas autorisé.` }).catch(() => {});
       await sendLog(guild, bot, `Spam détecté pour ${message.author.tag}`);
+      await runTriggeredFlows({ bot, ws, type: 'automation', guild, member, channel, message, interaction: null, match: 'antiSpam', vars: { automation: 'antiSpam' } });
       return;
     }
   }
@@ -2437,6 +2804,8 @@ async function handleMemberAdd(botId, member) {
   if (!context) return;
   const { ws, bot } = context;
   const guild = member.guild;
+  const raided = await handleRaidJoin(botId, member);
+  if (raided) return;
   const welcome = (bot.automations || []).find((entry) => entry.enabled && entry.type === 'welcome');
   if (welcome) {
     const channel = resolveChannel(guild, welcome.config?.channel) || guild.systemChannel;
@@ -2449,6 +2818,7 @@ async function handleMemberAdd(botId, member) {
       await channel
         .send({ content: text.slice(0, 2000), allowedMentions: { parse: ['users'] } })
         .catch((error) => log(ensureRuntime(botId), 'error', `Message d’accueil : ${error.message}`));
+      await runTriggeredFlows({ bot, ws, type: 'automation', guild, member, channel, message: null, interaction: null, match: 'welcome', vars: { automation: 'welcome' } });
     }
   }
   const autorole = (bot.automations || []).find((entry) => entry.enabled && entry.type === 'autorole');
@@ -2458,6 +2828,7 @@ async function handleMemberAdd(botId, member) {
       await member.roles
         .add(role, 'KyllBot Studio — autorole')
         .catch((error) => log(ensureRuntime(botId), 'error', `Autorole : ${error.message}`));
+      await runTriggeredFlows({ bot, ws, type: 'automation', guild, member, channel: guild.systemChannel, message: null, interaction: null, match: 'autorole', vars: { automation: 'autorole', role: role.name } });
     }
   }
   await runTriggeredFlows({
@@ -2576,6 +2947,11 @@ function attachHandlers(client, botId) {
       log(runtime, 'warn', runtime.warning);
     }
     try {
+      await captureBotSnapshots(botId, client, { messages: Boolean(enabledAutomation(context.bot, 'repair')) });
+    } catch (error) {
+      log(runtime, 'warn', `Sauvegarde anti-raid impossible : ${error.message}`);
+    }
+    try {
       const result = await syncBotCommands(botId);
       log(runtime, 'info', `${result.count} commande(s) synchronisée(s)${result.guildId ? ` sur le serveur ${result.guildId}` : ' globalement'}.`);
     } catch (error) {
@@ -2606,6 +2982,9 @@ function attachHandlers(client, botId) {
   client.on(Events.MessageCreate, safe((message) => handleMessage(botId, message), 'Message'));
   client.on(Events.GuildMemberAdd, safe((member) => handleMemberAdd(botId, member), 'Arrivée membre'));
   client.on(Events.GuildMemberRemove, safe((member) => handleMemberRemove(botId, member), 'Départ membre'));
+  client.on(Events.GuildMemberUpdate, safe((oldMember, newMember) => handleMemberUpdate(botId, oldMember, newMember), 'Membre modifié'));
+  client.on(Events.ChannelDelete, safe((channel) => handleChannelDelete(botId, channel), 'Salon supprimé'));
+  client.on(Events.GuildRoleDelete, safe((role) => handleRoleDelete(botId, role), 'Rôle supprimé'));
   client.on(Events.MessageReactionAdd, safe((reaction, user) => handleReaction(botId, reaction, user), 'Réaction'));
 }
 
