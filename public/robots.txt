@@ -1,7 +1,13 @@
+# Autorise explicitement Googlebot à vérifier et indexer le site.
+User-agent: Googlebot
+Allow: /
+Disallow: /api/
+
+User-agent: Googlebot-Image
+Allow: /
+
 User-agent: *
 Allow: /
 Disallow: /api/
-Disallow: /app
-Disallow: /studio
 
 Sitemap: https://kyllbot-studio-1-1-0.onrender.com/sitemap.xml
