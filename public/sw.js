@@ -1,4 +1,4 @@
-const CACHE = 'kyllbot-studio-2026-11-21-1';
+const CACHE = 'kyllbot-studio-2026-11-23-2';
 const PRECACHE = [
   '/login',
   '/offline.html',
@@ -11,6 +11,7 @@ const PRECACHE = [
 ];
 
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
     (async () => {
       const cache = await caches.open(CACHE);
