@@ -999,6 +999,22 @@ app.post(
 );
 
 app.post(
+  '/api/bots/:id/commands/sync',
+  requireAuth,
+  wrap(async (req, res) => {
+    const ws = getWorkspace(req.user.id);
+    const bot = findOr404(ws.bots, req.params.id, 'Bot');
+    try {
+      const result = await syncBotCommands(bot.id);
+      res.json({ ...result, bot: publicBot(bot), runtime: getBotRuntime(bot.id) });
+    } catch (error) {
+      const status = error.code === 'DISCORD_NETWORK' || (error.status && error.status >= 500) ? 502 : 400;
+      throw Object.assign(new Error(error.message), { status });
+    }
+  }),
+);
+
+app.post(
   '/api/bots/:id/discord/sync',
   requireAuth,
   wrap(async (req, res) => {

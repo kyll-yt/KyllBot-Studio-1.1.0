@@ -10,9 +10,10 @@ const APP_CHANGELOG = [
   {
     version: '1.1.3',
     date: '2026-11-21',
-    title: 'Variantes de commandes et connexion sécurisée',
+    title: 'Commandes par serveur et connexion sécurisée',
     items: [
       'Correction du bloc « Réponse IA » : réponses locales naturelles, sans message répétitif sur l’API.',
+      'Nouveau sélecteur de serveur dans l’onglet Commandes : choisis clairement le serveur Discord cible et synchronise ses commandes en un clic.',
       'Chaque commande peut contenir jusqu’à 20 variantes de réponse, tirées au hasard selon un poids configurable.',
       'Connexion email renforcée : limitation des tentatives, comparaison sécurisée des codes et code de démonstration masqué en production.',
       'Les blocs webhook et musique refusent les adresses locales ou privées.',

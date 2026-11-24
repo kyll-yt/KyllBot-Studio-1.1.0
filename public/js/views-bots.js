@@ -487,9 +487,56 @@ function viewBotDetail(id) {
   let body = '';
 
   if (state.botTab === 'commands') {
-    body = `<div class="panel">
+    const discord = bot.discord || {};
+    const servers = Array.isArray(discord.servers) && discord.servers.length ? discord.servers : discord.guildId ? [discord] : [];
+    const activeKey = discord.activeGuildId || discord.guildId || '';
+    const activeServer = servers.find((server) => server.id === activeKey || server.guildId === activeKey) || servers[0] || null;
+    const runtime = bot.runtime || {};
+    const serverName = activeServer?.guildName || activeServer?.name || 'Aucun serveur';
+    body = `<div class="panel" style="margin-bottom:14px">
       <div class="panel-head">
-        <h3>Commandes</h3>
+        <h3>Serveur des commandes</h3>
+        <div class="ph-actions">
+          <span class="pill ${activeServer ? 'green' : 'gray'}">${esc(serverName)}</span>
+          <button class="btn btn-ghost btn-sm" data-action="sync-bot-commands" data-id="${esc(bot.id)}">${icon('shuffle')} Synchroniser</button>
+        </div>
+      </div>
+      <div class="panel-body">
+        <p class="hint" style="margin:0 0 12px">Choisis clairement le serveur qui doit recevoir les commandes ci-dessous. Discord les enregistre immédiatement sur ce serveur.</p>
+        ${
+          servers.length
+            ? `<div class="server-list">
+                ${servers
+                  .map((server) => {
+                    const active = activeServer && (server.id === activeServer.id || (server.guildId && server.guildId === activeServer.guildId));
+                    return `<button type="button" class="server-card ${active ? 'active' : ''}" data-action="bot-command-server" data-id="${esc(bot.id)}" data-guild="${esc(server.guildId || server.id)}">
+                      <span class="server-avatar">${esc((server.name || server.guildName || 'S').slice(0, 1).toUpperCase())}</span>
+                      <span class="server-main">
+                        <b>${esc(server.guildName || server.name || 'Serveur Discord')}</b>
+                        <small>${server.guildId ? `ID ${esc(server.guildId)}` : 'Non connecté à Discord'} · ${bot.commands.length} commande(s)</small>
+                      </span>
+                      ${active ? '<span class="pill green">Commandes ici</span>' : '<span class="pill gray">Choisir</span>'}
+                    </button>`;
+                  })
+                  .join('')}
+              </div>`
+            : `<div class="empty" style="padding:24px 18px">
+                <div class="ic">${icon('bot')}</div>
+                <h3>Aucun serveur connecté</h3>
+                <p>Connecte un serveur Discord pour choisir où enregistrer les commandes.</p>
+                <button class="btn btn-primary btn-sm" data-action="bot-tab" data-tab="settings">Ouvrir les paramètres</button>
+              </div>`
+        }
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px">
+          <span class="hint" style="margin:0">${runtime.lastSyncAt ? `Dernière synchro : ${esc(timeAgo(runtime.lastSyncAt))} · ${runtime.commandCount || 0} commande(s)` : 'Pas encore synchronisé avec Discord.'}</span>
+        </div>
+        ${runtime.warning ? `<p class="hint" style="color:#fde68a;margin-top:6px">${esc(runtime.warning)}</p>` : ''}
+        ${runtime.lastError ? `<p class="hint" style="color:#fda4af;margin-top:6px">Dernière erreur : ${esc(runtime.lastError)}</p>` : ''}
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Commandes · ${esc(serverName)}</h3>
         <div class="ph-actions"><button class="btn btn-primary btn-sm" data-action="new-command" data-id="${esc(bot.id)}">${icon('plus')} Ajouter</button></div>
       </div>
       <div class="panel-body tight">
@@ -1208,6 +1255,14 @@ const COMMAND_PRESETS = [
   },
 ];
 
+function commandServerName(bot) {
+  const discord = bot?.discord || {};
+  const servers = Array.isArray(discord.servers) && discord.servers.length ? discord.servers : discord.guildId ? [discord] : [];
+  const key = discord.activeGuildId || discord.guildId || '';
+  const active = servers.find((server) => server.id === key || server.guildId === key) || servers[0];
+  return active?.guildName || active?.name || '';
+}
+
 function commandVariants(command) {
   return Array.isArray(command?.variants) ? command.variants.filter((variant) => variant?.text) : [];
 }
@@ -1243,10 +1298,11 @@ function commandModal(bot, command) {
     embed: { title: '', description: '', color: bot.color || '#7c5cff', footer: 'KyllBot Studio' },
   };
   const initialVariants = commandVariants(value);
+  const serverName = commandServerName(bot);
 
   const form = openModal({
     title: command ? 'Modifier la commande' : 'Nouvelle commande',
-    subtitle: 'Prévisualisez le rendu Discord en direct.',
+    subtitle: `${serverName ? `Serveur cible : ${serverName} · ` : ''}Prévisualisez le rendu Discord en direct.`,
     wide: true,
     submitLabel: command ? 'Enregistrer' : 'Créer la commande',
     body: `
@@ -1484,6 +1540,50 @@ onAction('bot-select-server', async (el) => {
     await api(`/api/bots/${bot.id}/discord/server`, { method: 'POST', body: JSON.stringify({ guildId: el.dataset.guild }) });
     await refresh();
     toast('Serveur actif changé. Les salons et rôles affichés sont ceux de ce serveur.', 'info');
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+});
+
+onAction('bot-command-server', async (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  if (!bot) return;
+  const target = (bot.discord?.servers || []).find((server) => server.id === el.dataset.guild || server.guildId === el.dataset.guild);
+  const serverName = target?.guildName || target?.name || 'ce serveur';
+  try {
+    await api(`/api/bots/${bot.id}/discord/server`, { method: 'POST', body: JSON.stringify({ guildId: el.dataset.guild }) });
+    let message = `Serveur des commandes : ${serverName}.`;
+    let tone = 'info';
+    if (bot.hasToken && target?.guildId) {
+      try {
+        const result = await api(`/api/bots/${bot.id}/commands/sync`, { method: 'POST' });
+        message = `${result.count} commande(s) enregistrée(s) sur ${serverName}.`;
+        tone = 'success';
+      } catch (error) {
+        message += ` Synchronisation impossible : ${error.message}`;
+      }
+    } else if (!bot.hasToken) {
+      message += ' Ajoute un token Discord pour les enregistrer.';
+    }
+    await refresh();
+    toast(message, tone);
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+});
+
+onAction('sync-bot-commands', async (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  if (!bot) return;
+  try {
+    const result = await api(`/api/bots/${bot.id}/commands/sync`, { method: 'POST' });
+    const server = (bot.discord?.servers || []).find((entry) => entry.guildId === result.guildId || entry.id === result.guildId);
+    await refresh();
+    if (result.global) {
+      toast('Commandes enregistrées globalement. Discord peut mettre jusqu’à 1 h à les afficher : choisis un serveur pour une synchronisation instantanée.', 'info');
+    } else {
+      toast(`${result.count} commande(s) enregistrée(s) sur ${server?.guildName || server?.name || 'le serveur actif'}.`, 'success');
+    }
   } catch (error) {
     toast(error.message, 'error');
   }
