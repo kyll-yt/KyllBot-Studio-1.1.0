@@ -61,8 +61,19 @@ function canManageGuild(guild) {
   }
 }
 
+function isLocalHostname(hostname) {
+  return ['localhost', '127.0.0.1', '::1'].includes(hostname) || hostname.endsWith('.local');
+}
+
 export function discordOAuthRedirectUri(req) {
-  const base = process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
+  const requestBase = `${req.protocol}://${req.get('host')}`;
+  let base = requestBase;
+  try {
+    const configured = new URL(String(process.env.PUBLIC_URL || '').trim());
+    if (!isLocalHostname(configured.hostname)) base = configured.origin;
+  } catch {
+    /* PUBLIC_URL absent ou invalide : on garde l'origine de la requête */
+  }
   return `${String(base).replace(/\/$/, '')}/api/discord/oauth/callback`;
 }
 

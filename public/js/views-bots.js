@@ -559,9 +559,10 @@ function viewBotDetail(id) {
         ${
           inviteUrl
             ? `<details class="token-help"><summary>Première fois : autoriser le retour Discord</summary>
-                <p>Dans Discord Developer Portal → ton application → OAuth2 → Redirects, ajoute cette URL :</p>
+                <p>Dans Discord Developer Portal → ton application → OAuth2 → Redirects, ajoute cette URL exacte :</p>
                 <code>${esc(state.config?.discordOAuthRedirectUri || `${window.location.origin}/api/discord/oauth/callback`)}</code>
-                <p>Ensuite, le bouton « Voir mes serveurs » fonctionnera.</p>
+                <p>Application Discord concernée : <code>${esc(bot.discordAccount?.id || 'inconnue')}</code></p>
+                <p>Si Discord affiche « Redirect_uri OAuth2 non valide », vérifie qu'il n'y a ni slash final ni <code>http</code> à la place de <code>https</code>, puis utilise « Lien direct » en attendant.</p>
               </details>`
             : ''
         }

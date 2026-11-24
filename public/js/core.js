@@ -4,9 +4,18 @@
 /* état & utilitaires                                                  */
 /* ------------------------------------------------------------------ */
 
-const APP_VERSION = '1.1.4';
+const APP_VERSION = '1.1.5';
 
 const APP_CHANGELOG = [
+  {
+    version: '1.1.5',
+    date: '2026-11-21',
+    title: 'Correction de la redirection Discord',
+    items: [
+      'L’URL de retour Discord utilise automatiquement la bonne adresse publique, même si une ancienne adresse locale est configurée.',
+      'Aide ajoutée dans Commandes en cas d’erreur « Redirect_uri OAuth2 non valide ».',
+    ],
+  },
   {
     version: '1.1.4',
     date: '2026-11-21',

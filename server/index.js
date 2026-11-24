@@ -678,7 +678,7 @@ function workspacePayload(user, req) {
 /* ------------------------------------------------------------------ */
 
 app.get('/api/auth/config', (req, res) => {
-  res.json({ google: googleConfigured, mail: mailConfigured, mailMode, devLogin: devLoginEnabled, demo: true });
+  res.json({ google: googleConfigured, mail: mailConfigured, mailMode, devLogin: devLoginEnabled, demo: true, discordRedirectUri: discordOAuthRedirectUri(req) });
 });
 
 app.post(
