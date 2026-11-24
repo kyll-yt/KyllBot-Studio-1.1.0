@@ -6,7 +6,9 @@ import express from 'express';
 import { db, findUserByEmail, findUserById, flushPersistence, newId, persist, storageStatus } from './db.js';
 import { remoteStoreInfo } from './supabase-store.js';
 import {
+  allowDemoLogin,
   clearCookie,
+  clearDemoCookie,
   createSession,
   destroySession,
   devLoginEnabled,
@@ -694,7 +696,7 @@ app.post(
   '/api/auth/verify-code',
   wrap(async (req, res) => {
     const { user, token } = verifyLoginCode(req.body?.email, req.body?.code, req);
-    res.setHeader('Set-Cookie', sessionCookie(token));
+    res.setHeader('Set-Cookie', [sessionCookie(token), clearDemoCookie()]);
     res.json({ user: publicUser(user) });
   }),
 );
@@ -702,9 +704,19 @@ app.post(
 app.post(
   '/api/auth/demo',
   wrap(async (req, res) => {
-    const user = findOrCreateUser('demo@kyllbot.studio', { name: 'Alex Démo', provider: 'demo' });
+    const cookieName = 'kyll_demo';
+    const existing = String(parseCookies(req.headers.cookie || '')[cookieName] || '').replace(/[^a-z0-9]/gi, '').slice(0, 40);
+    if (!existing && !allowDemoLogin(req.ip)) {
+      throw Object.assign(new Error('Trop de comptes démo créés depuis cette connexion. Réessaie dans une heure.'), { status: 429 });
+    }
+    const demoId = existing || crypto.randomBytes(12).toString('hex');
+    const user = findOrCreateUser(`demo-${demoId}@kyllbot.studio`, { name: 'Alex Démo', provider: 'demo' });
     const { token } = createSession(user.id, req);
-    res.setHeader('Set-Cookie', sessionCookie(token));
+    const secure = process.env.NODE_ENV === 'production' || process.env.COOKIE_SECURE === '1';
+    res.setHeader('Set-Cookie', [
+      `${cookieName}=${demoId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 24 * 3600}${secure ? '; Secure' : ''}`,
+      sessionCookie(token),
+    ]);
     res.json({ user: publicUser(user) });
   }),
 );
@@ -739,7 +751,7 @@ app.get(
         provider: 'google',
       });
       const { token } = createSession(user.id, req);
-      res.setHeader('Set-Cookie', [sessionCookie(token), 'kyll_oauth=; Path=/; Max-Age=0']);
+      res.setHeader('Set-Cookie', [sessionCookie(token), 'kyll_oauth=; Path=/; Max-Age=0', clearDemoCookie()]);
       res.redirect('/app');
     } catch (error) {
       console.error('Google OAuth:', error.message);
@@ -750,7 +762,7 @@ app.get(
 
 app.post('/api/auth/logout', (req, res) => {
   destroySession(req);
-  res.setHeader('Set-Cookie', clearCookie());
+  res.setHeader('Set-Cookie', [clearCookie(), clearDemoCookie()]);
   res.json({ ok: true });
 });
 
@@ -818,7 +830,7 @@ app.post(
     }
     persist();
     const { token } = createSession(user.id, req);
-    res.setHeader('Set-Cookie', sessionCookie(token));
+    res.setHeader('Set-Cookie', [sessionCookie(token), clearDemoCookie()]);
     res.json({ ok: true, user: publicUser(user) });
   }),
 );

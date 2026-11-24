@@ -34,6 +34,10 @@ const hash = (value) => crypto.createHash('sha256').update(String(value)).digest
 const codeHash = (email, code) => hash(`${email}:${code}:${authSecret()}`);
 const tokenHash = (token) => hash(`${token}:${authSecret()}`);
 
+export function allowDemoLogin(ip) {
+  return rateLimit(`demo:${ip || 'unknown'}`, 20, 60 * 60e3);
+}
+
 export function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
 }
@@ -260,6 +264,10 @@ export function sessionCookie(token) {
 
 export function clearCookie() {
   return `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+}
+
+export function clearDemoCookie() {
+  return 'kyll_demo=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0';
 }
 
 export function parseCookies(header = '') {
