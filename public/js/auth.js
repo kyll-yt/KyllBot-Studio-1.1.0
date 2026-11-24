@@ -21,7 +21,7 @@ const els = {
   ownerSubmit: document.getElementById('ownerSubmit'),
 };
 
-const state = { email: '', google: false, mail: false, timer: null, busy: false };
+const state = { email: '', google: false, mail: false, devLogin: false, timer: null, busy: false };
 const inputs = [...els.codeRow.querySelectorAll('input')];
 
 function showError(message) {
@@ -98,6 +98,10 @@ async function requestCode(email) {
   });
   state.email = payload.email || email;
   els.emailDisplay.textContent = state.email;
+  if (payload.transport === 'unconfigured') {
+    showError("L'envoi d'email n'est pas configuré. Utilise le compte de démonstration ci-dessous.");
+    return false;
+  }
   if (payload.devCode) {
     els.devCode.textContent = payload.devCode;
     els.devNote.hidden = false;
@@ -108,6 +112,7 @@ async function requestCode(email) {
     showNotice(`Code envoyé à ${state.email}. Vérifiez aussi les spams.`);
   }
   startCountdown(30);
+  return true;
 }
 
 els.emailForm.addEventListener('submit', async (event) => {
@@ -121,7 +126,8 @@ els.emailForm.addEventListener('submit', async (event) => {
   }
   setBusy(els.emailSubmit, true, 'Envoi du code…');
   try {
-    await requestCode(email);
+    const ready = await requestCode(email);
+    if (!ready) return;
     inputs.forEach((input) => {
       input.value = '';
       input.classList.remove('filled');
@@ -306,6 +312,7 @@ els.ownerForm?.addEventListener('submit', async (event) => {
     const config = await api('/api/auth/config');
     state.google = Boolean(config.google);
     state.mail = Boolean(config.mail);
+    state.devLogin = Boolean(config.devLogin);
     els.googleBtn.title = state.google
       ? 'Se connecter avec Google'
       : 'Google OAuth non configuré sur cette instance';
@@ -314,7 +321,9 @@ els.ownerForm?.addEventListener('submit', async (event) => {
       els.mailNote.classList.toggle('warn', !state.mail);
       els.mailNote.textContent = state.mail
         ? 'Le code à 6 chiffres sera envoyé par email.'
-        : "L'envoi réel n'est pas configuré sur cette instance : le code s'affichera après validation.";
+        : state.devLogin
+          ? "L'envoi réel n'est pas configuré sur cette instance : le code s'affichera après validation."
+          : "L'envoi d'email n'est pas configuré. Utilise le compte de démonstration ci-dessous.";
     }
   } catch {
     state.google = false;

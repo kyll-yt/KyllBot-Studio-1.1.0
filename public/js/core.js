@@ -4,9 +4,20 @@
 /* état & utilitaires                                                  */
 /* ------------------------------------------------------------------ */
 
-const APP_VERSION = '1.1.2';
+const APP_VERSION = '1.1.3';
 
 const APP_CHANGELOG = [
+  {
+    version: '1.1.3',
+    date: '2026-11-21',
+    title: 'Variantes de commandes et connexion sécurisée',
+    items: [
+      'Chaque commande peut contenir jusqu’à 20 variantes de réponse, tirées au hasard selon un poids configurable.',
+      'Connexion email renforcée : limitation des tentatives, comparaison sécurisée des codes et code de démonstration masqué en production.',
+      'Les blocs webhook et musique refusent les adresses locales ou privées.',
+      'Les diagnostics techniques détaillés sont désormais réservés au propriétaire du studio.',
+    ],
+  },
   {
     version: '1.1.2',
     date: '2026-11-21',

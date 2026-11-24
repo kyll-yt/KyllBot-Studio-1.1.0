@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { db } from './db.js';
+import { authSecret } from './secrets.js';
 
 export const OWNER_LIMITS = Object.freeze({
   bots: 999,
@@ -10,12 +11,11 @@ export const OWNER_LIMITS = Object.freeze({
   apiKeys: 10,
 });
 
-const SECRET = process.env.AUTH_SECRET || 'kyllbot-studio-dev-secret';
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const attempts = new Map();
 
 const normalizeCode = (code) => String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-const hash = (code) => crypto.createHash('sha256').update(`${normalizeCode(code)}:${SECRET}`).digest('hex');
+const hash = (code) => crypto.createHash('sha256').update(`${normalizeCode(code)}:${authSecret()}`).digest('hex');
 
 export function ownerEmail() {
   const configured = String(process.env.OWNER_EMAIL || '').trim().toLowerCase();

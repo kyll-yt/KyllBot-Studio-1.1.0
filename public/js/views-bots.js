@@ -500,8 +500,8 @@ function viewBotDetail(id) {
                   (command) => `<div class="command-row">
                     <button class="switch ${command.enabled ? 'on' : ''}" data-action="toggle-command" data-id="${esc(bot.id)}" data-cmd="${esc(command.id)}" aria-label="Activer ${esc(command.name)}"></button>
                     <span class="cmd-name">/${esc(command.name)}</span>
-                    <div class="cmd-main"><p>${esc(command.description || command.response || 'Aucune description')}</p></div>
-                    <span class="cmd-uses">${fmt(command.uses)} usages</span>
+                    <div class="cmd-main"><p>${esc(command.description || commandPreviewText(command) || 'Aucune description')}</p></div>
+                    <div class="cmd-uses">${commandVariants(command).length ? `<span class="pill gray">${commandVariants(command).length} variantes</span>` : ''} ${fmt(command.uses)} usages</div>
                     <button class="mini-btn" data-action="edit-command" data-id="${esc(bot.id)}" data-cmd="${esc(command.id)}" title="Modifier">${icon('edit')}</button>
                     <button class="mini-btn danger" data-action="delete-command" data-id="${esc(bot.id)}" data-cmd="${esc(command.id)}" title="Supprimer">${icon('trash')}</button>
                   </div>`,
@@ -1208,14 +1208,41 @@ const COMMAND_PRESETS = [
   },
 ];
 
+function commandVariants(command) {
+  return Array.isArray(command?.variants) ? command.variants.filter((variant) => variant?.text) : [];
+}
+
+function commandPreviewText(command) {
+  const variants = commandVariants(command);
+  if (command?.variantMode && variants.length) return variants[0].text;
+  return command?.response || '';
+}
+
+function commandVariantRow(variant = {}) {
+  return `<div class="command-variant-row" data-command-variant>
+    <span class="variant-badge">V</span>
+    <div class="variant-main">
+      <textarea class="textarea" rows="2" name="variantText" maxlength="1000" placeholder="Texte de la variante">${esc(variant.text || '')}</textarea>
+      <div class="variant-meta">
+        <label>Poids <input class="input" type="number" name="variantWeight" min="1" max="100" value="${esc(variant.weight || 1)}"></label>
+      </div>
+    </div>
+    <input type="hidden" name="variantId" value="${esc(variant.id || '')}">
+    <button type="button" class="mini-btn danger" data-remove-command-variant title="Supprimer">${icon('x')}</button>
+  </div>`;
+}
+
 function commandModal(bot, command) {
   const value = command || {
     name: '',
     description: '',
     response: '',
     cooldown: 3,
+    variants: [],
+    variantMode: false,
     embed: { title: '', description: '', color: bot.color || '#7c5cff', footer: 'KyllBot Studio' },
   };
+  const initialVariants = commandVariants(value);
 
   const form = openModal({
     title: command ? 'Modifier la commande' : 'Nouvelle commande',
@@ -1238,6 +1265,16 @@ function commandModal(bot, command) {
       </div>
       <div class="field"><label for="cDesc">Description</label><input class="input" id="cDesc" name="description" placeholder="Affiche le message d'accueil" value="${esc(value.description)}"></div>
       <div class="field"><label for="cResp">Réponse texte</label><textarea class="textarea" id="cResp" name="response" placeholder="Bienvenue {user} sur {server} !">${esc(value.response)}</textarea><div class="hint">Variables disponibles : {user}, {server}, {level}, {xp}</div></div>
+      <div class="field">
+        <div class="variant-editor-head">
+          <b>Variantes de réponse</b>
+          <span class="pill gray" id="cmdVariantCount">0 variante</span>
+        </div>
+        <label class="check-row" style="margin:8px 0"><input type="checkbox" name="variantMode" ${value.variantMode ? 'checked' : ''}> <span>Choisir une variante au hasard à chaque utilisation</span></label>
+        <p class="hint">Ajoute plusieurs textes : le bot en tire un au hasard selon son poids. Si l'option est désactivée, la réponse texte ci-dessus est utilisée.</p>
+        <div class="variants" id="cmdVariants">${initialVariants.map((variant) => commandVariantRow(variant)).join('')}</div>
+        <button type="button" class="link-btn" id="cmdAddVariant" style="margin-top:8px">${icon('plus')} Ajouter une variante</button>
+      </div>
       <div class="form-row">
         <div class="field"><label for="eTitle">Titre de l'embed</label><input class="input" id="eTitle" name="embedTitle" value="${esc(value.embed.title)}"></div>
         <div class="field"><label for="eColor">Couleur de l'embed</label><input class="input" id="eColor" name="embedColor" type="color" value="${esc(value.embed.color)}"></div>
@@ -1247,11 +1284,24 @@ function commandModal(bot, command) {
       <div class="field"><label>Aperçu Discord</label><div class="modal-preview" id="cmdPreview"></div></div>
     `,
     onSubmit: async (formData) => {
+      const variantIds = formData.getAll('variantId');
+      const variantTexts = formData.getAll('variantText');
+      const variantWeights = formData.getAll('variantWeight');
+      const variants = variantTexts
+        .map((text, index) => ({
+          id: String(variantIds[index] || '').trim(),
+          text: String(text || '').trim(),
+          weight: Math.min(100, Math.max(1, Number(variantWeights[index]) || 1)),
+        }))
+        .filter((variant) => variant.text)
+        .slice(0, 20);
       const payload = {
         name: formData.get('name'),
         description: formData.get('description'),
         response: formData.get('response'),
         cooldown: Number(formData.get('cooldown')),
+        variantMode: Boolean(formData.get('variantMode')),
+        variants,
         embed: {
           title: formData.get('embedTitle'),
           description: formData.get('embedDescription'),
@@ -1270,16 +1320,46 @@ function commandModal(bot, command) {
     },
   });
 
+  const variantsHost = form.querySelector('#cmdVariants');
+  const variantCount = form.querySelector('#cmdVariantCount');
+  const refreshVariantCount = () => {
+    if (!variantCount) return;
+    const count = variantsHost?.querySelectorAll('[data-command-variant]').length || 0;
+    variantCount.textContent = `${count} variante${count > 1 ? 's' : ''}`;
+  };
+  const addVariant = (variant = {}) => {
+    if (!variantsHost) return;
+    if (variantsHost.querySelectorAll('[data-command-variant]').length >= 20) {
+      toast('20 variantes maximum par commande.', 'error');
+      return;
+    }
+    variantsHost.insertAdjacentHTML('beforeend', commandVariantRow(variant));
+    refreshVariantCount();
+    update();
+  };
+
+  form.querySelector('#cmdAddVariant')?.addEventListener('click', () => addVariant());
+  variantsHost?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-remove-command-variant]');
+    if (!button) return;
+    button.closest('[data-command-variant]')?.remove();
+    refreshVariantCount();
+    update();
+  });
+
   const update = () => {
     const data = new FormData(form);
     const preview = document.getElementById('cmdPreview');
+    refreshVariantCount();
     if (!preview) return;
+    const variantTexts = data.getAll('variantText').map((value) => String(value).trim()).filter(Boolean);
+    const response = data.get('variantMode') && variantTexts.length ? variantTexts[0] : data.get('response') || variantTexts[0] || '';
     preview.innerHTML = embedPreview({
       title: data.get('embedTitle'),
       description: data.get('embedDescription'),
       color: data.get('embedColor'),
       footer: data.get('embedFooter'),
-      response: data.get('response'),
+      response,
     });
   };
   form.addEventListener('input', update);
@@ -1813,7 +1893,7 @@ onAction('test-bot', (el) => {
   const update = () => {
     const command = bot.commands.find((entry) => entry.id === select?.value);
     if (!command || !out) return;
-    const response = (command.response || '').replace(/\{user\}/g, '@Alex').replace(/\{server\}/g, 'Kyll Community');
+    const response = (commandPreviewText(command) || '').replace(/\{user\}/g, '@Alex').replace(/\{server\}/g, 'Kyll Community');
     out.innerHTML =
       embedPreview({ ...command.embed, response }) +
       `<p style="font-size:11.5px;color:var(--muted-2);margin-top:9px">Cooldown : ${command.cooldown}s · ${fmt(command.uses)} usages cumulés</p>`;

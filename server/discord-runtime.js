@@ -21,13 +21,13 @@ import {
   TextInputStyle,
   UserSelectMenuBuilder,
 } from 'discord.js';
-import { createReadStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import ffmpegPath from 'ffmpeg-static';
 import { db, persist } from './db.js';
 import { recordEvent } from './activity.js';
 import { formatDuration, formatSignedDuration, normalizeModalFields, parseDurationInput, runFlow } from './flows.js';
 import { decryptSecret } from './secrets.js';
+import { safeFetch } from './url-safety.js';
 import { activeDiscordServer, upsertDiscordServer } from './discord.js';
 import { savedMessageHasEmbed } from './messages.js';
 import { scheduledMessageDue } from './scheduled.js';
@@ -446,8 +446,20 @@ function renderTemplate(text, { guild, member, interaction, client }) {
     .replace(/\{xp\}/g, '0');
 }
 
+function commandResponseText(command) {
+  const variants = Array.isArray(command.variants) ? command.variants.filter((variant) => variant?.text) : [];
+  if (!command.variantMode || !variants.length) return command.response;
+  const total = variants.reduce((sum, variant) => sum + Math.max(1, Number(variant.weight) || 1), 0);
+  let roll = Math.random() * total;
+  for (const variant of variants) {
+    roll -= Math.max(1, Number(variant.weight) || 1);
+    if (roll <= 0) return variant.text;
+  }
+  return variants[variants.length - 1].text;
+}
+
 function commandPayload(command, context) {
-  const content = renderTemplate(command.response, context);
+  const content = renderTemplate(commandResponseText(command), context);
   const embed = command.embed || {};
   const hasEmbed = Boolean(embed.title || embed.description || embed.footer);
   const payload = {};
@@ -1292,13 +1304,13 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
         }
         case 'webhook': {
           if (output.url) {
-            const method = output.method || 'POST';
+            const method = String(output.method || 'POST').toUpperCase();
             const request = { method };
             if (method !== 'GET') {
               request.headers = { 'Content-Type': 'application/json' };
               request.body = output.body || '{}';
             }
-            await fetch(output.url, request);
+            await safeFetch(output.url, request);
           }
           break;
         }
@@ -1496,15 +1508,9 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
             const volumePct = Number(output.volume);
             const volume = Math.min(2, Math.max(0, (Number.isFinite(volumePct) ? volumePct : 80) / 100));
             const makeResource = async () => {
-              let input;
-              if (/^https?:\/\//i.test(url)) {
-                const response = await fetch(url);
-                if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
-                input = Readable.fromWeb(response.body);
-              } else {
-                input = createReadStream(url);
-              }
-              const resource = voice.createAudioResource(input, { inlineVolume: true, inputType: voice.StreamType.Arbitrary });
+              const response = await safeFetch(url);
+              if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+              const resource = voice.createAudioResource(Readable.fromWeb(response.body), { inlineVolume: true, inputType: voice.StreamType.Arbitrary });
               resource.volume?.setVolume(volume);
               return resource;
             };

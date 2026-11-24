@@ -4,7 +4,48 @@ import path from 'node:path';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const KEY_FILE = path.join(DATA_DIR, '.token-key');
+const AUTH_SECRET_FILE = path.join(DATA_DIR, '.auth-secret');
 let cachedKey = null;
+let cachedAuthSecret = null;
+
+function fileSecret(file) {
+  try {
+    const existing = fs.readFileSync(file);
+    if (existing.length >= 32) return existing.toString('utf8').trim();
+  } catch {
+    /* première utilisation */
+  }
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  const secret = crypto.randomBytes(32).toString('hex');
+  fs.writeFileSync(file, secret, { mode: 0o600 });
+  return secret;
+}
+
+export function authSecret() {
+  if (cachedAuthSecret) return cachedAuthSecret;
+  const configured = String(process.env.AUTH_SECRET || '').trim();
+  if (configured && configured !== 'change-me-in-production') {
+    cachedAuthSecret = configured;
+    return cachedAuthSecret;
+  }
+  // Réutilise la clé de chiffrement stable pour éviter de perdre les sessions
+  // quand le dossier data/ est effacé à chaque déploiement.
+  let stableKey = null;
+  try {
+    stableKey = parseKey(process.env.TOKEN_ENCRYPTION_KEY);
+  } catch {
+    /* clé invalide : on retombe sur le fichier local */
+  }
+  if (stableKey) {
+    cachedAuthSecret = crypto.createHash('sha256').update(`auth:${stableKey.toString('hex')}`).digest('hex');
+    return cachedAuthSecret;
+  }
+  cachedAuthSecret = fileSecret(AUTH_SECRET_FILE);
+  if (process.env.NODE_ENV === 'production') {
+    console.warn('[security] AUTH_SECRET et TOKEN_ENCRYPTION_KEY absents : un secret local a été généré. Les sessions seront perdues au prochain redéploiement.');
+  }
+  return cachedAuthSecret;
+}
 
 function parseKey(raw) {
   const value = String(raw || '').trim();

@@ -9,6 +9,7 @@ import {
   clearCookie,
   createSession,
   destroySession,
+  devLoginEnabled,
   exchangeGoogleCode,
   findOrCreateUser,
   googleAuthUrl,
@@ -124,12 +125,43 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+app.use('/api', (req, res, next) => {
+  if (SAFE_METHODS.has(req.method)) return next();
+  const origin = req.get('origin');
+  if (!origin) {
+    if (req.get('sec-fetch-site') === 'cross-site') {
+      return res.status(403).json({ error: 'Origine non autorisée.' });
+    }
+    return next();
+  }
+  let originHost = '';
+  try {
+    originHost = new URL(origin).host;
+  } catch {
+    return res.status(403).json({ error: 'Origine non autorisée.' });
+  }
+  const allowedHosts = new Set([req.get('host')].filter(Boolean));
+  try {
+    if (process.env.PUBLIC_URL) allowedHosts.add(new URL(process.env.PUBLIC_URL).host);
+  } catch {
+    /* PUBLIC_URL invalide : le contrôle se limite à l'hôte de la requête */
+  }
+  if (!allowedHosts.has(originHost)) {
+    return res.status(403).json({ error: 'Origine non autorisée.' });
+  }
+  next();
+});
+
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
   res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('X-DNS-Prefetch-Control', 'off');
   res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
   if (process.env.NODE_ENV === 'production' || req.secure) {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
@@ -149,11 +181,10 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get('/healthz', (req, res) => {
+function healthDetails() {
   const storage = storageStatus();
   const keySource = tokenKeySource();
-  res.set('Cache-Control', 'no-store');
-  res.json({
+  return {
     ok: true,
     pid: process.pid,
     uptime: Math.round(process.uptime()),
@@ -175,7 +206,12 @@ app.get('/healthz', (req, res) => {
       supabaseConfigError: remoteStoreInfo.configError,
       tokenKeySource: keySource,
     },
-  });
+  };
+}
+
+app.get('/healthz', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ ok: true });
 });
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -198,7 +234,11 @@ function migrateWorkspace(ws) {
   let changed = false;
   if ((ws.schemaVersion || 1) < SCHEMA_VERSION) {
     for (const bot of ws.bots || []) {
-      for (const command of bot.commands || []) command.uses = 0;
+      for (const command of bot.commands || []) {
+        command.uses = 0;
+        if (!Array.isArray(command.variants)) command.variants = [];
+        if (command.variantMode === undefined) command.variantMode = false;
+      }
       for (const flow of bot.flows || []) flow.runs = 0;
     }
     ws.schemaVersion = SCHEMA_VERSION;
@@ -344,6 +384,26 @@ const bad = (message) => Object.assign(new Error(message), { status: 400 });
 
 function pickColors(value) {
   return /^#[0-9a-f]{6}$/i.test(value || '') ? value : '#6d5efc';
+}
+
+function sanitizeCommandVariants(input) {
+  if (!Array.isArray(input)) return [];
+  const ids = new Set();
+  return input
+    .slice(0, 20)
+    .map((variant) => {
+      const text = str(variant?.text, 1000);
+      if (!text) return null;
+      let id = str(variant?.id, 80).replace(/[^\w-]/g, '') || newId();
+      if (ids.has(id)) id = newId();
+      ids.add(id);
+      return {
+        id,
+        text,
+        weight: Math.min(100, Math.max(1, Number(variant?.weight) || 1)),
+      };
+    })
+    .filter(Boolean);
 }
 
 function publicSavedMessage(message) {
@@ -617,7 +677,7 @@ function workspacePayload(user) {
 /* ------------------------------------------------------------------ */
 
 app.get('/api/auth/config', (req, res) => {
-  res.json({ google: googleConfigured, mail: mailConfigured, mailMode, demo: true });
+  res.json({ google: googleConfigured, mail: mailConfigured, mailMode, devLogin: devLoginEnabled, demo: true });
 });
 
 app.post(
@@ -701,6 +761,16 @@ function requireAppOwner(req) {
     throw Object.assign(new Error('Accès propriétaire réservé.'), { status: 403 });
   }
 }
+
+app.get(
+  '/api/system/health',
+  requireAuth,
+  wrap(async (req, res) => {
+    requireAppOwner(req);
+    res.set('Cache-Control', 'no-store');
+    res.json(healthDetails());
+  }),
+);
 
 app.get(
   '/api/owner/access',
@@ -1081,6 +1151,8 @@ app.post(
       },
       enabled: req.body?.enabled !== false,
       cooldown: Math.min(600, Math.max(0, Number(req.body?.cooldown) || 3)),
+      variants: sanitizeCommandVariants(req.body?.variants),
+      variantMode: Boolean(req.body?.variantMode),
       uses: 0,
     };
     bot.commands.push(command);
@@ -1109,6 +1181,8 @@ app.patch(
     if (body.response !== undefined) command.response = str(body.response, 1000);
     if (body.enabled !== undefined) command.enabled = Boolean(body.enabled);
     if (body.cooldown !== undefined) command.cooldown = Math.min(600, Math.max(0, Number(body.cooldown) || 0));
+    if (body.variants !== undefined) command.variants = sanitizeCommandVariants(body.variants);
+    if (body.variantMode !== undefined) command.variantMode = Boolean(body.variantMode);
     if (body.embed) {
       for (const key of ['title', 'description', 'footer']) {
         if (body.embed[key] !== undefined) command.embed[key] = str(body.embed[key], key === 'description' ? 500 : 120);

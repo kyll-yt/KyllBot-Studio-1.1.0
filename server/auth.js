@@ -2,22 +2,37 @@ import crypto from 'node:crypto';
 import nodemailer from 'nodemailer';
 import { db, findUserByEmail, findUserById, newId, persist } from './db.js';
 import { seedWorkspace } from './seed.js';
+import { authSecret } from './secrets.js';
 
 const COOKIE = 'kyll_session';
 const SESSION_TTL = 30 * 24 * 3600e3;
 const CODE_TTL = 10 * 60e3;
 const MAX_ATTEMPTS = 5;
-const SECRET = process.env.AUTH_SECRET || 'kyllbot-studio-dev-secret';
+
+function hostedPublicly() {
+  if (process.env.NODE_ENV === 'production') return true;
+  if (String(process.env.RENDER || '').toLowerCase() === 'true') return true;
+  if (process.env.RENDER_EXTERNAL_URL) return true;
+  try {
+    const host = new URL(String(process.env.PUBLIC_URL || '').trim()).hostname;
+    return !['localhost', '127.0.0.1', '::1'].includes(host);
+  } catch {
+    return false;
+  }
+}
+
+const DEV_LOGIN_CODE = process.env.ALLOW_DEV_LOGIN_CODE === '1' || !hostedPublicly();
 
 export const resendConfigured = Boolean(process.env.RESEND_API_KEY);
 export const smtpConfigured = Boolean(process.env.SMTP_HOST);
 export const mailConfigured = resendConfigured || smtpConfigured;
 export const mailMode = resendConfigured ? 'resend' : smtpConfigured ? 'smtp' : 'demo';
 export const googleConfigured = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+export const devLoginEnabled = DEV_LOGIN_CODE;
 
 const hash = (value) => crypto.createHash('sha256').update(String(value)).digest('hex');
-const codeHash = (email, code) => hash(`${email}:${code}:${SECRET}`);
-const tokenHash = (token) => hash(`${token}:${SECRET}`);
+const codeHash = (email, code) => hash(`${email}:${code}:${authSecret()}`);
+const tokenHash = (token) => hash(`${token}:${authSecret()}`);
 
 export function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
@@ -130,6 +145,10 @@ export async function requestLoginCode(rawEmail, ip) {
     throw Object.assign(new Error('Trop de tentatives depuis cette connexion.'), { status: 429 });
   }
 
+  if (!mailConfigured && !DEV_LOGIN_CODE) {
+    return { email, delivered: false, transport: 'unconfigured' };
+  }
+
   const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
   db.codes = db.codes.filter((c) => c.email !== email && c.expiresAt > Date.now() && !c.consumed);
   db.codes.push({
@@ -144,7 +163,12 @@ export async function requestLoginCode(rawEmail, ip) {
   persist();
 
   const result = await sendCodeEmail(email, code);
-  return { email, delivered: result.delivered, transport: result.transport, devCode: result.delivered ? undefined : code };
+  return {
+    email,
+    delivered: result.delivered,
+    transport: result.transport,
+    devCode: result.delivered || !DEV_LOGIN_CODE ? undefined : code,
+  };
 }
 
 export function verifyLoginCode(rawEmail, rawCode, req) {
@@ -158,7 +182,7 @@ export function verifyLoginCode(rawEmail, rawCode, req) {
 
   const entry = db.codes.find((c) => c.email === email && !c.consumed);
   if (!entry || entry.expiresAt < Date.now()) {
-    throw Object.assign(new Error('Code expiré ou introuvable. Demandez un nouveau code.'), { status: 400 });
+    throw Object.assign(new Error('Code incorrect ou expiré. Demandez un nouveau code.'), { status: 400 });
   }
   if (entry.attempts >= MAX_ATTEMPTS) {
     throw Object.assign(new Error('Trop d’essais sur ce code. Demandez un nouveau code.'), { status: 429 });
@@ -170,7 +194,7 @@ export function verifyLoginCode(rawEmail, rawCode, req) {
   const ok = expected.length === provided.length && crypto.timingSafeEqual(expected, provided);
   if (!ok) {
     persist();
-    throw Object.assign(new Error('Code incorrect.'), { status: 401 });
+    throw Object.assign(new Error('Code incorrect ou expiré.'), { status: 401 });
   }
 
   entry.consumed = true;
@@ -239,11 +263,20 @@ export function clearCookie() {
 }
 
 export function parseCookies(header = '') {
-  return header.split(';').reduce((acc, part) => {
-    const idx = part.indexOf('=');
-    if (idx > 0) acc[part.slice(0, idx).trim()] = decodeURIComponent(part.slice(idx + 1).trim());
-    return acc;
-  }, {});
+  return String(header)
+    .split(';')
+    .reduce((acc, part) => {
+      const idx = part.indexOf('=');
+      if (idx <= 0) return acc;
+      const key = part.slice(0, idx).trim();
+      const raw = part.slice(idx + 1).trim();
+      try {
+        acc[key] = decodeURIComponent(raw);
+      } catch {
+        acc[key] = raw;
+      }
+      return acc;
+    }, {});
 }
 
 export function userFromRequest(req) {
