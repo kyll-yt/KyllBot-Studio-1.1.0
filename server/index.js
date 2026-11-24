@@ -2365,6 +2365,11 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  KyllBot Studio — http://localhost:${PORT}`);
   console.log(`  Google OAuth : ${googleConfigured ? 'activé' : 'non configuré (mode démo)'}`);
   console.log(`  Envoi d'emails : ${mailMode === 'resend' ? 'Resend activé' : mailMode === 'smtp' ? 'SMTP activé' : 'mode démo (code affiché)'}`);
+  let migrated = false;
+  for (const ws of Object.values(db.workspaces || {})) {
+    if (migrateWorkspace(ws)) migrated = true;
+  }
+  if (migrated) persist();
   autostartBots();
   console.log('');
 });
