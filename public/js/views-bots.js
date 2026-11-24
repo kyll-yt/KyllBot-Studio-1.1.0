@@ -503,7 +503,8 @@ function viewBotDetail(id) {
           <span class="pill ${activeServer ? 'green' : 'gray'}">${esc(serverName)}</span>
           ${
             inviteUrl
-              ? `<a class="btn btn-ghost btn-sm" href="${esc(inviteUrl)}" target="_blank" rel="noopener noreferrer">${icon('plus')} Ajouter le bot</a>`
+              ? `<a class="btn btn-primary btn-sm" href="/api/bots/${esc(bot.id)}/discord/oauth/start">${icon('users')} Voir mes serveurs</a>
+                 <a class="btn btn-ghost btn-sm" href="${esc(inviteUrl)}" target="_blank" rel="noopener noreferrer">${icon('plus')} Lien direct</a>`
               : `<button class="btn btn-ghost btn-sm" data-action="bot-tab" data-tab="settings">${icon('key')} Ajouter le token</button>`
           }
           <button class="btn btn-ghost btn-sm" data-action="sync-bot-commands" data-id="${esc(bot.id)}">${icon('shuffle')} Synchroniser</button>
@@ -552,9 +553,18 @@ function viewBotDetail(id) {
         </div>
         <p class="hint" style="margin-top:8px">${
           inviteUrl
-            ? 'Le bot n’est pas encore sur ton serveur ? Clique sur « Ajouter le bot », choisis le serveur, puis reviens ici et clique sur « Synchroniser ».'
+            ? 'Le bot n’est pas encore sur ton serveur ? Clique sur « Voir mes serveurs » ou sur « Lien direct », choisis le serveur, puis reviens ici et clique sur « Synchroniser ».'
             : 'Ajoute le token du bot dans Paramètres pour générer le lien d’invitation vers un nouveau serveur.'
         }</p>
+        ${
+          inviteUrl
+            ? `<details class="token-help"><summary>Première fois : autoriser le retour Discord</summary>
+                <p>Dans Discord Developer Portal → ton application → OAuth2 → Redirects, ajoute cette URL :</p>
+                <code>${esc(state.config?.discordOAuthRedirectUri || `${window.location.origin}/api/discord/oauth/callback`)}</code>
+                <p>Ensuite, le bouton « Voir mes serveurs » fonctionnera.</p>
+              </details>`
+            : ''
+        }
         ${runtime.warning ? `<p class="hint" style="color:#fde68a;margin-top:6px">${esc(runtime.warning)}</p>` : ''}
         ${runtime.lastError ? `<p class="hint" style="color:#fda4af;margin-top:6px">Dernière erreur : ${esc(runtime.lastError)}</p>` : ''}
       </div>
@@ -670,7 +680,8 @@ function viewBotDetail(id) {
       <div class="panel-head">
         <h3>Serveur Discord</h3>
         <div class="ph-actions">
-          ${inviteUrl ? `<a class="btn btn-ghost btn-sm" href="${esc(inviteUrl)}" target="_blank" rel="noopener noreferrer">${icon('plus')} Ajouter le bot à un serveur</a>` : ''}
+          ${inviteUrl ? `<a class="btn btn-primary btn-sm" href="/api/bots/${esc(bot.id)}/discord/oauth/start">${icon('users')} Voir mes serveurs</a>
+          <a class="btn btn-ghost btn-sm" href="${esc(inviteUrl)}" target="_blank" rel="noopener noreferrer">${icon('plus')} Lien direct</a>` : ''}
           <button class="btn btn-ghost btn-sm" data-action="bot-sync-discord" data-id="${esc(bot.id)}">${icon('shuffle')} Synchroniser depuis Discord</button>
           <span class="pill violet">${discord.channels.length} salon(s) · ${discord.categories.length} catégorie(s)</span>
         </div>
@@ -1299,6 +1310,66 @@ function commandServerName(bot) {
   return active?.guildName || active?.name || '';
 }
 
+function openDiscordGuildsModal(result) {
+  const bot = state.ws?.bots?.find((entry) => entry.id === result.botId);
+  const available = result.availableGuilds || [];
+  const present = result.presentGuilds || [];
+  const body = result.error
+    ? `<div class="empty" style="padding:28px 18px"><div class="ic">${icon('x')}</div><h3>Autorisation impossible</h3><p>${esc(result.error)}</p></div>`
+    : `<p class="hint">Compte Discord : <b>${esc(result.user?.globalName || result.user?.username || 'inconnu')}</b></p>
+      <div class="field">
+        <label>Serveurs où tu peux ajouter le bot (${available.length})</label>
+        ${
+          available.length
+            ? `<div class="server-list">${available
+                .map(
+                  (guild) => `<div class="server-card">
+                    <span class="server-avatar">${esc((guild.name || 'S').slice(0, 1).toUpperCase())}</span>
+                    <span class="server-main"><b>${esc(guild.name)}</b><small>${guild.owner ? 'Tu es propriétaire' : 'Tu peux gérer ce serveur'} · bot absent</small></span>
+                    ${bot ? `<a class="btn btn-primary btn-sm" href="${esc(botInviteUrl(bot, guild.id))}" target="_blank" rel="noopener noreferrer">Ajouter le bot</a>` : ''}
+                    <button type="button" class="btn btn-ghost btn-sm" data-action="bot-connect-server" data-id="${esc(result.botId)}" data-guild="${esc(guild.id)}" data-close-modal="1">Configurer</button>
+                  </div>`,
+                )
+                .join('')}</div>`
+            : `<div class="empty" style="padding:24px 18px"><div class="ic">${icon('users')}</div><h3>Aucun serveur disponible</h3><p>Le bot est déjà présent sur tous tes serveurs gérables, ou tu n’as pas la permission « Gérer le serveur ».</p></div>`
+        }
+      </div>
+      ${
+        present.length
+          ? `<details class="token-help"><summary>Bot déjà présent sur ${present.length} serveur(s)</summary>${present.map((guild) => `<p>${esc(guild.name)}</p>`).join('')}</details>`
+          : ''
+      }
+      <p class="hint">Tu dois avoir la permission « Gérer le serveur » sur le serveur de ton ami. Si elle n’apparaît pas, demande-lui de t’ajouter comme administrateur ou de faire l’ajout lui-même.</p>`;
+  openModal({
+    title: 'Ajouter le bot à un serveur',
+    subtitle: 'Choisis un serveur, autorise l’invitation, puis configure-le.',
+    body,
+    hideFooter: true,
+    wide: true,
+  });
+}
+
+async function handleDiscordOAuthReturn() {
+  const params = new URLSearchParams(window.location.search);
+  const stateId = params.get('discord_oauth');
+  const error = params.get('discord_oauth_error');
+  if (!stateId && !error) return;
+  const url = new URL(window.location.href);
+  url.searchParams.delete('discord_oauth');
+  url.searchParams.delete('discord_oauth_error');
+  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  if (error) {
+    toast(error, 'error');
+    return;
+  }
+  try {
+    const result = await api(`/api/discord/oauth/result?state=${encodeURIComponent(stateId)}`);
+    openDiscordGuildsModal(result);
+  } catch (errorObject) {
+    toast(errorObject.message, 'error');
+  }
+}
+
 function commandVariants(command) {
   return Array.isArray(command?.variants) ? command.variants.filter((variant) => variant?.text) : [];
 }
@@ -1641,6 +1712,7 @@ onAction('bot-connect-server', async (el) => {
     }
     toast(`${result.guildName || 'Serveur'} connecté : ${result.channels} salons et ${result.roles} rôles.${commandInfo}`, tone);
     await refresh();
+    if (el.dataset.closeModal === '1') closeModal();
   } catch (error) {
     toast(error.message, 'error');
   }

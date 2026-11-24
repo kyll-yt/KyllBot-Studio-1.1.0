@@ -33,7 +33,8 @@ import {
   selectDiscordServer,
   upsertDiscordServer,
 } from './discord.js';
-import { encryptSecret, tokenKeySource } from './secrets.js';
+import { decryptSecret, encryptSecret, tokenKeySource } from './secrets.js';
+import { completeDiscordOAuth, createDiscordOAuthUrl, discordOAuthRedirectUri, takeDiscordOAuthResult } from './discord-oauth.js';
 import {
   autostartBots,
   getBotRuntime,
@@ -635,7 +636,7 @@ function computeStats(ws) {
   };
 }
 
-function workspacePayload(user) {
+function workspacePayload(user, req) {
   const ws = getWorkspace(user.id);
   const owner = isAppOwner(user);
   for (const bot of ws.bots) ensureBotFlows(bot);
@@ -668,7 +669,7 @@ function workspacePayload(user) {
       purchases: ws.purchases || [],
       invoices: ws.invoices || [],
     },
-    config: { google: googleConfigured, mail: mailConfigured, mailMode },
+    config: { google: googleConfigured, mail: mailConfigured, mailMode, discordOAuthRedirectUri: req ? discordOAuthRedirectUri(req) : '' },
   };
 }
 
@@ -824,7 +825,7 @@ app.post(
 app.get('/api/me', (req, res) => {
   const user = userFromRequest(req);
   if (!user) return res.status(401).json({ error: 'Non authentifié.' });
-  res.json(workspacePayload(user));
+  res.json(workspacePayload(user, req));
 });
 
 app.patch(
@@ -844,7 +845,7 @@ app.patch(
 /* ------------------------------------------------------------------ */
 
 app.get('/api/workspace', requireAuth, (req, res) => {
-  res.json(workspacePayload(req.user));
+  res.json(workspacePayload(req.user, req));
 });
 
 app.patch(
@@ -1011,6 +1012,48 @@ app.post(
       const status = error.code === 'DISCORD_NETWORK' || (error.status && error.status >= 500) ? 502 : 400;
       throw Object.assign(new Error(error.message), { status });
     }
+  }),
+);
+
+app.get(
+  '/api/bots/:id/discord/oauth/start',
+  requireAuth,
+  (req, res) => {
+    try {
+      const ws = getWorkspace(req.user.id);
+      const bot = findOr404(ws.bots, req.params.id, 'Bot');
+      if (!bot.tokenEnc) throw new Error('Ajoute le token du bot avant de voir tes serveurs Discord.');
+      const token = decryptSecret(bot.tokenEnc);
+      res.redirect(createDiscordOAuthUrl(req, bot, token, req.user.id));
+    } catch (error) {
+      const botPath = error.status === 404 ? '' : `/${encodeURIComponent(req.params.id)}`;
+      res.redirect(`/app?discord_oauth_error=${encodeURIComponent(error.message)}#/bots${botPath}`);
+    }
+  },
+);
+
+app.get('/api/discord/oauth/callback', async (req, res) => {
+  const state = String(req.query.state || '');
+  try {
+    const result = await completeDiscordOAuth(state, String(req.query.code || ''), String(req.query.error || ''));
+    if (result.botId) {
+      res.redirect(`/app?discord_oauth=${encodeURIComponent(state)}#/bots/${encodeURIComponent(result.botId)}`);
+    } else {
+      res.redirect('/app?discord_oauth_error=Autorisation%20Discord%20expir%C3%A9e.#/bots');
+    }
+  } catch (error) {
+    const botPath = error.botId ? `/${encodeURIComponent(error.botId)}` : '';
+    res.redirect(`/app?discord_oauth_error=${encodeURIComponent(error.message)}#/bots${botPath}`);
+  }
+});
+
+app.get(
+  '/api/discord/oauth/result',
+  requireAuth,
+  wrap(async (req, res) => {
+    const result = takeDiscordOAuthResult(String(req.query.state || ''), req.user.id);
+    if (!result) throw Object.assign(new Error('Résultat d’autorisation expiré. Recommence depuis le bot.'), { status: 404 });
+    res.json(result);
   }),
 );
 

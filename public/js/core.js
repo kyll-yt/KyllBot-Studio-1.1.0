@@ -4,9 +4,20 @@
 /* état & utilitaires                                                  */
 /* ------------------------------------------------------------------ */
 
-const APP_VERSION = '1.1.3';
+const APP_VERSION = '1.1.4';
 
 const APP_CHANGELOG = [
+  {
+    version: '1.1.4',
+    date: '2026-11-21',
+    title: 'Inviter le bot sur tes serveurs Discord',
+    items: [
+      'Bouton « Voir mes serveurs » : connecte ton compte Discord et affiche les serveurs où tu peux ajouter le bot.',
+      'Autorisation Discord sécurisée avec PKCE, sans secret client et sans accès aux messages.',
+      'Invitation préremplie sur le serveur choisi, avec les permissions recommandées.',
+      'Après l’invitation, bouton « Configurer » pour synchroniser les salons, les rôles et les commandes.',
+    ],
+  },
   {
     version: '1.1.3',
     date: '2026-11-21',
