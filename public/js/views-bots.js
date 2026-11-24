@@ -567,7 +567,10 @@ function viewBotDetail(id) {
     <div class="panel">
       <div class="panel-head">
         <h3>Commandes · ${esc(serverName)} (${visibleCommands.length})</h3>
-        <div class="ph-actions"><button class="btn btn-primary btn-sm" data-action="new-command" data-id="${esc(bot.id)}">${icon('plus')} Ajouter</button></div>
+        <div class="ph-actions">
+          ${servers.length > 1 ? `<button class="btn btn-sm btn-ghost" data-action="move-commands" data-id="${esc(bot.id)}">${icon('arrow')} Déplacer</button>` : ''}
+          <button class="btn btn-primary btn-sm" data-action="new-command" data-id="${esc(bot.id)}">${icon('plus')} Ajouter</button>
+        </div>
       </div>
       <div class="panel-body tight">
         ${
@@ -1546,6 +1549,58 @@ function commandModal(bot, command) {
   update();
 }
 
+function moveCommandsModal(bot) {
+  const servers = botDiscordServers(bot);
+  const source = activeBotServer(bot);
+  const targets = servers.filter((server) => server.id !== source?.id);
+  if (!source || !targets.length) {
+    toast('Ajoute d’abord un second serveur Discord à ce bot.', 'info');
+    return;
+  }
+  const commandCount = (bot.commands || []).filter((command) => commandServerKey(bot, command) === source.id).length;
+  const flowCount = (bot.flows || []).filter(
+    (flow) => flow.trigger?.type === 'slash' && commandServerKey(bot, flow) === source.id,
+  ).length;
+  openModal({
+    title: 'Déplacer les commandes',
+    subtitle: `Source : ${source.guildName || source.name || 'serveur actif'}.`,
+    submitLabel: 'Déplacer',
+    body: `
+      <p class="hint" style="margin:0 0 14px">${commandCount} commande(s) et ${flowCount} flux slash seront déplacés vers le serveur choisi. Les commandes déjà présentes sur le serveur cible sont ignorées.</p>
+      <div class="field">
+        <label for="moveTarget">Serveur cible</label>
+        <select class="select" id="moveTarget" name="toServerId" required>
+          ${targets
+            .map(
+              (server) =>
+                `<option value="${esc(server.id)}">${esc(server.guildName || server.name || 'Serveur Discord')}${server.guildId ? '' : ' (non connecté)'}</option>`,
+            )
+            .join('')}
+        </select>
+      </div>
+      <label class="check-row"><input type="checkbox" name="includeFlows" checked> <span>Déplacer aussi les flux slash</span></label>
+    `,
+    onSubmit: async (formData) => {
+      const result = await api(`/api/bots/${bot.id}/commands/move`, {
+        method: 'POST',
+        body: JSON.stringify({
+          fromServerId: source.id,
+          toServerId: formData.get('toServerId'),
+          includeFlows: Boolean(formData.get('includeFlows')),
+        }),
+      });
+      await refresh();
+      const skipped = (result.skipped || []).map((entry) => entry.name);
+      const details = skipped.length ? ` ${skipped.length} ignoré(s) car déjà présent(s) : ${skipped.join(', ')}.` : '';
+      const syncError = result.sync?.error ? ` Synchronisation Discord : ${result.sync.error}` : '';
+      toast(
+        `${result.moved.length} élément(s) déplacé(s) vers ${result.to.name}.${details}${syncError}`,
+        skipped.length || syncError ? 'info' : 'success',
+      );
+    },
+  });
+}
+
 const formatDiscord = (text) => esc(text).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
 
 function embedPreview({ title, description, color, footer, response }) {
@@ -1817,6 +1872,11 @@ onAction('new-command', (el) => {
     return;
   }
   commandModal(bot);
+});
+
+onAction('move-commands', (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  if (bot) moveCommandsModal(bot);
 });
 
 onAction('edit-command', (el) => {

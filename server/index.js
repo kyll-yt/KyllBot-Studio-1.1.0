@@ -1279,6 +1279,79 @@ app.post(
   }),
 );
 
+app.post(
+  '/api/bots/:id/commands/move',
+  requireAuth,
+  wrap(async (req, res) => {
+    const ws = getWorkspace(req.user.id);
+    const bot = findOr404(ws.bots, req.params.id, 'Bot');
+    const fromKey = str(req.body?.fromServerId, 60);
+    const toKey = str(req.body?.toServerId, 60);
+    const servers = bot.discord?.servers || [];
+    const from = servers.find((server) => server.id === fromKey || server.guildId === fromKey);
+    const to = servers.find((server) => server.id === toKey || server.guildId === toKey);
+    if (!from) throw bad('Serveur source introuvable.');
+    if (!to) throw bad('Serveur cible introuvable.');
+    if (from.id === to.id) throw bad('Choisis un serveur cible différent du serveur source.');
+    const includeFlows = req.body?.includeFlows !== false;
+    const moved = [];
+    const skipped = [];
+    const targetNames = new Set();
+    for (const command of bot.commands || []) {
+      if (scopedServerId(bot, command) === to.id) targetNames.add(command.name);
+    }
+    for (const flow of bot.flows || []) {
+      if (flow.trigger?.type === 'slash' && scopedServerId(bot, flow) === to.id) {
+        const name = String(flow.trigger?.command || '').trim().toLowerCase();
+        if (name) targetNames.add(name);
+      }
+    }
+    for (const command of bot.commands || []) {
+      if (scopedServerId(bot, command) !== from.id) continue;
+      if (targetNames.has(command.name)) {
+        skipped.push({ type: 'command', name: command.name, reason: 'exists' });
+        continue;
+      }
+      command.serverId = to.id;
+      targetNames.add(command.name);
+      moved.push({ type: 'command', name: command.name });
+    }
+    if (includeFlows) {
+      for (const flow of bot.flows || []) {
+        if (flow.trigger?.type !== 'slash' || scopedServerId(bot, flow) !== from.id) continue;
+        const name = String(flow.trigger?.command || '').trim().toLowerCase();
+        if (!name) continue;
+        if (targetNames.has(name)) {
+          skipped.push({ type: 'flow', name, reason: 'exists' });
+          continue;
+        }
+        flow.serverId = to.id;
+        targetNames.add(name);
+        moved.push({ type: 'flow', name });
+      }
+    }
+    if (!moved.length && !skipped.length) throw bad('Aucune commande à déplacer sur ce serveur.');
+    bot.discord = selectDiscordServer(bot.discord, to.id, bot);
+    pushActivity(
+      ws,
+      'bot',
+      `${moved.length} commande(s) déplacée(s) de ${from.guildName || from.name} vers ${to.guildName || to.name}`,
+    );
+    persist();
+    let sync = null;
+    if (bot.tokenEnc) sync = await syncBotCommands(bot.id).catch((error) => ({ error: error.message }));
+    res.json({
+      ok: true,
+      moved,
+      skipped,
+      from: { id: from.id, name: from.guildName || from.name },
+      to: { id: to.id, name: to.guildName || to.name },
+      sync,
+      runtime: getBotRuntime(bot.id),
+    });
+  }),
+);
+
 app.patch(
   '/api/bots/:id/commands/:commandId',
   requireAuth,
