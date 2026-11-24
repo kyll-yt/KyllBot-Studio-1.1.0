@@ -216,6 +216,25 @@ function roleColor(value) {
   return color ? `#${color.toString(16).padStart(6, '0')}` : '#94a3b8';
 }
 
+export async function listBotGuilds(botId) {
+  const context = getBotContext(botId);
+  if (!context) throw new Error('Bot introuvable.');
+  const { bot } = context;
+  if (!bot.tokenEnc) throw new Error('Aucun token Discord enregistré.');
+  const token = decryptSecret(bot.tokenEnc);
+  const guilds = await discordRequest(token, '/users/@me/guilds');
+  const configured = new Set((bot.discord?.servers || []).map((server) => String(server.guildId || server.id)));
+  return (Array.isArray(guilds) ? guilds : [])
+    .map((guild) => ({
+      id: guild.id,
+      name: guild.name,
+      icon: guild.icon || null,
+      owner: Boolean(guild.owner),
+      configured: configured.has(String(guild.id)),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+}
+
 export async function syncDiscordMetadata(botId, requestedGuildId = '') {
   const context = getBotContext(botId);
   if (!context) throw new Error('Bot introuvable.');

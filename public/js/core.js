@@ -4,29 +4,9 @@
 /* état & utilitaires                                                  */
 /* ------------------------------------------------------------------ */
 
-const APP_VERSION = '1.1.5';
+const APP_VERSION = '1.1.3';
 
 const APP_CHANGELOG = [
-  {
-    version: '1.1.5',
-    date: '2026-11-21',
-    title: 'Correction de la redirection Discord',
-    items: [
-      'L’URL de retour Discord utilise automatiquement la bonne adresse publique, même si une ancienne adresse locale est configurée.',
-      'Aide ajoutée dans Commandes en cas d’erreur « Redirect_uri OAuth2 non valide ».',
-    ],
-  },
-  {
-    version: '1.1.4',
-    date: '2026-11-21',
-    title: 'Inviter le bot sur tes serveurs Discord',
-    items: [
-      'Bouton « Voir mes serveurs » : connecte ton compte Discord et affiche les serveurs où tu peux ajouter le bot.',
-      'Autorisation Discord sécurisée avec PKCE, sans secret client et sans accès aux messages.',
-      'Invitation préremplie sur le serveur choisi, avec les permissions recommandées.',
-      'Après l’invitation, bouton « Configurer » pour synchroniser les salons, les rôles et les commandes.',
-    ],
-  },
   {
     version: '1.1.3',
     date: '2026-11-21',
@@ -34,6 +14,8 @@ const APP_CHANGELOG = [
     items: [
       'Correction du bloc « Réponse IA » : réponses locales naturelles, sans message répétitif sur l’API.',
       'Nouveau sélecteur de serveur dans l’onglet Commandes : choisis clairement le serveur Discord cible, ajoute le bot à un nouveau serveur et synchronise ses commandes en un clic.',
+      'Bouton « Ajouter le bot » : invitation directe vers le serveur de ton choix.',
+      'Bouton « Mes serveurs » : liste les serveurs où le bot est déjà présent et permet de les configurer en un clic.',
       'Chaque commande peut contenir jusqu’à 20 variantes de réponse, tirées au hasard selon un poids configurable.',
       'Connexion email renforcée : limitation des tentatives, comparaison sécurisée des codes et code de démonstration masqué en production.',
       'Les blocs webhook et musique refusent les adresses locales ou privées.',

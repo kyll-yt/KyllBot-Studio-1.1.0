@@ -656,7 +656,6 @@ async function bootstrap() {
   state.route = parseHash();
   updateChrome();
   render();
-  if (typeof handleDiscordOAuthReturn === 'function') void handleDiscordOAuthReturn();
 
   window.addEventListener('hashchange', () => {
     state.route = parseHash();

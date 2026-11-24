@@ -38,6 +38,7 @@ import { completeDiscordOAuth, createDiscordOAuthUrl, discordOAuthRedirectUri, t
 import {
   autostartBots,
   getBotRuntime,
+  listBotGuilds,
   refreshBotSnapshots,
   runAutomationTrigger,
   sendSavedMessageNow,
@@ -1008,6 +1009,22 @@ app.post(
     try {
       const result = await syncBotCommands(bot.id);
       res.json({ ...result, bot: publicBot(bot), runtime: getBotRuntime(bot.id) });
+    } catch (error) {
+      const status = error.code === 'DISCORD_NETWORK' || (error.status && error.status >= 500) ? 502 : 400;
+      throw Object.assign(new Error(error.message), { status });
+    }
+  }),
+);
+
+app.get(
+  '/api/bots/:id/discord/guilds',
+  requireAuth,
+  wrap(async (req, res) => {
+    const ws = getWorkspace(req.user.id);
+    const bot = findOr404(ws.bots, req.params.id, 'Bot');
+    try {
+      const guilds = await listBotGuilds(bot.id);
+      res.json({ guilds, bot: publicBot(bot) });
     } catch (error) {
       const status = error.code === 'DISCORD_NETWORK' || (error.status && error.status >= 500) ? 502 : 400;
       throw Object.assign(new Error(error.message), { status });
