@@ -1,6 +1,59 @@
 'use strict';
 
 /* ------------------------------------------------------------------ */
+/* vue : nouveautés                                                    */
+/* ------------------------------------------------------------------ */
+
+function viewNews() {
+  const latest = APP_CHANGELOG[0];
+  return `<div class="page-head">
+      <div>
+        <span class="pill violet">Version ${esc(APP_VERSION)}</span>
+        <h1 style="margin-top:10px">Nouveautés</h1>
+        <p class="sub">Tout ce qui vient d’arriver dans KyllBot Studio.</p>
+      </div>
+    </div>
+
+    <div class="news-hero">
+      <span class="news-hero-ic">${icon('spark')}</span>
+      <div>
+        <span class="pill green">Nouvelle version</span>
+        <h2>${esc(latest.title)}</h2>
+        <p>Version ${esc(latest.version)} · ${esc(new Date(latest.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }))}</p>
+      </div>
+    </div>
+
+    <div class="news-list">
+      ${APP_CHANGELOG.map(
+        (entry) => `<article class="panel news-card">
+          <div class="panel-head">
+            <h3>Version ${esc(entry.version)} — ${esc(entry.title)}</h3>
+            <span class="pill gray">${esc(new Date(entry.date).toLocaleDateString('fr-FR'))}</span>
+          </div>
+          <div class="panel-body">
+            <ul class="news-items">
+              ${entry.items.map((item) => `<li>${icon('check')} <span>${esc(item)}</span></li>`).join('')}
+            </ul>
+          </div>
+        </article>`,
+      ).join('')}
+    </div>
+
+    <div class="panel news-feedback">
+      <div class="panel-body">
+        <div class="empty-inline">
+          <span class="a-ic" style="width:38px;height:38px;border-radius:11px;display:grid;place-items:center;background:rgba(124,92,255,.14);color:#c2b4ff">${icon('message')}</span>
+          <div>
+            <b>Une idée pour la prochaine version ?</b>
+            <p>Les avis et suggestions aident à choisir les prochaines fonctionnalités.</p>
+          </div>
+          <a class="btn btn-ghost btn-sm" href="#/feedback">Donner mon avis</a>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ------------------------------------------------------------------ */
 /* vue : statistiques                                                  */
 /* ------------------------------------------------------------------ */
 

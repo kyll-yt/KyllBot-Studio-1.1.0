@@ -59,6 +59,7 @@ const FLOW_BLOCKS = {
   giveaway: { label: 'Giveaway', icon: 'award', tone: 'pink', group: 'interaction', hint: 'Tirage au sort avec durée' },
   await: { label: 'Attendre interaction', icon: 'clock', tone: 'grey', group: 'interaction', hint: 'Attend un clic, une réaction ou un message' },
   accountCheck: { label: 'Vérifier le compte', icon: 'shield', tone: 'amber', group: 'moderation', hint: 'Âge, avatar et comptes bots' },
+  moderation: { label: 'Modération complète', icon: 'shield', tone: 'pink', group: 'moderation', hint: 'Avertir, timeout, kick, ban, purge, lock, mute vocal…' },
   timeout: { label: 'Exclure temporairement', icon: 'clock', tone: 'amber', group: 'moderation', hint: 'Rend le membre muet pendant une durée' },
   kick: { label: 'Expulser', icon: 'userMinus', tone: 'pink', group: 'moderation', hint: 'Retire le membre du serveur' },
   ban: { label: 'Bannir', icon: 'shield', tone: 'pink', group: 'moderation', hint: 'Bannit le membre du serveur' },
@@ -349,7 +350,7 @@ function flowNewBlock(type, x = 120, y = 120) {
   const base = { id: flowUid(), type, x, y, next: null };
   switch (type) {
     case 'embed':
-      return { ...base, channel: '', title: 'Titre', url: '', description: '', color: '#7c5cff', footer: '', footerIcon: '', author: '', authorIcon: '', image: '', thumbnail: '', timestamp: false, ephemeral: false, silent: false, fields: [] };
+      return { ...base, channel: '', title: 'Titre', url: '', description: '', color: '#7c5cff', footer: '', footerIcon: '', author: '', authorIcon: '', image: '', thumbnail: '', timestamp: false, ephemeral: false, dm: false, deleteAfter: 0, silent: false, fields: [] };
     case 'dm':
       return { ...base, text: '', target: '', embed: false, title: '', description: '', color: '#7c5cff' };
     case 'button':
@@ -384,6 +385,9 @@ function flowNewBlock(type, x = 120, y = 120) {
         startText: '⏳ Fin {{time}}',
         endText: '⏰ Temps écoulé !',
         wait: false,
+        ephemeral: false,
+        dm: false,
+        silent: false,
       };
     case 'chrono':
       return {
@@ -393,6 +397,9 @@ function flowNewBlock(type, x = 120, y = 120) {
         variable: 'chrono_start',
         startText: '⏱️ Chronomètre démarré.',
         stopText: '⏱️ Temps écoulé : {{elapsed}}',
+        ephemeral: false,
+        dm: false,
+        silent: false,
       };
     case 'serviceStart':
       return {
@@ -400,6 +407,9 @@ function flowNewBlock(type, x = 120, y = 120) {
         channel: '',
         startText: '▶️ Service démarré pour {{member}}.',
         alreadyText: '⚠️ Service déjà en cours depuis {{since}}.',
+        ephemeral: false,
+        dm: false,
+        silent: false,
       };
     case 'serviceStop':
       return {
@@ -407,6 +417,9 @@ function flowNewBlock(type, x = 120, y = 120) {
         channel: '',
         stopText: '⏹️ Service terminé : {{duration}} ajoutées. Service : {{service}} · Pénalité : {{penalty}} · Total : {{total}}.',
         emptyText: '⚠️ Aucun service en cours pour {{member}}.',
+        ephemeral: false,
+        dm: false,
+        silent: false,
       };
     case 'servicePenalty':
       return {
@@ -432,12 +445,18 @@ function flowNewBlock(type, x = 120, y = 120) {
         resetHour: 0,
         timezone: 'Europe/Paris',
         message: '✅ Période du service : {{period}}.',
+        ephemeral: false,
+        dm: false,
+        silent: false,
       };
     case 'serviceReset':
       return {
         ...base,
         channel: '',
         message: '🧹 Les compteurs du service ont été réinitialisés.',
+        ephemeral: false,
+        dm: false,
+        silent: false,
       };
     case 'cooldown':
       return { ...base, seconds: 10, scope: 'member' };
@@ -450,6 +469,8 @@ function flowNewBlock(type, x = 120, y = 120) {
         ...base,
         channel: '',
         ephemeral: false,
+        dm: false,
+        deleteAfter: 0,
         silent: false,
         reply: false,
         tts: false,
@@ -479,6 +500,8 @@ function flowNewBlock(type, x = 120, y = 120) {
         variantMode: false,
         variants: [],
         ephemeral: false,
+        dm: false,
+        deleteAfter: 0,
         reply: false,
         tts: false,
         silent: false,
@@ -489,7 +512,7 @@ function flowNewBlock(type, x = 120, y = 120) {
     case 'log':
       return { ...base, text: '' };
     case 'reply':
-      return { ...base, channel: '', text: '', ping: true, ephemeral: false };
+      return { ...base, channel: '', text: '', ping: true, ephemeral: false, dm: false, deleteAfter: 0 };
     case 'edit':
       return { ...base, messageRef: 'dernier', text: '', embed: false, title: '', description: '', color: '#7c5cff' };
     case 'thread':
@@ -535,6 +558,26 @@ function flowNewBlock(type, x = 120, y = 120) {
         failMessage: '🚫 Ton compte est trop récent ou suspect. Réessaie dans quelques jours ou contacte le staff.',
         variable: 'account_ok',
         channel: '',
+      };
+    case 'moderation':
+      return {
+        ...base,
+        action: 'warn',
+        target: '',
+        duration: 10,
+        durationUnit: 'minutes',
+        reason: 'Règles du serveur',
+        deleteDays: 0,
+        deleteMessages: false,
+        amount: 10,
+        seconds: 10,
+        role: '',
+        channel: '',
+        nickname: '',
+        notify: true,
+        notifyMessage: 'Tu as reçu une sanction : {{reason}}',
+        logChannel: '',
+        evidence: '',
       };
     case 'timeout':
       return { ...base, duration: 10, reason: 'Comportement contraire aux règles' };
@@ -759,11 +802,17 @@ function viewFlowEditor(botId, flowId) {
         </div>
         <button class="tool-btn" data-action="flow-fit" title="Recentrer">${icon('grid')} Recentrer</button>
         <button class="tool-btn" data-action="flow-auto" title="Ranger les blocs">${icon('flow')} Ranger</button>
+        <select class="select canvas-bg-select" id="flowCanvasBg" title="Fond du canvas" aria-label="Fond du canvas">
+          <option value="dots" ${(flow.canvasStyle || 'dots') === 'dots' ? 'selected' : ''}>Fond : points</option>
+          <option value="grid" ${flow.canvasStyle === 'grid' ? 'selected' : ''}>Fond : grille</option>
+          <option value="aurora" ${flow.canvasStyle === 'aurora' ? 'selected' : ''}>Fond : aurore</option>
+          <option value="plain" ${flow.canvasStyle === 'plain' ? 'selected' : ''}>Fond : uni</option>
+        </select>
         <span class="toolbar-spacer"></span>
         <button class="tool-btn" data-action="flow-toggle-test">${icon('play')} Test</button>
         <button class="tool-btn" data-action="flow-add-menu">${icon('plus')} Ajouter un bloc</button>
       </div>
-      <div class="canvas-viewport" id="flowViewport">
+      <div class="canvas-viewport" id="flowViewport" data-canvas="${esc(flow.canvasStyle || 'dots')}">
         <div class="canvas-world" id="flowWorld" style="transform: translate(${view.x}px, ${view.y}px) scale(${view.zoom})">
           <svg class="canvas-edges" id="flowEdges" aria-hidden="true"></svg>
           ${flow.blocks.map((block) => renderNode(block, flow)).join('')}
@@ -1051,11 +1100,11 @@ function flowBlockRows(block) {
       return flowSummaryRows([
         ['Salon', block.channel || '#général'],
         ['Message', block.text],
-        ['Mode', block.ephemeral ? 'éphémère' : 'normal'],
-        ['Options', [block.reply ? 'réponse' : '', block.tts ? 'vocal' : '', block.silent ? 'silencieux' : '', block.suppressEmbeds ? 'sans embeds' : ''].filter(Boolean).join(' · ') || 'standard'],
+        ['Mode', block.dm ? 'message privé' : block.ephemeral ? 'éphémère' : 'normal'],
+        ['Options', [block.reply ? 'réponse' : '', block.tts ? 'vocal' : '', block.silent ? 'silencieux' : '', block.suppressEmbeds ? 'sans embeds' : '', block.deleteAfter ? `supprimé après ${block.deleteAfter} s` : ''].filter(Boolean).join(' · ') || 'standard'],
       ]);
     case 'embed':
-      return flowSummaryRows([['Titre', block.title || 'Sans titre'], ['Description', block.description], ['Auteur', block.author], ['Champs', `${(block.fields || []).length}`], ['Couleur', block.color]]);
+      return flowSummaryRows([['Titre', block.title || 'Sans titre'], ['Description', block.description], ['Auteur', block.author], ['Champs', `${(block.fields || []).length}`], ['Mode', block.dm ? 'message privé' : block.ephemeral ? 'éphémère' : 'normal'], ['Couleur', block.color]]);
     case 'dm':
       return flowSummaryRows([['Message privé', block.text], ['Destinataire', block.target || 'membre déclencheur'], ['Embed', block.embed ? 'oui' : 'non']]);
     case 'button': {
@@ -1075,7 +1124,7 @@ function flowBlockRows(block) {
         ['Sorties', `${variants.filter((variant) => variant.next).length}/${variants.length}`],
         ['Aperçu', variants[0]?.text],
         ['Salon', block.channel || '#général'],
-        ['Mode', block.embed ? 'embed' : 'message'],
+        ['Mode', block.dm ? 'message privé' : block.ephemeral ? 'éphémère' : block.embed ? 'embed' : 'message'],
       ]);
     case 'role':
       return flowSummaryRows([
@@ -1101,16 +1150,20 @@ function flowBlockRows(block) {
       return flowSummaryRows([
         ['Type', 'compte à rebours'],
         ['Durée', `${block.duration || 5} ${block.unit || 'minutes'}`],
+        ['Salon', block.channel || 'salon du déclencheur'],
+        ['Mode', block.dm ? 'message privé' : block.ephemeral ? 'éphémère' : 'normal'],
       ]);
     case 'chrono':
       return flowSummaryRows([
         ['Action', block.action === 'stop' ? 'arrêter' : 'démarrer'],
         ['Variable', block.variable || 'chrono_start'],
+        ['Salon', block.channel || 'salon du déclencheur'],
+        ['Mode', block.dm ? 'message privé' : block.ephemeral ? 'éphémère' : 'normal'],
       ]);
     case 'serviceStart':
-      return flowSummaryRows([['Action', 'démarrer le service'], ['Salon', block.channel || 'salon du déclencheur']]);
+      return flowSummaryRows([['Action', 'démarrer le service'], ['Salon', block.channel || 'salon du déclencheur'], ['Mode', block.dm ? 'message privé' : block.ephemeral ? 'éphémère' : 'normal']]);
     case 'serviceStop':
-      return flowSummaryRows([['Action', 'arrêter le service'], ['Salon', block.channel || 'salon du déclencheur']]);
+      return flowSummaryRows([['Action', 'arrêter le service'], ['Salon', block.channel || 'salon du déclencheur'], ['Mode', block.dm ? 'message privé' : block.ephemeral ? 'éphémère' : 'normal']]);
     case 'servicePenalty':
       return flowSummaryRows([['Action', 'ajouter une pénalité'], ['Saisie', 'membre + durée dans un formulaire']]);
     case 'serviceLeaderboard':
@@ -1174,6 +1227,14 @@ function flowBlockRows(block) {
         ['Âge minimum', `${block.minAgeDays ?? 7} j`],
         ['Bots', block.blockBots ? 'bloqués' : 'autorisés'],
         ['Avatar', block.requireAvatar ? 'requis' : 'facultatif'],
+      ]);
+    case 'moderation':
+      return flowSummaryRows([
+        ['Action', block.action || 'warn'],
+        ['Cible', block.target || 'membre déclencheur'],
+        ['Raison', block.reason],
+        ['Durée', ['timeout', 'ban', 'softban'].includes(block.action) ? `${block.duration || 10} ${block.durationUnit || 'minutes'}` : ''],
+        ['Journal', block.logChannel],
       ]);
     case 'timeout':
       return flowSummaryRows([['Durée', `${block.duration || 10} min`], ['Raison', block.reason]]);
@@ -1855,8 +1916,11 @@ function renderNodeFields(block) {
       return `<div class="fld-row">
           ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel), 'grow')}
           ${nodeField('Éphémère', `<button class="switch ${block.ephemeral ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="ephemeral"></button>`, 'shrink')}
+          ${nodeField('Message privé', `<button class="switch ${block.dm ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="dm"></button>`, 'shrink')}
           ${nodeField('Variantes aléatoires', `<button class="switch ${block.variantMode ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="variantMode"></button>`, 'shrink')}
+          ${nodeField('Supprimer après', `<input class="input" type="number" min="0" max="300" ${bind('deleteAfter')} value="${Number(block.deleteAfter) || 0}" placeholder="0">`, 'shrink')}
         </div>
+        <p class="hint">Éphémère = seul le membre qui déclenche voit le message. Message privé = envoi en DM. Laisse les deux désactivés pour un message public.</p>
         ${block.variantMode
           ? `<p class="hint">Le texte est tiré au hasard parmi les variantes ci-dessous. Le poids règle la probabilité.</p>
             <div class="variant-editor-head">
@@ -1896,7 +1960,9 @@ function renderNodeFields(block) {
       return `<div class="fld-row">
           ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel), 'grow')}
           ${nodeField('Éphémère', `<button class="switch ${block.ephemeral ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="ephemeral"></button>`, 'shrink')}
+          ${nodeField('Message privé', `<button class="switch ${block.dm ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="dm"></button>`, 'shrink')}
           ${nodeField('Silencieux', `<button class="switch ${block.silent ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="silent"></button>`, 'shrink')}
+          ${nodeField('Supprimer après', `<input class="input" type="number" min="0" max="300" ${bind('deleteAfter')} value="${Number(block.deleteAfter) || 0}">`, 'shrink')}
         </div>
         <div class="fld-row">
           ${nodeField('Titre', `<input class="input" ${bind('title')} value="${esc(block.title || '')}">`, 'grow')}
@@ -1975,6 +2041,8 @@ function renderNodeFields(block) {
       return `<div class="fld-row">
           ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel), 'grow')}
           ${nodeField('Éphémère', `<button class="switch ${block.ephemeral ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="ephemeral"></button>`, 'shrink')}
+          ${nodeField('Message privé', `<button class="switch ${block.dm ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="dm"></button>`, 'shrink')}
+          ${nodeField('Supprimer après', `<input class="input" type="number" min="0" max="300" ${bind('deleteAfter')} value="${Number(block.deleteAfter) || 0}">`, 'shrink')}
           ${nodeField('Silencieux', `<button class="switch ${block.silent ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="silent"></button>`, 'shrink')}
           ${nodeField('Répondre', `<button class="switch ${block.reply ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="reply"></button>`, 'shrink')}
           ${nodeField('Vocal', `<button class="switch ${block.tts ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="tts"></button>`, 'shrink')}
@@ -2035,7 +2103,11 @@ function renderNodeFields(block) {
           ${nodeField('Mentionner', `<button class="switch ${block.ping ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="ping"></button>`, 'shrink')}
         </div>
         ${nodeField('Réponse', `<textarea class="textarea" rows="3" ${bind('text')} placeholder="Merci {{user.name}} !">${esc(block.text)}</textarea>`)}
-        ${nodeField('Éphémère', `<button class="switch ${block.ephemeral ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="ephemeral"></button>`, 'shrink')}`;
+        <div class="fld-row">
+          ${nodeField('Éphémère', `<button class="switch ${block.ephemeral ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="ephemeral"></button>`, 'shrink')}
+          ${nodeField('Message privé', `<button class="switch ${block.dm ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="dm"></button>`, 'shrink')}
+          ${nodeField('Supprimer après', `<input class="input" type="number" min="0" max="300" ${bind('deleteAfter')} value="${Number(block.deleteAfter) || 0}">`, 'shrink')}
+        </div>`;
     case 'edit':
       return `<div class="fld-row">
           ${nodeField('Message', `<input class="input" ${bind('messageRef')} value="${esc(block.messageRef || '')}" placeholder="dernier">`, 'grow')}
@@ -2264,6 +2336,8 @@ function renderNodeFieldsB(block) {
             <option value="hours" ${block.unit === 'hours' ? 'selected' : ''}>Heures</option>
           </select>`, 'grow')}
           ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel), 'grow')}
+          ${nodeField('Éphémère', `<button class="switch ${block.ephemeral ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="ephemeral"></button>`, 'shrink')}
+          ${nodeField('Message privé', `<button class="switch ${block.dm ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="dm"></button>`, 'shrink')}
         </div>
         ${nodeField('Message de départ', `<textarea class="textarea" rows="2" ${bind('startText')} placeholder="⏳ Fin {{time}}">${esc(block.startText || '')}</textarea>`)}
         ${nodeField('Message de fin', `<textarea class="textarea" rows="2" ${bind('endText')} placeholder="⏰ Temps écoulé !">${esc(block.endText || '')}</textarea>`)}
@@ -2278,7 +2352,11 @@ function renderNodeFieldsB(block) {
           </select>`, 'grow')}
           ${nodeField('Variable du chrono', `<input class="input" ${bind('variable')} value="${esc(block.variable || 'chrono_start')}" placeholder="chrono_start">`, 'grow')}
         </div>
-        ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel), 'grow')}
+        <div class="fld-row">
+          ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel), 'grow')}
+          ${nodeField('Éphémère', `<button class="switch ${block.ephemeral ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="ephemeral"></button>`, 'shrink')}
+          ${nodeField('Message privé', `<button class="switch ${block.dm ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="dm"></button>`, 'shrink')}
+        </div>
         ${action === 'start'
           ? `${nodeField('Message de départ', `<textarea class="textarea" rows="2" ${bind('startText')} placeholder="⏱️ Chronomètre démarré.">${esc(block.startText || '')}</textarea>`)}
              <p class="hint">Enregistre l’heure de départ. Le bloc « Arrêter le chronomètre » avec la même variable calcule le temps écoulé, même dans un autre déclenchement.</p>`
@@ -2288,6 +2366,8 @@ function renderNodeFieldsB(block) {
     case 'serviceStart':
       return `<div class="fld-row">
           ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel, { emptyLabel: 'Salon du déclencheur' }), 'grow')}
+          ${nodeField('Éphémère', `<button class="switch ${block.ephemeral ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="ephemeral"></button>`, 'shrink')}
+          ${nodeField('Message privé', `<button class="switch ${block.dm ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="dm"></button>`, 'shrink')}
         </div>
         ${nodeField('Message de démarrage', `<textarea class="textarea" rows="2" ${bind('startText')} placeholder="▶️ Service démarré pour {{member}}.">${esc(block.startText || '')}</textarea>`)}
         ${nodeField('Message si déjà en cours', `<textarea class="textarea" rows="2" ${bind('alreadyText')} placeholder="⚠️ Service déjà en cours depuis {{since}}.">${esc(block.alreadyText || '')}</textarea>`)}
@@ -2295,6 +2375,8 @@ function renderNodeFieldsB(block) {
     case 'serviceStop':
       return `<div class="fld-row">
           ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel, { emptyLabel: 'Salon du déclencheur' }), 'grow')}
+          ${nodeField('Éphémère', `<button class="switch ${block.ephemeral ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="ephemeral"></button>`, 'shrink')}
+          ${nodeField('Message privé', `<button class="switch ${block.dm ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="dm"></button>`, 'shrink')}
         </div>
         ${nodeField('Message de fin', `<textarea class="textarea" rows="2" ${bind('stopText')} placeholder="⏹️ Service terminé : {{duration}} ajoutées.">${esc(block.stopText || '')}</textarea>`)}
         ${nodeField('Message si aucun service', `<textarea class="textarea" rows="2" ${bind('emptyText')} placeholder="⚠️ Aucun service en cours pour {{member}}.">${esc(block.emptyText || '')}</textarea>`)}
@@ -2328,12 +2410,18 @@ function renderNodeFieldsB(block) {
           ${nodeField('Heure de remise à zéro', `<input class="input" type="number" min="0" max="23" ${bind('resetHour')} value="${block.resetHour || 0}">`, 'shrink')}
           ${nodeField('Fuseau horaire', `<input class="input" ${bind('timezone')} value="${esc(block.timezone || 'Europe/Paris')}" placeholder="Europe/Paris">`, 'grow')}
         </div>
-        ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel, { emptyLabel: 'Salon du déclencheur' }), 'grow')}
+        <div class="fld-row">
+          ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel, { emptyLabel: 'Salon du déclencheur' }), 'grow')}
+          ${nodeField('Éphémère', `<button class="switch ${block.ephemeral ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="ephemeral"></button>`, 'shrink')}
+          ${nodeField('Message privé', `<button class="switch ${block.dm ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="dm"></button>`, 'shrink')}
+        </div>
         ${nodeField('Message de confirmation', `<textarea class="textarea" rows="2" ${bind('message')} placeholder="✅ Période du service : {{period}}.">${esc(block.message || '')}</textarea>`)}
         <p class="hint">Par défaut : une semaine, remise à zéro le lundi à 00:00 (Europe/Paris). Modifier la période réinitialise les compteurs.</p>`;
     case 'serviceReset':
       return `<div class="fld-row">
           ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel, { emptyLabel: 'Salon du déclencheur' }), 'grow')}
+          ${nodeField('Éphémère', `<button class="switch ${block.ephemeral ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="ephemeral"></button>`, 'shrink')}
+          ${nodeField('Message privé', `<button class="switch ${block.dm ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="dm"></button>`, 'shrink')}
         </div>
         ${nodeField('Message', `<textarea class="textarea" rows="2" ${bind('message')} placeholder="🧹 Les compteurs du service ont été réinitialisés.">${esc(block.message || '')}</textarea>`)}
         <p class="hint">Remet à zéro les temps de service et les pénalités de la période en cours.</p>`;
@@ -2381,6 +2469,53 @@ function renderNodeFieldsB(block) {
         ${nodeField('Message d’échec', `<textarea class="textarea" rows="2" ${bind('failMessage')} placeholder="🚫 Ton compte est trop récent…">${esc(block.failMessage || '')}</textarea>`)}
         ${nodeField('Salon du message', flowChannelSelect(bind('channel'), block.channel, { emptyLabel: 'Salon du déclencheur' }), 'grow')}
         <p class="hint">Vérifie l’âge du compte, l’avatar et les comptes bots. Le résultat est aussi disponible dans <code>{{account_ok}}</code> et <code>{{account_reasons}}</code>.</p>`;
+    case 'moderation': {
+      const action = block.action || 'warn';
+      const needsDuration = ['timeout', 'ban', 'softban'].includes(action);
+      const needsDeleteDays = ['ban', 'softban'].includes(action);
+      const needsAmount = action === 'purge';
+      const needsSeconds = action === 'slowmode';
+      const needsRole = ['roleAdd', 'roleRemove'].includes(action);
+      const needsNickname = action === 'nickname';
+      const needsChannel = ['purge', 'slowmode', 'lock', 'unlock', 'voiceMove', 'log'].includes(action);
+      const needsNotify = ['warn', 'timeout', 'kick', 'ban', 'softban'].includes(action);
+      return `<div class="fld-row">
+          ${nodeField('Action', `<select class="select" ${bind('action')}>
+            ${[
+              ['warn', 'Avertir'], ['timeout', 'Exclure temporairement'], ['kick', 'Expulser'], ['ban', 'Bannir'],
+              ['softban', 'Softban (ban + unban)'], ['unban', 'Débannir'], ['purge', 'Purger des messages'],
+              ['slowmode', 'Ralentir le salon'], ['lock', 'Verrouiller le salon'], ['unlock', 'Déverrouiller le salon'],
+              ['roleAdd', 'Ajouter un rôle'], ['roleRemove', 'Retirer un rôle'], ['nickname', 'Changer le pseudo'],
+              ['voiceMute', 'Mute vocal'], ['voiceUnmute', 'Unmute vocal'], ['voiceDeafen', 'Mute casque'],
+              ['voiceUndeafen', 'Unmute casque'], ['voiceMove', 'Déplacer en vocal'], ['dm', 'Message privé'],
+              ['log', 'Journal de modération'],
+            ].map(([value, label]) => `<option value="${value}" ${action === value ? 'selected' : ''}>${label}</option>`).join('')}
+          </select>`, 'grow')}
+          ${nodeField('Cible', `<input class="input" ${bind('target')} value="${esc(block.target || '')}" placeholder="Vide = membre déclencheur">`, 'grow')}
+        </div>
+        <div class="fld-row">
+          ${nodeField('Raison', `<input class="input" ${bind('reason')} value="${esc(block.reason || '')}" placeholder="Règles du serveur">`, 'grow')}
+          ${needsDuration ? nodeField('Durée', `<input class="input" type="number" min="1" max="10080" ${bind('duration')} value="${block.duration || 10}">`, 'shrink') : ''}
+          ${needsDuration ? nodeField('Unité', `<select class="select" ${bind('durationUnit')}>
+            <option value="minutes" ${block.durationUnit !== 'hours' && block.durationUnit !== 'days' ? 'selected' : ''}>Minutes</option>
+            <option value="hours" ${block.durationUnit === 'hours' ? 'selected' : ''}>Heures</option>
+            <option value="days" ${block.durationUnit === 'days' ? 'selected' : ''}>Jours</option>
+          </select>`, 'shrink') : ''}
+          ${needsDeleteDays ? nodeField('Supprimer messages (j)', `<input class="input" type="number" min="0" max="7" ${bind('deleteDays')} value="${block.deleteDays || 0}">`, 'shrink') : ''}
+          ${needsAmount ? nodeField('Nombre', `<input class="input" type="number" min="1" max="100" ${bind('amount')} value="${block.amount || 10}">`, 'shrink') : ''}
+          ${needsSeconds ? nodeField('Secondes', `<input class="input" type="number" min="0" max="21600" ${bind('seconds')} value="${block.seconds || 10}">`, 'shrink') : ''}
+          ${needsNickname ? nodeField('Nouveau pseudo', `<input class="input" ${bind('nickname')} value="${esc(block.nickname || '')}" placeholder="Nouveau pseudo">`, 'grow') : ''}
+        </div>
+        ${needsRole ? `<div class="fld-row">${nodeField('Rôle', `<input class="input" ${bind('role')} value="${esc(block.role || '')}" placeholder="Nom ou ID du rôle">`, 'grow')}</div>` : ''}
+        ${needsChannel ? `<div class="fld-row">${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel, { emptyLabel: 'Salon du déclencheur' }), 'grow')}</div>` : ''}
+        <div class="fld-row">
+          ${nodeField('Prévenir en privé', `<button class="switch ${block.notify !== false ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="notify"></button>`, 'shrink')}
+          ${nodeField('Journal', `<input class="input" ${bind('logChannel')} value="${esc(block.logChannel || '')}" placeholder="Salon de logs (optionnel)">`, 'grow')}
+        </div>
+        ${needsNotify ? nodeField('Message privé de notification', `<textarea class="textarea" rows="2" ${bind('notifyMessage')} placeholder="Tu as reçu une sanction : {{reason}}">${esc(block.notifyMessage || '')}</textarea>`) : ''}
+        ${action === 'log' ? nodeField('Détail du journal', `<input class="input" ${bind('evidence')} value="${esc(block.evidence || '')}" placeholder="Contexte ou preuve">`) : ''}
+        <p class="hint">La cible accepte un ID, une mention ou un pseudo. Le bot doit avoir les permissions nécessaires et être au-dessus du membre dans la hiérarchie.</p>`;
+    }
     case 'timeout':
       return `<div class="fld-row">
           ${nodeField('Durée (minutes)', `<input class="input" type="number" min="1" max="10080" ${bind('duration')} value="${block.duration || 10}">`, 'shrink')}
@@ -2905,6 +3040,12 @@ function initFlowCanvas() {
 
   viewport.addEventListener('pointerdown', onCanvasDown);
   viewport.addEventListener('wheel', onCanvasWheel, { passive: false });
+  document.getElementById('flowCanvasBg')?.addEventListener('change', (event) => {
+    if (!flowEditor.flow) return;
+    flowEditor.flow.canvasStyle = event.target.value;
+    viewport.dataset.canvas = event.target.value;
+    flowEditor.dirty = true;
+  });
   window.removeEventListener('resize', onCanvasResize);
   window.addEventListener('resize', onCanvasResize);
 }

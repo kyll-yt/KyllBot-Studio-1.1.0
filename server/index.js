@@ -84,6 +84,22 @@ const app = express();
 const PORT = Number(process.env.PORT || 12000);
 const PID_FILE = process.env.PID_FILE || path.join(os.tmpdir(), 'kyllbot-app.pid');
 
+const APPEARANCE_THEMES = new Set(['classic', 'neon', 'ocean', 'sunset', 'forest', 'mono', 'candy']);
+const APPEARANCE_TOGGLES = ['neon', 'glass', 'animations', 'compact', 'rounded', 'grid', 'glowText', 'reducedMotion'];
+
+function sanitizeAppearance(input, previous = {}) {
+  const next = {
+    theme: APPEARANCE_THEMES.has(previous.theme) ? previous.theme : 'classic',
+    ...Object.fromEntries(APPEARANCE_TOGGLES.map((key) => [key, Boolean(previous[key])])),
+  };
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return next;
+  if (APPEARANCE_THEMES.has(input.theme)) next.theme = input.theme;
+  for (const key of APPEARANCE_TOGGLES) {
+    if (input[key] !== undefined) next[key] = Boolean(input[key]);
+  }
+  return next;
+}
+
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(express.json({ limit: '256kb' }));
@@ -296,6 +312,15 @@ function migrateWorkspace(ws) {
   const previousAddons = JSON.stringify(ws.addons || {});
   ensureAddons(ws);
   if (JSON.stringify(ws.addons) !== previousAddons) changed = true;
+  if (!ws.settings || typeof ws.settings !== 'object') {
+    ws.settings = {};
+    changed = true;
+  }
+  const appearance = sanitizeAppearance(ws.settings.appearance, {});
+  if (JSON.stringify(ws.settings.appearance) !== JSON.stringify(appearance)) {
+    ws.settings.appearance = appearance;
+    changed = true;
+  }
   return changed;
 }
 
@@ -767,6 +792,9 @@ app.patch(
       }
     }
     if (body.branding) ws.settings.branding.accent = pickColors(body.branding.accent);
+    if (body.appearance && typeof body.appearance === 'object') {
+      ws.settings.appearance = sanitizeAppearance(body.appearance, ws.settings.appearance || {});
+    }
     if (body.plan !== undefined && PLAN_NAMES.includes(body.plan)) {
       const nextPlan = normalizePlanName(body.plan);
       if (nextPlan !== ws.plan) {

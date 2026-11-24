@@ -272,6 +272,7 @@ export function seedWorkspace(user, { includeBots = true } = {}) {
       language: 'fr',
       notifications: { email: true, product: true, weekly: true },
       branding: { accent: '#6d5efc', darkMode: true },
+      appearance: { theme: 'classic', neon: false, glass: false, animations: true, compact: false, rounded: false, grid: false, glowText: false, reducedMotion: false },
     },
     createdAt: new Date().toISOString(),
   };

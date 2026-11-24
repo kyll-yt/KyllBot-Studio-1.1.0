@@ -310,6 +310,33 @@ function viewSettings() {
           </form>
         </div>
       </div>
+
+      <div class="panel style-panel">
+        <div class="panel-head"><h3>Style du site</h3><span class="pill violet">${esc(APPEARANCE_THEMES[appearanceSettings().theme]?.label || 'Classique')}</span></div>
+        <div class="panel-body">
+          <div class="theme-grid">
+            ${Object.entries(APPEARANCE_THEMES)
+              .map(
+                ([key, theme]) => `<button type="button" class="theme-card ${appearanceSettings().theme === key ? 'active' : ''}" data-action="set-theme" data-theme="${key}" style="--theme-a:${theme.accent};--theme-b:${theme.accent2};--theme-bg:${theme.bg}">
+                  <span class="theme-preview"><i></i><i></i><i></i></span>
+                  <b>${esc(theme.label)}</b>
+                  <small>${esc(theme.hint)}</small>
+                </button>`,
+              )
+              .join('')}
+          </div>
+          <div class="style-toggles">
+            ${Object.entries(APPEARANCE_TOGGLES)
+              .map(
+                ([key, toggle]) => `<div class="setting-row">
+                  <div class="sr-main"><h4>${esc(toggle.label)}</h4><p>${esc(toggle.hint)}</p></div>
+                  <button class="switch ${appearanceSettings()[key] ? 'on' : ''}" data-action="toggle-appearance" data-key="${key}" aria-label="${esc(toggle.label)}"></button>
+                </div>`,
+              )
+              .join('')}
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="panel" style="margin-top:16px">
@@ -349,6 +376,31 @@ onAction('toggle-notif', async (el) => {
   const notifications = { ...state.ws.settings.notifications, [key]: !state.ws.settings.notifications[key] };
   await api('/api/settings', { method: 'PATCH', body: JSON.stringify({ notifications }) });
   await refresh();
+});
+
+onAction('set-theme', async (el) => {
+  const theme = el.dataset.theme;
+  if (!APPEARANCE_THEMES[theme]) return;
+  await api('/api/settings', {
+    method: 'PATCH',
+    body: JSON.stringify({ appearance: { ...appearanceSettings(), theme } }),
+  });
+  state.ws.settings.appearance = { ...appearanceSettings(), theme };
+  applyAppearance();
+  render();
+  toast(`Thème « ${APPEARANCE_THEMES[theme].label} » activé.`);
+});
+
+onAction('toggle-appearance', async (el) => {
+  const key = el.dataset.key;
+  if (!Object.hasOwn(APPEARANCE_TOGGLES, key)) return;
+  const appearance = appearanceSettings();
+  appearance[key] = !appearance[key];
+  await api('/api/settings', { method: 'PATCH', body: JSON.stringify({ appearance }) });
+  state.ws.settings.appearance = appearance;
+  applyAppearance();
+  render();
+  toast(`${APPEARANCE_TOGGLES[key].label} ${appearance[key] ? 'activé' : 'désactivé'}.`, 'info');
 });
 
 onAction('logout', async () => {
@@ -600,6 +652,7 @@ async function bootstrap() {
   }
 
   bindChrome();
+  applyAppearance();
   state.route = parseHash();
   updateChrome();
   render();

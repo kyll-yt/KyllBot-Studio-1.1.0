@@ -42,6 +42,10 @@
             <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="3" y="5" width="14" height="11" rx="3.4" stroke="currentColor" stroke-width="1.5"/><circle cx="7.6" cy="10.5" r="1.2" fill="currentColor"/><circle cx="12.4" cy="10.5" r="1.2" fill="currentColor"/><path d="M10 5V2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
             Mes bots <span class="nav-count" id="navBotCount">0</span>
           </a>
+          <a class="nav-link" href="#/news" data-nav="news">
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M8 1.5 9.8 6l4.7.4-3.6 3.1 1.1 4.6L8 11.6l-4 2.5 1.1-4.6L1.5 6.4 6.2 6 8 1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+            Nouveautés <span class="nav-badge-new">1.1.2</span>
+          </a>
           <a class="nav-link" href="#/courses" data-nav="courses">
             <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 4.5 2.8 7.6 10 10.7l7.2-3.1L10 4.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M5.2 9.4v4.1c0 1.2 2.1 2.4 4.8 2.4s4.8-1.2 4.8-2.4V9.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
             Formations
@@ -169,6 +173,18 @@
       <main class="content" id="view" tabindex="-1"></main>
     </div>
   </div>
+
+  <div class="demo-banner" id="demoBanner" hidden>
+    <span class="demo-banner-ic">!</span>
+    <div>
+      <b>Mode démonstration</b>
+      <span>Les modifications ne sont pas sauvegardées. Crée un vrai compte pour conserver ton studio.</span>
+    </div>
+    <a class="btn btn-primary btn-sm" href="/login">Créer un compte</a>
+    <button type="button" class="demo-banner-close" data-dismiss-demo aria-label="Masquer l’avertissement">×</button>
+  </div>
+
+  <div class="app-version" id="appVersion" title="Version de KyllBot Studio">v1.1.2</div>
 
   <div class="toast-root" id="toastRoot" aria-live="polite"></div>
   <div id="modalRoot"></div>

@@ -4,6 +4,106 @@
 /* état & utilitaires                                                  */
 /* ------------------------------------------------------------------ */
 
+const APP_VERSION = '1.1.2';
+
+const APP_CHANGELOG = [
+  {
+    version: '1.1.2',
+    date: '2026-11-21',
+    title: 'Contrôle total des messages et de l’apparence',
+    items: [
+      'Nouveau choix de visibilité pour tous les envois : public, éphémère (seul le membre voit) ou message privé.',
+      'Chrono, compte à rebours et blocs de service peuvent maintenant envoyer leurs messages dans un autre salon.',
+      'Bloc de modération complet : avertir, exclure, expulser, bannir, softban, débannir, purger, verrouiller, ralentir, mute vocal et plus.',
+      'Éditeur de flux amélioré : fond personnalisable, meilleure palette, nœuds plus lisibles et bouton variantes disponible partout.',
+      'Nouveaux thèmes et interrupteurs d’interface : Néon, Océan, Sunset, Forêt, Mono, Bonbon et effets visuels.',
+      'Nouvelles automatisations prêtes à configurer : départ, boost, mentions abusives, majuscules, fils automatiques et messages de congé.',
+      'Avertissement clair en mode démonstration : aucune modification n’est conservée.',
+      'Badge de version discret en bas à droite et page Nouveautés.',
+    ],
+  },
+  {
+    version: '1.1.1',
+    date: '2026-11-21',
+    title: 'Persistance Supabase renforcée',
+    items: [
+      'Sauvegarde Supabase plus fiable avec reprise automatique.',
+      'Diagnostic de stockage visible dans /healthz.',
+      'Correction du service worker pour éviter les anciennes interfaces en cache.',
+    ],
+  },
+];
+
+const APPEARANCE_THEMES = {
+  classic: {
+    label: 'Classique',
+    hint: 'Le violet KyllBot original.',
+    accent: '#7c5cff',
+    accent2: '#22d3ee',
+    bg: '#07060d',
+    surface: '#110f1d',
+  },
+  neon: {
+    label: 'Néon',
+    hint: 'Cyber, glow et contrastes électriques.',
+    accent: '#00f5d4',
+    accent2: '#ff2e88',
+    bg: '#03040a',
+    surface: '#0a0d18',
+  },
+  ocean: {
+    label: 'Océan',
+    hint: 'Bleu profond et vagues cyan.',
+    accent: '#38bdf8',
+    accent2: '#2dd4bf',
+    bg: '#041018',
+    surface: '#0a1c2a',
+  },
+  sunset: {
+    label: 'Sunset',
+    hint: 'Orange chaud et rose corail.',
+    accent: '#fb923c',
+    accent2: '#f43f5e',
+    bg: '#120806',
+    surface: '#24110d',
+  },
+  forest: {
+    label: 'Forêt',
+    hint: 'Vert naturel et brume douce.',
+    accent: '#4ade80',
+    accent2: '#a3e635',
+    bg: '#050d09',
+    surface: '#0c1a12',
+  },
+  mono: {
+    label: 'Mono',
+    hint: 'Minimal, gris et élégant.',
+    accent: '#e5e7eb',
+    accent2: '#94a3b8',
+    bg: '#08090b',
+    surface: '#14161a',
+  },
+  candy: {
+    label: 'Bonbon',
+    hint: 'Rose, lilas et pêche.',
+    accent: '#f472b6',
+    accent2: '#c084fc',
+    bg: '#120714',
+    surface: '#24102a',
+  },
+};
+
+const APPEARANCE_TOGGLES = {
+  neon: { label: 'Néon', hint: 'Halo lumineux autour des boutons et des cartes.' },
+  glass: { label: 'Verre', hint: 'Panneaux translucides avec flou.' },
+  animations: { label: 'Animations', hint: 'Transitions et apparitions animées.' },
+  compact: { label: 'Compact', hint: 'Réduit les espacements pour voir plus de contenu.' },
+  rounded: { label: 'Arrondi', hint: 'Coins plus doux sur les cartes et boutons.' },
+  grid: { label: 'Grille', hint: 'Affiche la grille de fond du studio.' },
+  glowText: { label: 'Texte lumineux', hint: 'Titres et accents avec un léger glow.' },
+  reducedMotion: { label: 'Réduire les mouvements', hint: 'Désactive les animations non essentielles.' },
+};
+
 const state = {
   user: null,
   ws: null,
@@ -214,8 +314,55 @@ async function refresh() {
   state.ws = data.workspace;
   state.stats = data.stats;
   state.billing = data.billing;
+  applyAppearance();
   updateChrome();
   render();
+}
+
+function appearanceSettings() {
+  const saved = state.ws?.settings?.appearance || {};
+  return {
+    theme: APPEARANCE_THEMES[saved.theme] ? saved.theme : 'classic',
+    ...Object.fromEntries(Object.keys(APPEARANCE_TOGGLES).map((key) => [key, Boolean(saved[key])])),
+  };
+}
+
+function applyAppearance() {
+  const appearance = appearanceSettings();
+  const theme = APPEARANCE_THEMES[appearance.theme];
+  const root = document.documentElement;
+  root.dataset.theme = appearance.theme;
+  root.style.setProperty('--primary', theme.accent);
+  root.style.setProperty('--primary-soft', `${theme.accent}24`);
+  root.style.setProperty('--violet', theme.accent2);
+  root.style.setProperty('--cyan', theme.accent2);
+  root.style.setProperty('--bg', theme.bg);
+  root.style.setProperty('--bg-soft', theme.surface);
+  root.style.setProperty('--surface', theme.surface);
+  root.style.setProperty('--surface-2', theme.surface);
+  root.style.setProperty('--surface-3', theme.surface);
+  root.style.setProperty('--gradient', `linear-gradient(120deg, ${theme.accent} 0%, ${theme.accent2} 100%)`);
+  root.style.setProperty('--gradient-soft', `linear-gradient(120deg, ${theme.accent}24, ${theme.accent2}18)`);
+  for (const [key, enabled] of Object.entries(appearance)) {
+    if (key !== 'theme') root.classList.toggle(`ui-${key}`, Boolean(enabled));
+  }
+  const version = document.getElementById('appVersion');
+  if (version) version.textContent = `v${APP_VERSION}`;
+  syncDemoBanner();
+}
+
+function syncDemoBanner() {
+  const banner = document.getElementById('demoBanner');
+  if (!banner) return;
+  const isDemo = state.user?.provider === 'demo';
+  const dismissed = sessionStorage.getItem('kyll-demo-banner-dismissed') === '1';
+  banner.hidden = !isDemo || dismissed;
+  if (banner.dataset.bound === '1') return;
+  banner.dataset.bound = '1';
+  banner.querySelector('[data-dismiss-demo]')?.addEventListener('click', () => {
+    sessionStorage.setItem('kyll-demo-banner-dismissed', '1');
+    banner.hidden = true;
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -356,6 +503,7 @@ function updateChrome() {
   const labels = {
     dashboard: "Vue d'ensemble",
     bots: 'Mes bots',
+    news: 'Nouveautés',
     bot: 'Détail du bot',
     flow: 'Éditeur de flux',
     courses: 'Formations',
@@ -405,6 +553,7 @@ function render() {
   const routes = {
     dashboard: viewDashboard,
     bots: viewBots,
+    news: viewNews,
     bot: () => viewBotDetail(id),
     flow: () => viewFlowEditor(id, state.route.subId),
     courses: viewCourses,

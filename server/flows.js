@@ -60,6 +60,7 @@ export const BLOCKS = {
   giveaway: { label: 'Giveaway', group: 'interaction' },
   await: { label: 'Attendre interaction', group: 'interaction' },
   accountCheck: { label: 'Vérifier le compte', group: 'moderation' },
+  moderation: { label: 'Modération complète', group: 'moderation' },
   timeout: { label: 'Exclure temporairement', group: 'moderation' },
   kick: { label: 'Expulser', group: 'moderation' },
   ban: { label: 'Bannir', group: 'moderation' },
@@ -276,10 +277,12 @@ function normalizeBlock(block) {
           ? block.variants.slice(0, MAX_VARIANTS).map(normalizeVariant)
           : [],
         ephemeral: Boolean(block?.ephemeral),
+        dm: Boolean(block?.dm),
         reply: Boolean(block?.reply),
         tts: Boolean(block?.tts),
         silent: Boolean(block?.silent),
         suppressEmbeds: Boolean(block?.suppressEmbeds),
+        deleteAfter: num(block?.deleteAfter, 0, 300, 0),
       };
     case 'embed':
       return {
@@ -289,7 +292,9 @@ function normalizeBlock(block) {
         url: str(block?.url, 500),
         description: str(block?.description, 1800),
         ephemeral: Boolean(block?.ephemeral),
+        dm: Boolean(block?.dm),
         silent: Boolean(block?.silent),
+        deleteAfter: num(block?.deleteAfter, 0, 300, 0),
         color: /^#[0-9a-f]{6}$/i.test(String(block?.color || '')) ? block.color : '#7c5cff',
         footer: str(block?.footer, 80),
         author: str(block?.author, 100),
@@ -330,10 +335,12 @@ function normalizeBlock(block) {
         ...base,
         channel: str(block?.channel, 60),
         ephemeral: Boolean(block?.ephemeral),
+        dm: Boolean(block?.dm),
         silent: Boolean(block?.silent),
         reply: Boolean(block?.reply),
         tts: Boolean(block?.tts),
         suppressEmbeds: Boolean(block?.suppressEmbeds),
+        deleteAfter: num(block?.deleteAfter, 0, 300, 0),
         embed: Boolean(block?.embed),
         title: str(block?.title, 120),
         url: str(block?.url, 500),
@@ -407,6 +414,9 @@ function normalizeBlock(block) {
         startText: str(block?.startText, 1000),
         endText: str(block?.endText, 1000),
         wait: Boolean(block?.wait),
+        ephemeral: Boolean(block?.ephemeral),
+        dm: Boolean(block?.dm),
+        silent: Boolean(block?.silent),
       };
     }
     case 'chrono':
@@ -417,6 +427,9 @@ function normalizeBlock(block) {
         variable: str(block?.variable, 40).replace(/[^\w.-]/g, '') || 'chrono_start',
         startText: str(block?.startText, 1000),
         stopText: str(block?.stopText, 1000),
+        ephemeral: Boolean(block?.ephemeral),
+        dm: Boolean(block?.dm),
+        silent: Boolean(block?.silent),
       };
     case 'serviceStart':
       return {
@@ -424,6 +437,9 @@ function normalizeBlock(block) {
         channel: str(block?.channel, 60),
         startText: str(block?.startText, 1000),
         alreadyText: str(block?.alreadyText, 1000),
+        ephemeral: Boolean(block?.ephemeral),
+        dm: Boolean(block?.dm),
+        silent: Boolean(block?.silent),
       };
     case 'serviceStop':
       return {
@@ -431,6 +447,9 @@ function normalizeBlock(block) {
         channel: str(block?.channel, 60),
         stopText: str(block?.stopText, 1000),
         emptyText: str(block?.emptyText, 1000),
+        ephemeral: Boolean(block?.ephemeral),
+        dm: Boolean(block?.dm),
+        silent: Boolean(block?.silent),
       };
     case 'servicePenalty':
       return {
@@ -446,6 +465,7 @@ function normalizeBlock(block) {
         title: str(block?.title, 80) || 'Classement du service',
         top: num(block?.top, 1, 25, 10),
         ephemeral: Boolean(block?.ephemeral),
+        dm: Boolean(block?.dm),
       };
     case 'serviceConfig':
       return {
@@ -456,12 +476,18 @@ function normalizeBlock(block) {
         resetHour: num(block?.resetHour, 0, 23, 0),
         timezone: str(block?.timezone, 60) || 'Europe/Paris',
         message: str(block?.message, 1000),
+        ephemeral: Boolean(block?.ephemeral),
+        dm: Boolean(block?.dm),
+        silent: Boolean(block?.silent),
       };
     case 'serviceReset':
       return {
         ...base,
         channel: str(block?.channel, 60),
         message: str(block?.message, 1000),
+        ephemeral: Boolean(block?.ephemeral),
+        dm: Boolean(block?.dm),
+        silent: Boolean(block?.silent),
       };
     case 'cooldown':
       return {
@@ -489,6 +515,8 @@ function normalizeBlock(block) {
         text: str(block?.text, 2000),
         ping: block?.ping === undefined ? true : Boolean(block.ping),
         ephemeral: Boolean(block?.ephemeral),
+        dm: Boolean(block?.dm),
+        deleteAfter: num(block?.deleteAfter, 0, 300, 0),
       };
     case 'edit':
       return {
@@ -606,6 +634,32 @@ function normalizeBlock(block) {
         variable: str(block?.variable, 40).replace(/[^\w.-]/g, '') || 'account_ok',
         channel: str(block?.channel, 60),
       };
+    case 'moderation': {
+      const actions = [
+        'warn', 'timeout', 'kick', 'ban', 'softban', 'unban', 'purge', 'slowmode',
+        'lock', 'unlock', 'roleAdd', 'roleRemove', 'nickname', 'voiceMute', 'voiceUnmute',
+        'voiceDeafen', 'voiceUndeafen', 'voiceMove', 'dm', 'log',
+      ];
+      return {
+        ...base,
+        action: actions.includes(block?.action) ? block.action : 'warn',
+        target: str(block?.target, 80),
+        duration: num(block?.duration, 1, 10080, 10),
+        durationUnit: ['minutes', 'hours', 'days'].includes(block?.durationUnit) ? block.durationUnit : 'minutes',
+        reason: str(block?.reason, 200),
+        deleteDays: num(block?.deleteDays, 0, 7, 0),
+        deleteMessages: Boolean(block?.deleteMessages),
+        amount: num(block?.amount, 1, 100, 10),
+        seconds: num(block?.seconds, 0, 21600, 10),
+        role: str(block?.role, 60),
+        channel: str(block?.channel, 60),
+        nickname: str(block?.nickname, 32),
+        notify: block?.notify === undefined ? true : Boolean(block.notify),
+        notifyMessage: str(block?.notifyMessage, 1000),
+        logChannel: str(block?.logChannel, 60),
+        evidence: str(block?.evidence, 300),
+      };
+    }
     case 'timeout':
       return {
         ...base,
@@ -920,6 +974,11 @@ export function sanitizeFlow(input = {}, previous = null) {
     description: str(input.description, 200),
     enabled: input.enabled === undefined ? previous?.enabled ?? true : Boolean(input.enabled),
     trigger: normalizeTrigger(input.trigger ?? previous?.trigger),
+    canvasStyle: ['dots', 'grid', 'aurora', 'plain'].includes(input.canvasStyle)
+      ? input.canvasStyle
+      : ['dots', 'grid', 'aurora', 'plain'].includes(previous?.canvasStyle)
+        ? previous.canvasStyle
+        : 'dots',
     variables: (Array.isArray(input.variables) ? input.variables : previous?.variables || [])
       .slice(0, 20)
       .map(normalizeVariable)
@@ -1258,10 +1317,12 @@ export function runFlow(flow, input = {}) {
           channel: block.channel || ctx.channel,
           text,
           ephemeral: block.ephemeral,
+          dm: block.dm,
           reply: block.reply,
           tts: block.tts,
           silent: block.silent,
           suppressEmbeds: block.suppressEmbeds,
+          deleteAfter: block.deleteAfter,
           variant: variant?.id,
         });
         entry.detail = `${block.channel || ctx.channel} · ${text.slice(0, 90)}`;
@@ -1291,8 +1352,10 @@ export function runFlow(flow, input = {}) {
           channel: block.channel || ctx.channel,
           embed,
           ephemeral: block.ephemeral,
+          dm: block.dm,
           silent: block.silent,
           suppressEmbeds: block.suppressEmbeds,
+          deleteAfter: block.deleteAfter,
         });
         entry.detail = embed.title || String(embed.description || '').slice(0, 80);
         break;
@@ -1356,10 +1419,12 @@ export function runFlow(flow, input = {}) {
               })),
             },
             ephemeral: block.ephemeral,
+            dm: block.dm,
             silent: block.silent,
             reply: block.reply,
             tts: block.tts,
             suppressEmbeds: block.suppressEmbeds,
+            deleteAfter: block.deleteAfter,
             variant: variant.id,
           });
         } else {
@@ -1368,10 +1433,12 @@ export function runFlow(flow, input = {}) {
             channel: block.channel || ctx.channel,
             text,
             ephemeral: block.ephemeral,
+            dm: block.dm,
             silent: block.silent,
             reply: block.reply,
             tts: block.tts,
             suppressEmbeds: block.suppressEmbeds,
+            deleteAfter: block.deleteAfter,
             variant: variant.id,
           });
         }
@@ -1474,6 +1541,9 @@ export function runFlow(flow, input = {}) {
           durationMs,
           end,
           wait: block.wait,
+          ephemeral: block.ephemeral,
+          dm: block.dm,
+          silent: block.silent,
         });
         entry.detail = `compte à rebours ${vars.duration}${block.wait ? ' · attend la fin' : ''}`;
         break;
@@ -1494,6 +1564,9 @@ export function runFlow(flow, input = {}) {
             variable,
             text: interpolate(block.stopText, ctx, vars) || `⏱️ Temps écoulé : ${elapsed}`,
             stopText: interpolate(stopTemplate, ctx, vars),
+            ephemeral: block.ephemeral,
+            dm: block.dm,
+            silent: block.silent,
           });
           entry.detail = `chronomètre arrêté · ${elapsed}`;
         } else {
@@ -1504,6 +1577,9 @@ export function runFlow(flow, input = {}) {
             channel: block.channel || ctx.channel,
             variable,
             startText: interpolate(block.startText, ctx, vars) || '⏱️ Chronomètre démarré.',
+            ephemeral: block.ephemeral,
+            dm: block.dm,
+            silent: block.silent,
           });
           entry.detail = `chronomètre démarré · ${variable}`;
         }
@@ -1516,6 +1592,9 @@ export function runFlow(flow, input = {}) {
           blockId: block.id,
           text: interpolate(block.startText, ctx, vars),
           alreadyText: interpolate(block.alreadyText, ctx, vars),
+          ephemeral: block.ephemeral,
+          dm: block.dm,
+          silent: block.silent,
         });
         entry.detail = 'service démarré';
         break;
@@ -1527,6 +1606,9 @@ export function runFlow(flow, input = {}) {
           blockId: block.id,
           text: interpolate(block.stopText, ctx, vars),
           emptyText: interpolate(block.emptyText, ctx, vars),
+          ephemeral: block.ephemeral,
+          dm: block.dm,
+          silent: block.silent,
         });
         entry.detail = 'service arrêté';
         break;
@@ -1551,6 +1633,7 @@ export function runFlow(flow, input = {}) {
           title: interpolate(block.title, ctx, vars),
           top: block.top,
           ephemeral: block.ephemeral,
+          dm: block.dm,
         });
         entry.detail = `classement · top ${block.top}`;
         break;
@@ -1564,6 +1647,9 @@ export function runFlow(flow, input = {}) {
           resetHour: block.resetHour,
           timezone: block.timezone,
           message: interpolate(block.message, ctx, vars),
+          ephemeral: block.ephemeral,
+          dm: block.dm,
+          silent: block.silent,
         });
         entry.detail = `${block.period === 'month' ? 'mois' : 'semaine'} · reset ${block.resetDay} ${block.resetHour} h`;
         break;
@@ -1573,6 +1659,9 @@ export function runFlow(flow, input = {}) {
           kind: 'serviceReset',
           channel: block.channel || ctx.channel,
           message: interpolate(block.message, ctx, vars),
+          ephemeral: block.ephemeral,
+          dm: block.dm,
+          silent: block.silent,
         });
         entry.detail = 'compteurs du service réinitialisés';
         break;
@@ -1616,8 +1705,10 @@ export function runFlow(flow, input = {}) {
           channel: block.channel || ctx.channel,
           text,
           ephemeral: block.ephemeral,
+          dm: block.dm,
           reply: true,
           ping: block.ping,
+          deleteAfter: block.deleteAfter,
         });
         entry.detail = `réponse${block.ping ? ' avec mention' : ''} · ${text.slice(0, 80)}`;
         break;
@@ -1796,6 +1887,33 @@ export function runFlow(flow, input = {}) {
         entry.status = pass ? 'ok' : 'skipped';
         entry.detail = pass ? 'compte valide' : reasons.join(' · ');
         if (!pass && block.failAction !== 'continue') next = null;
+        break;
+      }
+      case 'moderation': {
+        const target = interpolate(block.target, ctx, vars) || ctx.user.name;
+        const reason = interpolate(block.reason, ctx, vars);
+        const notifyMessage = interpolate(block.notifyMessage, ctx, vars);
+        const evidence = interpolate(block.evidence, ctx, vars);
+        outputs.push({
+          kind: 'moderation',
+          action: block.action,
+          target,
+          duration: block.duration,
+          durationUnit: block.durationUnit,
+          reason,
+          deleteDays: block.deleteDays,
+          deleteMessages: block.deleteMessages,
+          amount: block.amount,
+          seconds: block.seconds,
+          role: block.role,
+          channel: block.channel || ctx.channel,
+          nickname: interpolate(block.nickname, ctx, vars),
+          notify: block.notify,
+          notifyMessage,
+          logChannel: block.logChannel,
+          evidence,
+        });
+        entry.detail = `${block.action} · ${target}${reason ? ` · ${reason}` : ''}`;
         break;
       }
       case 'timeout': {

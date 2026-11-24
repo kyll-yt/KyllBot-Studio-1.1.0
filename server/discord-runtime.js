@@ -394,8 +394,17 @@ async function resolveMember(guild, ref) {
   if (!guild) return null;
   const raw = String(ref || '').trim();
   const id = raw.match(/\d{17,20}/)?.[0];
-  if (!id) return null;
-  return guild.members.cache.get(id) || (await guild.members.fetch(id).catch(() => null));
+  if (id) return guild.members.cache.get(id) || (await guild.members.fetch(id).catch(() => null));
+  const needle = raw.replace(/^@/, '').trim().toLowerCase();
+  if (!needle) return null;
+  return (
+    guild.members.cache.find(
+      (entry) =>
+        entry.user?.username?.toLowerCase() === needle ||
+        entry.user?.tag?.toLowerCase() === needle ||
+        entry.displayName?.toLowerCase() === needle,
+    ) || null
+  );
 }
 
 function toEmbed(input = {}) {
@@ -717,6 +726,34 @@ async function askAI({ model, prompt, maxTokens, provider = 'auto' }) {
   return localAIResponse(prompt);
 }
 
+async function deliverFlowPayload({ output, target, payload, member, interaction, interactionUsed }) {
+  if (output.dm) {
+    if (!member?.send) return { sent: false, interactionUsed };
+    const dmPayload = { ...payload };
+    delete dmPayload.ephemeral;
+    delete dmPayload.reply;
+    const sentMessage = await member.send(dmPayload).catch(() => null);
+    return { sent: Boolean(sentMessage), message: sentMessage, interactionUsed };
+  }
+  if (output.ephemeral && interaction) {
+    const ephemeralPayload = { ...payload, ephemeral: true };
+    delete ephemeralPayload.reply;
+    if (interaction.deferred && !interactionUsed) {
+      await interaction.editReply(ephemeralPayload);
+      return { sent: true, interactionUsed: true };
+    }
+    if (interaction.replied || interactionUsed) {
+      await interaction.followUp(ephemeralPayload);
+      return { sent: true, interactionUsed: true };
+    }
+    await interaction.reply(ephemeralPayload);
+    return { sent: true, interactionUsed: true };
+  }
+  if (!target?.send) return { sent: false, interactionUsed };
+  const sentMessage = await target.send(payload).catch(() => null);
+  return { sent: Boolean(sentMessage), message: sentMessage, channel: target, interactionUsed };
+}
+
 async function executeFlow({ bot, ws, flow, guild, member, channel, message, interaction, startBlock, vars = {} }) {
   const runtime = ensureRuntime(bot.id);
   const user = member?.user || interaction?.user || message?.author;
@@ -757,61 +794,44 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
         case 'message':
         case 'reply': {
           const target = resolveChannel(guild, output.channel) || channel;
-          if (!target) break;
-          if (output.ephemeral && interaction) {
-            const payload = { content: output.text || ' ', ephemeral: true };
-            if (interaction.deferred && !interactionUsed) {
-              await interaction.editReply(payload);
-              interactionUsed = true;
-            } else if (interaction.replied || interactionUsed) {
-              await interaction.followUp(payload);
-            } else {
-              await interaction.reply(payload);
-              interactionUsed = true;
-            }
-          } else {
-            const payload = {
-              content: output.text || ' ',
-              allowedMentions: { parse: output.ping === false ? [] : ['users', 'roles'] },
-            };
-            if (output.tts) payload.tts = true;
-            if (output.silent || output.suppressEmbeds) {
-              payload.flags =
-                (output.silent ? MessageFlags.SuppressNotifications : 0) |
-                (output.suppressEmbeds ? MessageFlags.SuppressEmbeds : 0);
-            }
-            if (output.reply && message?.id) payload.reply = { messageReference: message.id, failIfNotExists: false };
-            lastMessage = await target.send(payload);
-            lastChannel = target;
+          const payload = { content: output.text || ' ', allowedMentions: { parse: output.ping === false ? [] : ['users', 'roles'] } };
+          if (output.tts) payload.tts = true;
+          if (output.silent || output.suppressEmbeds) {
+            payload.flags =
+              (output.silent ? MessageFlags.SuppressNotifications : 0) |
+              (output.suppressEmbeds ? MessageFlags.SuppressEmbeds : 0);
           }
-          sent = true;
+          if (output.reply && message?.id) payload.reply = { messageReference: message.id, failIfNotExists: false };
+          const delivered = await deliverFlowPayload({ output, target, payload, member, interaction, interactionUsed });
+          interactionUsed = delivered.interactionUsed;
+          if (delivered.message) {
+            lastMessage = delivered.message;
+            lastChannel = delivered.channel;
+          }
+          sent = delivered.sent;
+          if (output.deleteAfter > 0 && delivered.message) {
+            setTimeout(() => delivered.message.delete().catch(() => {}), Math.min(Number(output.deleteAfter) * 1000, 300000)).unref?.();
+          }
           break;
         }
         case 'embed': {
           const target = resolveChannel(guild, output.channel) || channel;
-          if (!target) break;
           const payload = { embeds: [toEmbed(output.embed)] };
           if (output.silent || output.suppressEmbeds) {
             payload.flags =
               (output.silent ? MessageFlags.SuppressNotifications : 0) |
               (output.suppressEmbeds ? MessageFlags.SuppressEmbeds : 0);
           }
-          if (output.ephemeral && interaction) {
-            payload.ephemeral = true;
-            if (interaction.deferred && !interactionUsed) {
-              await interaction.editReply(payload);
-              interactionUsed = true;
-            } else if (interaction.replied || interactionUsed) {
-              await interaction.followUp(payload);
-            } else {
-              await interaction.reply(payload);
-              interactionUsed = true;
-            }
-          } else {
-            lastMessage = await target.send(payload);
-            lastChannel = target;
+          const delivered = await deliverFlowPayload({ output, target, payload, member, interaction, interactionUsed });
+          interactionUsed = delivered.interactionUsed;
+          if (delivered.message) {
+            lastMessage = delivered.message;
+            lastChannel = delivered.channel;
           }
-          sent = true;
+          sent = delivered.sent;
+          if (output.deleteAfter > 0 && delivered.message) {
+            setTimeout(() => delivered.message.delete().catch(() => {}), Math.min(Number(output.deleteAfter) * 1000, 300000)).unref?.();
+          }
           break;
         }
         case 'dm': {
@@ -923,17 +943,31 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
           break;
         case 'timer': {
           const target = resolveChannel(guild, output.channel) || channel;
-          if (!target?.send) break;
-          const timerMessage = await target.send({ content: String(output.text || ' ').slice(0, 2000) }).catch(() => null);
+          const delivered = await deliverFlowPayload({
+            output,
+            target,
+            payload: { content: String(output.text || ' ').slice(0, 2000) },
+            member,
+            interaction,
+            interactionUsed,
+          });
+          interactionUsed = delivered.interactionUsed;
+          const timerMessage = delivered.message;
           if (timerMessage) {
             lastMessage = timerMessage;
-            lastChannel = target;
-            sent = true;
+            lastChannel = delivered.channel;
           }
+          sent = delivered.sent;
           const finish = async () => {
             const text = String(output.endText || '⏰ Temps écoulé !').slice(0, 2000);
-            if (timerMessage?.reply) await timerMessage.reply({ content: text }).catch(() => {});
-            else await target.send({ content: text }).catch(() => {});
+            await deliverFlowPayload({
+              output,
+              target,
+              payload: { content: text },
+              member,
+              interaction,
+              interactionUsed,
+            });
           };
           const durationMs = Math.max(1000, Number(output.durationMs) || 1000);
           if (output.wait) {
@@ -952,30 +986,55 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
           if (output.action === 'start') {
             chronos.set(key, Date.now());
             const text = String(output.startText || '').trim();
-            if (text && target?.send) {
-              lastMessage = await target.send({ content: text.slice(0, 2000) }).catch(() => null);
-              if (lastMessage) {
-                lastChannel = target;
-                sent = true;
+            if (text) {
+              const delivered = await deliverFlowPayload({
+                output,
+                target,
+                payload: { content: text.slice(0, 2000) },
+                member,
+                interaction,
+                interactionUsed,
+              });
+              interactionUsed = delivered.interactionUsed;
+              if (delivered.message) {
+                lastMessage = delivered.message;
+                lastChannel = delivered.channel;
               }
+              sent = delivered.sent;
             }
             break;
           }
           const started = chronos.get(key);
           if (!started) {
-            if (target?.send) await target.send({ content: 'Aucun chronomètre démarré avec cette variable. Lance d’abord le bloc « Démarrer le chronomètre ».' }).catch(() => {});
+            await deliverFlowPayload({
+              output,
+              target,
+              payload: { content: 'Aucun chronomètre démarré avec cette variable. Lance d’abord le bloc « Démarrer le chronomètre ».' },
+              member,
+              interaction,
+              interactionUsed,
+            });
             break;
           }
           chronos.delete(key);
           const elapsed = formatDuration(Date.now() - started);
           const template = String(output.stopText || '⏱️ Temps écoulé : __ELAPSED__');
           const text = template.replaceAll('__ELAPSED__', elapsed);
-          if (target?.send) {
-            lastMessage = await target.send({ content: text.slice(0, 2000) }).catch(() => null);
-            if (lastMessage) {
-              lastChannel = target;
-              sent = true;
+          {
+            const delivered = await deliverFlowPayload({
+              output,
+              target,
+              payload: { content: text.slice(0, 2000) },
+              member,
+              interaction,
+              interactionUsed,
+            });
+            interactionUsed = delivered.interactionUsed;
+            if (delivered.message) {
+              lastMessage = delivered.message;
+              lastChannel = delivered.channel;
             }
+            sent = delivered.sent;
           }
           break;
         }
@@ -1001,12 +1060,21 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
               serviceTokens(state, entry, { now }),
             );
           }
-          if (target?.send && text) {
-            lastMessage = await target.send({ content: text.slice(0, 2000) }).catch(() => null);
-            if (lastMessage) {
-              lastChannel = target;
-              sent = true;
+          if (text) {
+            const delivered = await deliverFlowPayload({
+              output,
+              target,
+              payload: { content: text.slice(0, 2000) },
+              member,
+              interaction,
+              interactionUsed,
+            });
+            interactionUsed = delivered.interactionUsed;
+            if (delivered.message) {
+              lastMessage = delivered.message;
+              lastChannel = delivered.channel;
             }
+            sent = delivered.sent;
           }
           break;
         }
@@ -1043,12 +1111,21 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
               serviceTokens(state, entry, { now }),
             );
           }
-          if (target?.send && text) {
-            lastMessage = await target.send({ content: text.slice(0, 2000) }).catch(() => null);
-            if (lastMessage) {
-              lastChannel = target;
-              sent = true;
+          if (text) {
+            const delivered = await deliverFlowPayload({
+              output,
+              target,
+              payload: { content: text.slice(0, 2000) },
+              member,
+              interaction,
+              interactionUsed,
+            });
+            interactionUsed = delivered.interactionUsed;
+            if (delivered.message) {
+              lastMessage = delivered.message;
+              lastChannel = delivered.channel;
             }
+            sent = delivered.sent;
           }
           break;
         }
@@ -1116,16 +1193,21 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
             .setDescription((lines.length ? lines.join('\n') : 'Aucun temps de service enregistré pour cette période.').slice(0, 4096))
             .setColor(0x7c5cff)
             .setFooter({ text: `${period} · remise à zéro ${reset}` });
-          if (output.ephemeral && interaction && !interaction.replied && !interaction.deferred) {
-            await interaction.reply({ embeds: [embed], ephemeral: true }).catch(() => {});
-            interactionUsed = true;
-            sent = true;
-          } else if (target?.send) {
-            lastMessage = await target.send({ embeds: [embed] }).catch(() => null);
-            if (lastMessage) {
-              lastChannel = target;
-              sent = true;
+          {
+            const delivered = await deliverFlowPayload({
+              output,
+              target,
+              payload: { embeds: [embed] },
+              member,
+              interaction,
+              interactionUsed,
+            });
+            interactionUsed = delivered.interactionUsed;
+            if (delivered.message) {
+              lastMessage = delivered.message;
+              lastChannel = delivered.channel;
             }
+            sent = delivered.sent;
           }
           break;
         }
@@ -1156,12 +1238,21 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
             output.message || '✅ Période du service : {{period}} (reset {{reset}}).',
             tokens,
           );
-          if (target?.send && text) {
-            lastMessage = await target.send({ content: text.slice(0, 2000) }).catch(() => null);
-            if (lastMessage) {
-              lastChannel = target;
-              sent = true;
+          if (text) {
+            const delivered = await deliverFlowPayload({
+              output,
+              target,
+              payload: { content: text.slice(0, 2000) },
+              member,
+              interaction,
+              interactionUsed,
+            });
+            interactionUsed = delivered.interactionUsed;
+            if (delivered.message) {
+              lastMessage = delivered.message;
+              lastChannel = delivered.channel;
             }
+            sent = delivered.sent;
           }
           break;
         }
@@ -1176,12 +1267,21 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
             output.message || '🧹 Les compteurs du service ont été réinitialisés.',
             tokens,
           );
-          if (target?.send && text) {
-            lastMessage = await target.send({ content: text.slice(0, 2000) }).catch(() => null);
-            if (lastMessage) {
-              lastChannel = target;
-              sent = true;
+          if (text) {
+            const delivered = await deliverFlowPayload({
+              output,
+              target,
+              payload: { content: text.slice(0, 2000) },
+              member,
+              interaction,
+              interactionUsed,
+            });
+            interactionUsed = delivered.interactionUsed;
+            if (delivered.message) {
+              lastMessage = delivered.message;
+              lastChannel = delivered.channel;
             }
+            sent = delivered.sent;
           }
           break;
         }
@@ -1741,6 +1841,135 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
               await target.send({ content, allowedMentions: { users: user?.id ? [user.id] : [] } }).catch(() => {});
             }
             if (output.stop) stopped = true;
+          }
+          break;
+        }
+        case 'moderation': {
+          const action = output.action || 'warn';
+          const targetMember = output.target ? await resolveMember(guild, output.target) : member;
+          const targetChannel = resolveChannel(guild, output.channel) || channel;
+          const reason = String(output.reason || 'KyllBot Studio').slice(0, 500);
+          const unitMs = output.durationUnit === 'days' ? 86400000 : output.durationUnit === 'hours' ? 3600000 : 60000;
+          const durationMs = Math.min(Math.max(1, Number(output.duration) || 10) * unitMs, 28 * 86400000);
+          let detail = '';
+          try {
+            switch (action) {
+              case 'warn':
+                detail = 'avertissement envoyé';
+                break;
+              case 'timeout':
+                if (!targetMember) throw new Error('membre introuvable');
+                await targetMember.timeout(durationMs, reason);
+                detail = `exclusion de ${formatDuration(durationMs)}`;
+                break;
+              case 'kick':
+                if (!targetMember) throw new Error('membre introuvable');
+                await targetMember.kick(reason);
+                detail = 'membre expulsé';
+                break;
+              case 'ban':
+                if (!targetMember) throw new Error('membre introuvable');
+                await targetMember.ban({ reason, deleteMessageSeconds: Math.min((Number(output.deleteDays) || 0) * 86400, 604800) });
+                detail = 'membre banni';
+                break;
+              case 'softban':
+                if (!targetMember) throw new Error('membre introuvable');
+                await targetMember.ban({ reason, deleteMessageSeconds: 604800 });
+                await guild.members.unban(targetMember.id, reason).catch(() => {});
+                detail = 'softban appliqué';
+                break;
+              case 'unban': {
+                let id = String(output.target || '').match(/\d{17,20}/)?.[0];
+                if (!id) {
+                  const needle = String(output.target || '').replace(/^@/, '').trim().toLowerCase();
+                  const bans = await guild.bans.fetch().catch(() => null);
+                  const found = bans?.find(
+                    (entry) => entry.user.username.toLowerCase() === needle || entry.user.tag.toLowerCase() === needle,
+                  );
+                  id = found?.user.id;
+                }
+                if (!id) throw new Error('identifiant introuvable');
+                await guild.members.unban(id, reason);
+                detail = 'membre débanni';
+                break;
+              }
+              case 'purge': {
+                if (!targetChannel?.bulkDelete) throw new Error('salon introuvable');
+                const messages = await targetChannel.messages.fetch({ limit: Math.min(100, Math.max(1, Number(output.amount) || 10)) });
+                await targetChannel.bulkDelete(messages, true);
+                detail = `${messages.size} message(s) supprimé(s)`;
+                break;
+              }
+              case 'slowmode':
+                if (!targetChannel?.setRateLimitPerUser) throw new Error('salon introuvable');
+                await targetChannel.setRateLimitPerUser(Math.min(21600, Math.max(0, Number(output.seconds) || 0)), reason);
+                detail = `ralenti à ${Number(output.seconds) || 0} s`;
+                break;
+              case 'lock':
+              case 'unlock':
+                if (!targetChannel?.permissionOverwrites) throw new Error('salon introuvable');
+                await targetChannel.permissionOverwrites.edit(guild.roles.everyone, {
+                  SendMessages: action === 'unlock' ? null : false,
+                });
+                detail = action === 'lock' ? 'salon verrouillé' : 'salon déverrouillé';
+                break;
+              case 'roleAdd':
+              case 'roleRemove': {
+                const role = resolveRole(guild, output.role);
+                if (!role || !targetMember) throw new Error('rôle ou membre introuvable');
+                if (action === 'roleAdd') await targetMember.roles.add(role, reason);
+                else await targetMember.roles.remove(role, reason);
+                detail = `rôle ${role.name} ${action === 'roleAdd' ? 'ajouté' : 'retiré'}`;
+                break;
+              }
+              case 'nickname':
+                if (!targetMember) throw new Error('membre introuvable');
+                await targetMember.setNickname(String(output.nickname || '').slice(0, 32), reason);
+                detail = 'pseudo modifié';
+                break;
+              case 'voiceMute':
+              case 'voiceUnmute':
+              case 'voiceDeafen':
+              case 'voiceUndeafen':
+                if (!targetMember?.voice) throw new Error('membre introuvable');
+                if (action === 'voiceMute') await targetMember.voice.setMute(true, reason);
+                if (action === 'voiceUnmute') await targetMember.voice.setMute(false, reason);
+                if (action === 'voiceDeafen') await targetMember.voice.setDeaf(true, reason);
+                if (action === 'voiceUndeafen') await targetMember.voice.setDeaf(false, reason);
+                detail = 'état vocal modifié';
+                break;
+              case 'voiceMove': {
+                const voiceChannel = resolveChannel(guild, output.channel);
+                if (!targetMember?.voice || !voiceChannel) throw new Error('salon vocal introuvable');
+                await targetMember.voice.setChannel(voiceChannel);
+                detail = 'membre déplacé';
+                break;
+              }
+              case 'dm':
+                if (!targetMember) throw new Error('membre introuvable');
+                await targetMember.send({ content: String(output.notifyMessage || output.reason || 'Message du staff').slice(0, 2000) }).catch(() => {});
+                detail = 'message privé envoyé';
+                break;
+              case 'log':
+                detail = String(output.evidence || reason).slice(0, 500);
+                break;
+              default:
+                detail = action;
+            }
+            if (output.notify !== false && targetMember && ['warn', 'timeout', 'kick', 'ban', 'softban'].includes(action)) {
+              const notify = String(output.notifyMessage || 'Tu as reçu une sanction : {{reason}}').replaceAll('{{reason}}', reason);
+              await targetMember.send({ content: notify.slice(0, 2000) }).catch(() => {});
+            }
+            await sendLog(guild, bot, `🛡️ **${action}** · ${targetMember?.user?.tag || output.target || user?.tag || 'membre'} · ${detail}${reason ? ` · raison : ${reason}` : ''}`, output.logChannel);
+            if (action !== 'log' && output.logChannel && targetChannel?.send) {
+              await targetChannel.send({ content: `🛡️ ${action} : ${detail}` }).catch(() => {});
+            }
+            result.variables.moderation_ok = true;
+            result.variables.moderation_action = action;
+          } catch (error) {
+            result.variables.moderation_ok = false;
+            result.variables.moderation_error = error.message;
+            if (targetChannel?.send) await targetChannel.send({ content: `⚠️ Modération impossible : ${error.message}` }).catch(() => {});
           }
           break;
         }
