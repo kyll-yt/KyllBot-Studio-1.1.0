@@ -2110,7 +2110,7 @@ body.pwa-standalone .sidebar-install { display: none; }
 }
 
 /* ------------------------------------------------------------------ */
-/* BotGhost-like flow builder                                          */
+/* Constructeur de flux visuel                                         */
 /* ------------------------------------------------------------------ */
 
 .flow-layout {
@@ -2379,7 +2379,7 @@ body.pwa-standalone .sidebar-install { display: none; }
   .flow-layout .flow-side .flow-drawer-close { display: inline-flex; }
 }
 
-/* Formulaire : éditeur de champs façon BotGhost */
+/* Formulaire : éditeur de champs */
 .form-field-editor { display: flex; flex-direction: column; gap: 8px; }
 .form-field-editor-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .form-field-editor-head b { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #b5bac1; }
@@ -2407,7 +2407,7 @@ body.pwa-standalone .sidebar-install { display: none; }
   .form-field-options.has-choice { grid-template-columns: 1fr; }
 }
 
-/* Icônes de blocs : aplats colorés comme BotGhost */
+/* Icônes de blocs : aplats colorés */
 .node-ic {
   background: var(--tone);
   background: color-mix(in srgb, var(--tone) 72%, #000 28%);
@@ -2419,7 +2419,7 @@ body.pwa-standalone .sidebar-install { display: none; }
 }
 .pal-item .blk-ic svg { color: #fff; }
 
-/* Bouton + sous les blocs, comme BotGhost */
+/* Bouton + sous les blocs */
 .node-add-next {
   position: absolute;
   left: 50%;

@@ -899,7 +899,7 @@ app.patch(
       const nextPlan = normalizePlanName(body.plan);
       if (nextPlan !== ws.plan) {
         const target = publicPlans(ws).find((entry) => entry.id === nextPlan);
-        if (target && target.price > 0) {
+        if (target && target.credits > 0) {
           throw bad('Les plans payants s’activent avec des crédits depuis la boutique de facturation.');
         }
         const previousPlan = ws.plan;

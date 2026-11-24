@@ -3,8 +3,8 @@
 Studio tout-en-un pour créer des bots Discord et des formations interactives : commandes slash,
 embeds, automatisations, cours, quiz, apprenants, certificats, statistiques, équipe et API.
 
-Le projet reprend le meilleur de BotGhost (éditeur de bots) et de Hurix (plateforme de formation)
-dans une seule application web.
+Le projet réunit un éditeur de bots Discord et une plateforme de formation dans une seule
+application web.
 
 ## Démarrage
 
@@ -99,9 +99,9 @@ L'API REST est sous `/api` : `auth`, `me`, `workspace`, `bots`, `commands`, `aut
 - Codes de connexion hachés (HMAC), expiration 10 minutes, usage unique, 5 tentatives maximum.
 - Sessions opaques : jeton aléatoire stocké haché, cookie `HttpOnly` + `SameSite=Lax`.
 - Rate limiting sur l'envoi de codes et la vérification.
-- En-têtes CSP, `X-Frame-Options`, `Referrer-Policy`, `nosniff`.
-- Aucun secret Discord n'est stocké : les jetons de bots sont générés localement et affichés une
-  seule fois.
+- En-têtes CSP, `X-Frame-Options`, `Referrer-Policy`, `nosniff`, HSTS en production.
+- Contrôle d'origine sur les requêtes sensibles et isolation des espaces par compte.
+- Tokens Discord chiffrés au repos avec AES-256-GCM ; ils ne sont jamais réaffichés en clair.
 
 ## Limites connues
 

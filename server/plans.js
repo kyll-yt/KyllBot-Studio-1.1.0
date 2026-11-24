@@ -1,7 +1,7 @@
-const plan = (id, price, tagline, limits, features, missing = []) => ({
+const plan = (id, credits, tagline, limits, features, missing = []) => ({
   id,
   name: id,
-  price,
+  credits,
   tagline,
   limits,
   features,
@@ -29,7 +29,7 @@ export const PLANS = {
   ),
   Essentiel: plan(
     'Essentiel',
-    9,
+    300,
     'Pour animer une communauté active.',
     { bots: 10, courses: 25, learners: 1000, members: 10, commandsPerBot: 120, apiKeys: 5 },
     [
@@ -47,7 +47,7 @@ export const PLANS = {
   ),
   Pro: plan(
     'Pro',
-    19,
+    600,
     'Pour les créateurs et les équipes qui montent en puissance.',
     { bots: 25, courses: 100, learners: 5000, members: 25, commandsPerBot: 200, apiKeys: 10 },
     [
@@ -65,7 +65,7 @@ export const PLANS = {
   ),
   Studio: plan(
     'Studio',
-    49,
+    1200,
     'Pour les studios et les organisations sans limite.',
     { bots: 999, courses: 999, learners: 999999, members: 200, commandsPerBot: 500, apiKeys: 25 },
     [

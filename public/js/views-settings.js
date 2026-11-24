@@ -41,7 +41,7 @@ function viewBilling() {
     <div class="plan-banner">
       <div>
         <span class="pill violet">Plan actuel</span>
-        <h3 style="margin-top:8px">${esc(ws.plan)} — ${current && current.price > 0 ? `${current.price} € / mois` : 'Gratuit'}</h3>
+        <h3 style="margin-top:8px">${esc(ws.plan)} — ${current && current.credits > 0 ? `${fmt(current.credits)} crédits / mois` : 'Gratuit'}</h3>
         <p>${esc(current?.tagline || 'Votre plan actuel et ses limites.')}</p>
         <p class="credit-balance">${fmt(credits)} crédits disponibles</p>
       </div>
@@ -63,7 +63,7 @@ function viewBilling() {
               return `<div class="plan-card ${entry.current ? 'current' : ''}">
                 ${entry.current ? '<span class="pill green plan-badge">Actuel</span>' : ''}
                 <h4>${esc(entry.name)}</h4>
-                <div class="plan-price">${entry.price === 0 ? '0 €' : `${entry.price} €`}<span>/ mois</span></div>
+                <div class="plan-price">${entry.credits === 0 ? '0 crédit' : `${fmt(entry.credits)} crédits`}<span>/ mois</span></div>
                 <p class="plan-tagline">${esc(entry.tagline)}</p>
                 <ul class="plan-features">${entry.features.map((feature) => `<li>${icon('check')} ${esc(feature)}</li>`).join('')}</ul>
                 <div class="plan-actions">
@@ -142,9 +142,9 @@ function viewBilling() {
                 (invoice) => `<div class="invoice-row">
                   <span class="inv-ic">${icon('file')}</span>
                   <div style="flex:1"><div style="font-weight:600">${esc(invoice.label || invoice.id)}</div><div style="font-size:10.5px;color:var(--muted-2)">${esc(invoiceDate(invoice))}</div></div>
-                  <span style="color:var(--muted)">${invoice.credits ? `${fmt(invoice.credits)} crédits` : invoice.amount ? `${fmt(invoice.amount)} €` : '—'}</span>
+                  <span style="color:var(--muted)">${invoice.credits ? `${fmt(invoice.credits)} crédits` : '—'}</span>
                   <span class="pill green">${esc(invoice.status || 'Payée')}</span>
-                  <button class="mini-btn" data-action="download-invoice" data-id="${esc(invoice.id)}" data-label="${esc(invoice.label || invoice.id)}" data-amount="${esc(invoice.credits ? `${invoice.credits} crédits` : invoice.amount ? `${invoice.amount} EUR` : '0')}" title="Télécharger">${icon('download')}</button>
+                  <button class="mini-btn" data-action="download-invoice" data-id="${esc(invoice.id)}" data-label="${esc(invoice.label || invoice.id)}" data-amount="${esc(invoice.credits ? `${invoice.credits} crédits` : '0 crédit')}" title="Télécharger">${icon('download')}</button>
                 </div>`,
               )
               .join('')
