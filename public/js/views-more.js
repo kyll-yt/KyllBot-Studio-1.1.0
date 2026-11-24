@@ -447,39 +447,39 @@ function viewTeam() {
 
     <div class="panel">
       <div class="panel-head"><h3>${members.length + 1} membre(s)</h3><div class="ph-actions"><span class="pill violet">Plan ${esc(state.ws.plan)}</span></div></div>
-      <div class="table-wrap"><table class="table">
+      <div class="table-wrap"><table class="table team-table">
         <thead><tr><th>Membre</th><th>Rôle</th><th>Statut</th><th>Depuis</th><th></th></tr></thead>
         <tbody>
           <tr>
-            <td><div class="cell-user">
+            <td data-label="Membre"><div class="cell-user">
               ${avatarHtml(owner, 30, 9)}
               <div><b>${esc(owner.name)}</b><span>${esc(owner.email)}</span></div>
             </div></td>
-            <td><span class="pill violet">Propriétaire</span></td>
-            <td><span class="pill green">Actif</span></td>
-            <td style="color:var(--muted-2);font-size:11.5px">${esc(timeAgo(owner.createdAt))}</td>
+            <td data-label="Rôle"><span class="pill violet">Propriétaire</span></td>
+            <td data-label="Statut"><span class="pill green">Actif</span></td>
+            <td data-label="Depuis" style="color:var(--muted-2);font-size:11.5px">${esc(timeAgo(owner.createdAt))}</td>
             <td></td>
           </tr>
           ${members
             .map(
               (member) => `<tr>
-                <td><div class="cell-user">
+                <td data-label="Membre"><div class="cell-user">
                   <span class="avatar" style="width:30px;height:30px;border-radius:9px;font-size:10.5px">${esc(initials(member.name))}</span>
                   <div><b>${esc(member.name)}</b><span>${esc(member.email)}</span></div>
                 </div></td>
-                <td>
+                <td data-label="Rôle">
                   <select class="select" style="width:130px;padding:6px 28px 6px 10px;font-size:12px" data-change="member-role" data-id="${esc(member.id)}">
                     ${['Éditeur', 'Analyste', 'Lecteur']
                       .map((role) => `<option ${member.role === role ? 'selected' : ''}>${role}</option>`)
                       .join('')}
                   </select>
                 </td>
-                <td><div style="display:flex;gap:4px;flex-wrap:wrap">
+                <td data-label="Statut"><div style="display:flex;gap:4px;flex-wrap:wrap">
                   <span class="pill ${member.status === 'active' ? 'green' : 'amber'}">${member.status === 'active' ? 'Actif' : 'Invité'}</span>
                   <span class="pill ${member.hasAccount ? 'cyan' : 'gray'}">${member.hasAccount ? 'Compte lié' : 'Pas encore de compte'}</span>
                 </div></td>
-                <td style="color:var(--muted-2);font-size:11.5px">${esc(timeAgo(member.joinedAt))}</td>
-                <td><div style="display:flex;gap:6px;justify-content:flex-end;align-items:center">
+                <td data-label="Depuis" style="color:var(--muted-2);font-size:11.5px">${esc(timeAgo(member.joinedAt))}</td>
+                <td data-label="Actions"><div style="display:flex;gap:6px;justify-content:flex-end;align-items:center;flex-wrap:wrap">
                   ${member.hasAccount ? '' : `<button class="btn btn-ghost btn-sm" data-action="check-member" data-id="${esc(member.id)}">Vérifier</button>`}
                   <button class="btn btn-ghost btn-sm danger-text" data-action="remove-member" data-id="${esc(member.id)}">${icon('trash')} Retirer</button>
                 </div></td>
