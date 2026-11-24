@@ -970,6 +970,7 @@ export function sanitizeFlow(input = {}, previous = null) {
 
   const flow = {
     id: previous?.id || str(input.id, 40) || newId(),
+    serverId: str(input.serverId, 60) || previous?.serverId || '',
     name: str(input.name, 60) || previous?.name || 'Nouveau flux',
     description: str(input.description, 200),
     enabled: input.enabled === undefined ? previous?.enabled ?? true : Boolean(input.enabled),

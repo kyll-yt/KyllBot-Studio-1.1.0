@@ -475,8 +475,12 @@ function viewBotDetail(id) {
   const bot = state.ws.bots.find((entry) => entry.id === id);
   if (!bot) return emptyState('Bot introuvable', 'Ce bot a peut-être été supprimé.', 'Retour aux bots', 'go-bots');
 
+  const tabServer = activeBotServer(bot);
+  const commandTabCount = tabServer
+    ? (bot.commands || []).filter((command) => commandServerKey(bot, command) === tabServer.id).length
+    : (bot.commands || []).length;
   const tabs = [
-    ['commands', `Commandes (${bot.commands.length})`],
+    ['commands', `Commandes (${commandTabCount})`],
     ['messages', `Messages (${(bot.savedMessages || []).length})`],
     ['flows', `Flux (${(bot.flows || []).length})`],
     ['automations', `Automatisations (${bot.automations.length})`],
@@ -487,12 +491,12 @@ function viewBotDetail(id) {
   let body = '';
 
   if (state.botTab === 'commands') {
-    const discord = bot.discord || {};
-    const servers = Array.isArray(discord.servers) && discord.servers.length ? discord.servers : discord.guildId ? [discord] : [];
-    const activeKey = discord.activeGuildId || discord.guildId || '';
-    const activeServer = servers.find((server) => server.id === activeKey || server.guildId === activeKey) || servers[0] || null;
+    const servers = botDiscordServers(bot);
+    const activeServer = activeBotServer(bot);
     const runtime = bot.runtime || {};
     const serverName = activeServer?.guildName || activeServer?.name || 'Aucun serveur';
+    const commandsForServer = (server) => (bot.commands || []).filter((command) => commandServerKey(bot, command) === server?.id);
+    const visibleCommands = activeServer ? commandsForServer(activeServer) : bot.commands || [];
     const knownGuilds = Array.isArray(bot.discordAccount?.guilds) ? bot.discordAccount.guilds : [];
     const unconfiguredGuilds = knownGuilds.filter((guild) => !servers.some((server) => server.guildId === guild.id));
     const inviteUrl = botInviteUrl(bot);
@@ -511,7 +515,7 @@ function viewBotDetail(id) {
         </div>
       </div>
       <div class="panel-body">
-        <p class="hint" style="margin:0 0 12px">Choisis clairement le serveur qui doit recevoir les commandes ci-dessous. Discord les enregistre immédiatement sur ce serveur.</p>
+        <p class="hint" style="margin:0 0 12px">Chaque serveur garde ses propres commandes. Celles créées ici sont liées uniquement au serveur sélectionné et ne s’afficheront pas sur les autres.</p>
         ${
           servers.length
             ? `<div class="server-list">
@@ -522,7 +526,7 @@ function viewBotDetail(id) {
                       <span class="server-avatar">${esc((server.name || server.guildName || 'S').slice(0, 1).toUpperCase())}</span>
                       <span class="server-main">
                         <b>${esc(server.guildName || server.name || 'Serveur Discord')}</b>
-                        <small>${server.guildId ? `ID ${esc(server.guildId)}` : 'Non connecté à Discord'} · ${bot.commands.length} commande(s)</small>
+                        <small>${server.guildId ? `ID ${esc(server.guildId)}` : 'Non connecté à Discord'} · ${commandsForServer(server).length} commande(s)</small>
                       </span>
                       ${active ? '<span class="pill green">Commandes ici</span>' : '<span class="pill gray">Choisir</span>'}
                     </button>`;
@@ -562,13 +566,13 @@ function viewBotDetail(id) {
     </div>
     <div class="panel">
       <div class="panel-head">
-        <h3>Commandes · ${esc(serverName)}</h3>
+        <h3>Commandes · ${esc(serverName)} (${visibleCommands.length})</h3>
         <div class="ph-actions"><button class="btn btn-primary btn-sm" data-action="new-command" data-id="${esc(bot.id)}">${icon('plus')} Ajouter</button></div>
       </div>
       <div class="panel-body tight">
         ${
-          bot.commands.length
-            ? bot.commands
+          visibleCommands.length
+            ? visibleCommands
                 .map(
                   (command) => `<div class="command-row">
                     <button class="switch ${command.enabled ? 'on' : ''}" data-action="toggle-command" data-id="${esc(bot.id)}" data-cmd="${esc(command.id)}" aria-label="Activer ${esc(command.name)}"></button>
@@ -582,8 +586,8 @@ function viewBotDetail(id) {
                 .join('')
             : `<div class="empty" style="padding:38px 20px">
                 <div class="ic">${icon('code')}</div>
-                <h3>Aucune commande</h3>
-                <p>Ajoutez une première commande avec sa réponse et son embed.</p>
+                <h3>Aucune commande sur ce serveur</h3>
+                <p>Ajoute une première commande liée à ${esc(serverName)}. Elle restera invisible sur tes autres serveurs.</p>
                 <button class="btn btn-primary" data-action="new-command" data-id="${esc(bot.id)}">Ajouter une commande</button>
               </div>`
         }
@@ -1293,12 +1297,22 @@ function botInviteUrl(bot, guildId = '') {
   return `https://discord.com/oauth2/authorize?client_id=${appId}&permissions=${BOT_INVITE_PERMISSIONS}&scope=bot%20applications.commands${guild}`;
 }
 
-function commandServerName(bot) {
+function botDiscordServers(bot) {
   const discord = bot?.discord || {};
-  const servers = Array.isArray(discord.servers) && discord.servers.length ? discord.servers : discord.guildId ? [discord] : [];
+  return Array.isArray(discord.servers) && discord.servers.length ? discord.servers : discord.guildId ? [discord] : [];
+}
+
+function activeBotServer(bot) {
+  const discord = bot?.discord || {};
+  const servers = botDiscordServers(bot);
   const key = discord.activeGuildId || discord.guildId || '';
-  const active = servers.find((server) => server.id === key || server.guildId === key) || servers[0];
-  return active?.guildName || active?.name || '';
+  return servers.find((server) => server.id === key || server.guildId === key) || servers[0] || null;
+}
+
+function commandServerKey(bot, command) {
+  const key = String(command?.serverId || '').trim();
+  const found = botDiscordServers(bot).find((server) => server.id === key || server.guildId === key);
+  return (found || activeBotServer(bot))?.id || '';
 }
 
 async function openBotGuildsModal(bot) {
@@ -1369,14 +1383,33 @@ function commandModal(bot, command) {
     embed: { title: '', description: '', color: bot.color || '#7c5cff', footer: 'KyllBot Studio' },
   };
   const initialVariants = commandVariants(value);
-  const serverName = commandServerName(bot);
+  const servers = botDiscordServers(bot);
+  const targetServerId = command?.serverId || activeBotServer(bot)?.id || '';
 
   const form = openModal({
     title: command ? 'Modifier la commande' : 'Nouvelle commande',
-    subtitle: `${serverName ? `Serveur cible : ${serverName} · ` : ''}Prévisualisez le rendu Discord en direct.`,
+    subtitle: 'Prévisualisez le rendu Discord en direct. La commande est liée à un seul serveur.',
     wide: true,
     submitLabel: command ? 'Enregistrer' : 'Créer la commande',
     body: `
+      <div class="field">
+        <label for="cServer">Serveur cible</label>
+        <select class="select" id="cServer" name="serverId" ${servers.length ? '' : 'disabled'}>
+          ${
+            servers.length
+              ? servers
+                  .map(
+                    (server) =>
+                      `<option value="${esc(server.id)}" ${
+                        server.id === targetServerId || server.guildId === targetServerId ? 'selected' : ''
+                      }>${esc(server.guildName || server.name || 'Serveur Discord')}${server.guildId ? '' : ' (non connecté)'}</option>`,
+                  )
+                  .join('')
+              : '<option value="">Aucun serveur configuré</option>'
+          }
+        </select>
+        <div class="hint">La commande sera créée uniquement sur ce serveur. Elle restera invisible sur les autres.</div>
+      </div>
       <div class="field">
         <label>Actions prêtes à l’emploi</label>
         <div class="preset-grid">
@@ -1424,6 +1457,7 @@ function commandModal(bot, command) {
         .slice(0, 20);
       const payload = {
         name: formData.get('name'),
+        serverId: String(formData.get('serverId') || targetServerId),
         description: formData.get('description'),
         response: formData.get('response'),
         cooldown: Number(formData.get('cooldown')),
@@ -1623,21 +1657,13 @@ onAction('bot-command-server', async (el) => {
   const serverName = target?.guildName || target?.name || 'ce serveur';
   try {
     await api(`/api/bots/${bot.id}/discord/server`, { method: 'POST', body: JSON.stringify({ guildId: el.dataset.guild }) });
-    let message = `Serveur des commandes : ${serverName}.`;
-    let tone = 'info';
-    if (bot.hasToken && target?.guildId) {
-      try {
-        const result = await api(`/api/bots/${bot.id}/commands/sync`, { method: 'POST' });
-        message = `${result.count} commande(s) enregistrée(s) sur ${serverName}.`;
-        tone = 'success';
-      } catch (error) {
-        message += ` Synchronisation impossible : ${error.message}`;
-      }
-    } else if (!bot.hasToken) {
-      message += ' Ajoute un token Discord pour les enregistrer.';
-    }
     await refresh();
-    toast(message, tone);
+    toast(
+      bot.hasToken
+        ? `Serveur actif : ${serverName}. Les nouvelles commandes iront sur ce serveur.`
+        : `Serveur actif : ${serverName}. Ajoute un token Discord pour enregistrer les commandes.`,
+      'success',
+    );
   } catch (error) {
     toast(error.message, 'error');
   }
@@ -1648,13 +1674,14 @@ onAction('sync-bot-commands', async (el) => {
   if (!bot) return;
   try {
     const result = await api(`/api/bots/${bot.id}/commands/sync`, { method: 'POST' });
-    const server = (bot.discord?.servers || []).find((entry) => entry.guildId === result.guildId || entry.id === result.guildId);
     await refresh();
-    if (result.global) {
-      toast('Commandes enregistrées globalement. Discord peut mettre jusqu’à 1 h à les afficher : choisis un serveur pour une synchronisation instantanée.', 'info');
-    } else {
-      toast(`${result.count} commande(s) enregistrée(s) sur ${server?.guildName || server?.name || 'le serveur actif'}.`, 'success');
-    }
+    const details = (result.servers || [])
+      .map((server) => `${server.name} : ${server.count}`)
+      .join(' · ');
+    toast(
+      `${result.count} commande(s) synchronisée(s) sur ${result.servers?.length || 1} serveur(s).${details ? ` (${details})` : ''}${result.warning ? ` ${result.warning}` : ''}`,
+      result.warning ? 'info' : 'success',
+    );
   } catch (error) {
     toast(error.message, 'error');
   }
@@ -1674,7 +1701,7 @@ onAction('bot-connect-server', async (el) => {
     let tone = 'success';
     try {
       const sync = await api(`/api/bots/${bot.id}/commands/sync`, { method: 'POST' });
-      commandInfo = ` ${sync.count} commande(s) enregistrée(s).`;
+      commandInfo = ` ${sync.count} commande(s) synchronisée(s) sur ${sync.servers?.length || 1} serveur(s).`;
     } catch (error) {
       commandInfo = ` Commandes non synchronisées : ${error.message}`;
       tone = 'info';
@@ -1784,7 +1811,12 @@ onAction('go-bots', () => {
 
 onAction('new-command', (el) => {
   const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
-  if (bot) commandModal(bot);
+  if (!bot) return;
+  if (!activeBotServer(bot)) {
+    toast('Choisis d’abord un serveur Discord pour cette commande.', 'error');
+    return;
+  }
+  commandModal(bot);
 });
 
 onAction('edit-command', (el) => {

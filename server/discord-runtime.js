@@ -29,7 +29,7 @@ import { formatDuration, formatSignedDuration, normalizeModalFields, parseDurati
 import { cleanAIPrompt, localAIResponse } from './local-ai.js';
 import { decryptSecret } from './secrets.js';
 import { safeFetch } from './url-safety.js';
-import { activeDiscordServer, upsertDiscordServer } from './discord.js';
+import { activeDiscordServer, itemMatchesGuild, scopedServerId, upsertDiscordServer } from './discord.js';
 import { savedMessageHasEmbed } from './messages.js';
 import { scheduledMessageDue } from './scheduled.js';
 import { addServicePenalty, applyServiceTokens, applyServiceTokensDeep, ensureServiceState, safeTimezone, serviceDisplayName, serviceEntry, servicePeriodLabel, serviceResetLabel, serviceTokens, serviceTotals } from './service.js';
@@ -2153,16 +2153,20 @@ async function handleInteraction(botId, interaction) {
   if (interaction.isChatInputCommand()) {
     const commandName = normalizeCommandName(interaction.commandName);
     const command = (bot.commands || []).find(
-      (entry) => normalizeCommandName(entry.name) === commandName && entry.enabled !== false,
+      (entry) =>
+        normalizeCommandName(entry.name) === commandName &&
+        entry.enabled !== false &&
+        itemMatchesGuild(bot, entry, interaction.guildId),
     );
     const slashFlows = (bot.flows || []).filter(
       (flow) =>
         flow.enabled !== false &&
         flow.trigger?.type === 'slash' &&
-        normalizeCommandName(flow.trigger?.command) === commandName,
+        normalizeCommandName(flow.trigger?.command) === commandName &&
+        itemMatchesGuild(bot, flow, interaction.guildId),
     );
     if (!command && !slashFlows.length) {
-      await interaction.reply({ content: 'Cette commande n’est plus active sur ce bot.', ephemeral: true });
+      await interaction.reply({ content: 'Cette commande n’est pas active sur ce serveur.', ephemeral: true });
       return;
     }
     if (command) {
@@ -3008,7 +3012,12 @@ async function handleMessage(botId, message) {
   const prefix = String(bot.prefix || '!');
   if (message.content.startsWith(prefix)) {
     const [rawName] = message.content.slice(prefix.length).trim().split(/\s+/);
-    const command = (bot.commands || []).find((entry) => entry.name === String(rawName || '').toLowerCase() && entry.enabled !== false);
+    const command = (bot.commands || []).find(
+      (entry) =>
+        entry.name === String(rawName || '').toLowerCase() &&
+        entry.enabled !== false &&
+        itemMatchesGuild(bot, entry, message.guildId),
+    );
     if (command) {
       const remaining = cooldownRemaining(bot.id, message.author.id, command.name, command.cooldown);
       if (remaining > 0) {
@@ -3210,7 +3219,11 @@ function attachHandlers(client, botId) {
     }
     try {
       const result = await syncBotCommands(botId);
-      log(runtime, 'info', `${result.count} commande(s) synchronisée(s)${result.guildId ? ` sur le serveur ${result.guildId}` : ' globalement'}.`);
+      log(
+        runtime,
+        'info',
+        `${result.count} commande(s) synchronisée(s) sur ${result.servers?.length || 1} serveur(s).`,
+      );
     } catch (error) {
       runtime.warning = `Connexion OK, mais synchronisation des commandes impossible : ${error.message}`;
       log(runtime, 'warn', runtime.warning);
@@ -3343,16 +3356,17 @@ function normalizeCommandName(value) {
     .slice(0, 32);
 }
 
-function commandList(bot) {
+function commandList(bot, serverId) {
   const commands = new Map();
   for (const command of bot.commands || []) {
-    if (command.enabled === false) continue;
+    if (command.enabled === false || scopedServerId(bot, command) !== serverId) continue;
     const name = normalizeCommandName(command.name);
     if (!name) continue;
     commands.set(name, { name, description: String(command.description || 'Commande KyllBot').slice(0, 100) });
   }
   for (const flow of bot.flows || []) {
     if (flow.enabled === false || flow.trigger?.type !== 'slash') continue;
+    if (scopedServerId(bot, flow) !== serverId) continue;
     const name = normalizeCommandName(flow.trigger?.command);
     if (!name || commands.has(name)) continue;
     commands.set(name, { name, description: String(flow.description || flow.name || 'Flux KyllBot').slice(0, 100) });
@@ -3367,21 +3381,79 @@ export async function syncBotCommands(botId) {
   if (!bot.tokenEnc) throw new Error('Aucun token Discord enregistré.');
   const token = decryptSecret(bot.tokenEnc);
   const appId = bot.discordAccount?.id || (await discordRequest(token, '/users/@me')).id;
-  const guildId = String(bot.discord?.guildId || '').trim();
-  const commands = commandList(bot);
-  const pathName = guildId ? `/applications/${appId}/guilds/${guildId}/commands` : `/applications/${appId}/commands`;
-  const data = await discordRequest(token, pathName, { method: 'PUT', body: commands });
+  const configured = (bot.discord?.servers || []).filter((server) => /^\d{17,20}$/.test(String(server.guildId || '')));
+  const fallbackGuildId = String(bot.discord?.guildId || '').trim();
+  if (!configured.length && /^\d{17,20}$/.test(fallbackGuildId)) {
+    configured.push({ id: fallbackGuildId, guildId: fallbackGuildId, name: bot.discord.guildName || 'Serveur Discord' });
+  }
+  if (!configured.length) {
+    throw new Error('Aucun serveur Discord configuré. Choisis un serveur avant de synchroniser les commandes.');
+  }
+
+  const warnings = [];
+  let globalCleared = false;
+  try {
+    await discordRequest(token, `/applications/${appId}/commands`, { method: 'PUT', body: [] });
+    globalCleared = true;
+  } catch (error) {
+    warnings.push(`Anciennes commandes globales non supprimées : ${error.message}`);
+  }
+
+  const results = [];
+  let total = 0;
+  let firstError = null;
+  for (const server of configured) {
+    const commands = commandList(bot, server.id);
+    try {
+      const data = await discordRequest(token, `/applications/${appId}/guilds/${server.guildId}/commands`, {
+        method: 'PUT',
+        body: commands,
+      });
+      const count = Array.isArray(data) ? data.length : commands.length;
+      total += count;
+      results.push({
+        id: server.id,
+        guildId: server.guildId,
+        name: server.guildName || server.name || 'Serveur Discord',
+        count,
+        ok: true,
+      });
+    } catch (error) {
+      firstError ||= error;
+      results.push({
+        id: server.id,
+        guildId: server.guildId,
+        name: server.guildName || server.name || 'Serveur Discord',
+        count: 0,
+        ok: false,
+        error: error.message,
+      });
+    }
+  }
+
   const runtime = ensureRuntime(botId);
   runtime.lastSyncAt = new Date().toISOString();
-  runtime.commandCount = Array.isArray(data) ? data.length : commands.length;
-  runtime.lastError = null;
-  if (!guildId) {
-    runtime.warning =
-      'Commandes enregistrées globalement : Discord peut mettre jusqu’à 1 h à les afficher. Renseigne l’ID du serveur pour une synchronisation instantanée.';
-  } else if (runtime.warning?.startsWith('Commandes enregistrées globalement')) {
+  runtime.commandCount = total;
+  runtime.commandsByServer = results;
+  const failed = results.filter((entry) => !entry.ok);
+  runtime.lastError = failed.length === results.length ? firstError?.message || 'Aucun serveur accessible.' : null;
+  if (failed.length === results.length) {
+    throw new Error(`Synchronisation impossible : ${firstError?.message || 'aucun serveur accessible'}.`);
+  }
+  for (const entry of failed) warnings.push(`${entry.name} : ${entry.error}`);
+  if (warnings.length) runtime.warning = warnings.join(' ');
+  else if (runtime.warning?.startsWith('Commandes enregistrées globalement') || runtime.warning?.startsWith('Anciennes commandes')) {
     runtime.warning = null;
   }
-  return { ok: true, count: runtime.commandCount, guildId: guildId || null, global: !guildId, commands };
+  return {
+    ok: true,
+    count: total,
+    guildId: activeDiscordServer(bot.discord)?.guildId || configured[0].guildId,
+    global: false,
+    globalCleared,
+    servers: results,
+    warning: warnings.join(' ') || null,
+  };
 }
 
 export async function testBotConnection(botId) {

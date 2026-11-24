@@ -710,12 +710,16 @@ function viewBotFlows(bot) {
               .map((flow) => {
                 const trigger = FLOW_TRIGGERS[flow.trigger?.type] || FLOW_TRIGGERS.slash;
                 const links = (flow.blocks || []).filter((block) => block.next || block.thenId || block.elseId).length;
+                const flowServer =
+                  botDiscordServers(bot).find((server) => server.id === flow.serverId || server.guildId === flow.serverId) ||
+                  activeBotServer(bot);
                 return `<div class="flow-card">
                   <span class="fl-ic">${icon(trigger.icon)}</span>
                   <div class="fl-main">
                     <h4>${esc(flow.name)} ${flow.enabled ? '' : '<span class="pill grey">En pause</span>'}</h4>
                     <p>${esc(flow.description || trigger.label)}</p>
                     <div class="fl-meta">
+                      ${flow.trigger?.type === 'slash' && flowServer ? `<span>${esc(flowServer.guildName || flowServer.name || 'Serveur Discord')}</span>` : ''}
                       <span>${flow.blocks?.length || 0} bloc(s)</span>
                       <span>${links} connexion(s)</span>
                       <span>${fmt(flow.runs || 0)} exécution(s)</span>

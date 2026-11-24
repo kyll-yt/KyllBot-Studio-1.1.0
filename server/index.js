@@ -32,6 +32,8 @@ import {
   activeDiscordServer,
   defaultDiscordServer,
   normalizeDiscordServer,
+  resolveDiscordServer,
+  scopedServerId,
   selectDiscordServer,
   upsertDiscordServer,
 } from './discord.js';
@@ -253,6 +255,20 @@ function migrateWorkspace(ws) {
     if (JSON.stringify(bot.discord) !== JSON.stringify(discord)) {
       bot.discord = discord;
       changed = true;
+    }
+    const activeServer = activeDiscordServer(bot.discord);
+    const serverIds = new Set((bot.discord?.servers || []).flatMap((server) => [server.id, server.guildId]).filter(Boolean));
+    for (const command of bot.commands || []) {
+      if (!command.serverId || !serverIds.has(command.serverId)) {
+        command.serverId = activeServer?.id || '';
+        changed = true;
+      }
+    }
+    for (const flow of bot.flows || []) {
+      if (flow.trigger?.type === 'slash' && (!flow.serverId || !serverIds.has(flow.serverId))) {
+        flow.serverId = activeServer?.id || '';
+        changed = true;
+      }
     }
     if (bot.tokenHash && !bot.tokenEnc) {
       bot.tokenHash = null;
@@ -1223,12 +1239,23 @@ app.post(
     const bot = findOr404(ws.bots, req.params.id, 'Bot');
     const name = str(req.body?.name, 40).replace(/\s+/g, '-').toLowerCase();
     if (name.length < 1) throw bad('Le nom de la commande est requis.');
-    if (bot.commands.some((c) => c.name === name)) throw bad('Cette commande existe déjà sur ce bot.');
+    const requestedServerId = str(req.body?.serverId || req.body?.guildId, 60);
+    const targetServer = requestedServerId
+      ? (bot.discord?.servers || []).find((server) => server.id === requestedServerId || server.guildId === requestedServerId)
+      : activeDiscordServer(bot.discord);
+    if (!targetServer) {
+      throw bad(requestedServerId ? 'Serveur introuvable pour cette commande.' : 'Choisis d’abord un serveur Discord pour cette commande.');
+    }
+    const serverId = targetServer.id;
+    if (bot.commands.some((c) => c.name === name && scopedServerId(bot, c) === serverId)) {
+      throw bad('Cette commande existe déjà sur ce serveur.');
+    }
     assertLimit(ws, 'commands', bot.commands.length, req.user);
     const embed = req.body?.embed || {};
     const command = {
       id: newId(),
       name,
+      serverId,
       description: str(req.body?.description, 160),
       response: str(req.body?.response, 1000),
       embed: {
@@ -1260,11 +1287,23 @@ app.patch(
     const bot = findOr404(ws.bots, req.params.id, 'Bot');
     const command = findOr404(bot.commands, req.params.commandId, 'Commande');
     const body = req.body || {};
+    const changesServer = body.serverId !== undefined || body.guildId !== undefined;
+    const requestedServerId = str(body.serverId || body.guildId, 60);
+    const targetServer = changesServer
+      ? (bot.discord?.servers || []).find((server) => server.id === requestedServerId || server.guildId === requestedServerId)
+      : null;
+    if (changesServer && !targetServer) throw bad('Serveur introuvable pour cette commande.');
+    const nextServerId = changesServer ? targetServer.id : scopedServerId(bot, command);
+    let nextName = command.name;
     if (body.name !== undefined) {
-      const name = str(body.name, 40).replace(/\s+/g, '-').toLowerCase();
-      if (!name) throw bad('Nom invalide.');
-      command.name = name;
+      nextName = str(body.name, 40).replace(/\s+/g, '-').toLowerCase();
+      if (!nextName) throw bad('Nom invalide.');
     }
+    if (bot.commands.some((c) => c.id !== command.id && c.name === nextName && scopedServerId(bot, c) === nextServerId)) {
+      throw bad('Cette commande existe déjà sur ce serveur.');
+    }
+    command.serverId = nextServerId;
+    command.name = nextName;
     if (body.description !== undefined) command.description = str(body.description, 160);
     if (body.response !== undefined) command.response = str(body.response, 1000);
     if (body.enabled !== undefined) command.enabled = Boolean(body.enabled);
@@ -1579,6 +1618,8 @@ app.post(
     if (flows.length >= 40) throw bad('Limite de 40 flux atteinte pour ce bot.');
     const template = str(req.body?.template, 20);
     const flow = template ? flowTemplate(template, bot.name) : sanitizeFlow({ name: str(req.body?.name, 60) || 'Nouveau flux' });
+    const targetServer = resolveDiscordServer(bot.discord, req.body?.serverId || req.body?.guildId) || activeDiscordServer(bot.discord);
+    flow.serverId = targetServer?.id || '';
     flow.name = str(req.body?.name, 60) || flow.name;
     flow.description = describeFlowTrigger(flow.trigger);
     flows.push(flow);
@@ -1601,6 +1642,7 @@ app.patch(
     const body = req.body || {};
     const previous = flows[index];
     const next = sanitizeFlow({ ...previous, ...body }, previous);
+    if (!next.serverId) next.serverId = activeDiscordServer(bot.discord)?.id || '';
     if (body.name === undefined) next.name = previous.name;
     if (body.trigger) next.description = describeFlowTrigger(next.trigger);
     flows[index] = next;

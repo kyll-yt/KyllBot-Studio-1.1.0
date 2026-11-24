@@ -180,3 +180,26 @@ export function selectDiscordServer(discord, key, bot = {}) {
   if (!target) return current;
   return { ...target, servers: current.servers, activeGuildId: target.id };
 }
+
+export function resolveDiscordServer(discord, key) {
+  const servers = Array.isArray(discord?.servers) ? discord.servers : [];
+  const needle = String(key || '').trim();
+  if (needle) {
+    const found = servers.find((entry) => entry.id === needle || entry.guildId === needle);
+    if (found) return found;
+  }
+  return activeDiscordServer(discord);
+}
+
+export function scopedServerId(bot, item) {
+  const found = resolveDiscordServer(bot?.discord, item?.serverId);
+  if (found) return found.id;
+  return activeDiscordServer(bot?.discord)?.id || '';
+}
+
+export function itemMatchesGuild(bot, item, guildId) {
+  const server = resolveDiscordServer(bot?.discord, scopedServerId(bot, item));
+  const target = String(guildId || '').trim();
+  if (!server || !target) return false;
+  return String(server.id) === target || String(server.guildId) === target;
+}
