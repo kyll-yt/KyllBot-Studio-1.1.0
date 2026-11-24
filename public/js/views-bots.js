@@ -493,11 +493,19 @@ function viewBotDetail(id) {
     const activeServer = servers.find((server) => server.id === activeKey || server.guildId === activeKey) || servers[0] || null;
     const runtime = bot.runtime || {};
     const serverName = activeServer?.guildName || activeServer?.name || 'Aucun serveur';
+    const knownGuilds = Array.isArray(bot.discordAccount?.guilds) ? bot.discordAccount.guilds : [];
+    const unconfiguredGuilds = knownGuilds.filter((guild) => !servers.some((server) => server.guildId === guild.id));
+    const inviteUrl = botInviteUrl(bot);
     body = `<div class="panel" style="margin-bottom:14px">
       <div class="panel-head">
         <h3>Serveur des commandes</h3>
         <div class="ph-actions">
           <span class="pill ${activeServer ? 'green' : 'gray'}">${esc(serverName)}</span>
+          ${
+            inviteUrl
+              ? `<a class="btn btn-ghost btn-sm" href="${esc(inviteUrl)}" target="_blank" rel="noopener noreferrer">${icon('plus')} Ajouter le bot</a>`
+              : `<button class="btn btn-ghost btn-sm" data-action="bot-tab" data-tab="settings">${icon('key')} Ajouter le token</button>`
+          }
           <button class="btn btn-ghost btn-sm" data-action="sync-bot-commands" data-id="${esc(bot.id)}">${icon('shuffle')} Synchroniser</button>
         </div>
       </div>
@@ -527,9 +535,26 @@ function viewBotDetail(id) {
                 <button class="btn btn-primary btn-sm" data-action="bot-tab" data-tab="settings">Ouvrir les paramètres</button>
               </div>`
         }
+        ${
+          unconfiguredGuilds.length
+            ? `<div class="server-connect">
+                <span class="hint">Serveurs où le bot est déjà présent, mais pas encore configurés :</span>
+                ${unconfiguredGuilds
+                  .map(
+                    (guild) => `<button class="btn btn-ghost btn-sm" data-action="bot-connect-server" data-id="${esc(bot.id)}" data-guild="${esc(guild.id)}">${icon('plus')} Configurer ${esc(guild.name)}</button>`,
+                  )
+                  .join('')}
+              </div>`
+            : ''
+        }
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px">
           <span class="hint" style="margin:0">${runtime.lastSyncAt ? `Dernière synchro : ${esc(timeAgo(runtime.lastSyncAt))} · ${runtime.commandCount || 0} commande(s)` : 'Pas encore synchronisé avec Discord.'}</span>
         </div>
+        <p class="hint" style="margin-top:8px">${
+          inviteUrl
+            ? 'Le bot n’est pas encore sur ton serveur ? Clique sur « Ajouter le bot », choisis le serveur, puis reviens ici et clique sur « Synchroniser ».'
+            : 'Ajoute le token du bot dans Paramètres pour générer le lien d’invitation vers un nouveau serveur.'
+        }</p>
         ${runtime.warning ? `<p class="hint" style="color:#fde68a;margin-top:6px">${esc(runtime.warning)}</p>` : ''}
         ${runtime.lastError ? `<p class="hint" style="color:#fda4af;margin-top:6px">Dernière erreur : ${esc(runtime.lastError)}</p>` : ''}
       </div>
@@ -616,6 +641,7 @@ function viewBotDetail(id) {
             ? 'Erreur de connexion'
             : 'Hors ligne';
     const knownGuilds = Array.isArray(bot.discordAccount?.guilds) ? bot.discordAccount.guilds : [];
+    const inviteUrl = botInviteUrl(bot);
     body = `<div class="panel">
       <div class="panel-head"><h3>Paramètres du bot</h3></div>
       <div class="panel-body">
@@ -644,6 +670,7 @@ function viewBotDetail(id) {
       <div class="panel-head">
         <h3>Serveur Discord</h3>
         <div class="ph-actions">
+          ${inviteUrl ? `<a class="btn btn-ghost btn-sm" href="${esc(inviteUrl)}" target="_blank" rel="noopener noreferrer">${icon('plus')} Ajouter le bot à un serveur</a>` : ''}
           <button class="btn btn-ghost btn-sm" data-action="bot-sync-discord" data-id="${esc(bot.id)}">${icon('shuffle')} Synchroniser depuis Discord</button>
           <span class="pill violet">${discord.channels.length} salon(s) · ${discord.categories.length} catégorie(s)</span>
         </div>
@@ -1255,6 +1282,15 @@ const COMMAND_PRESETS = [
   },
 ];
 
+const BOT_INVITE_PERMISSIONS = '1100454816983';
+
+function botInviteUrl(bot, guildId = '') {
+  const appId = String(bot?.discordAccount?.id || bot?.runtime?.userId || '').trim();
+  if (!/^\d{17,20}$/.test(appId)) return '';
+  const guild = guildId ? `&guild_id=${encodeURIComponent(guildId)}&disable_guild_select=true` : '';
+  return `https://discord.com/oauth2/authorize?client_id=${appId}&permissions=${BOT_INVITE_PERMISSIONS}&scope=bot%20applications.commands${guild}`;
+}
+
 function commandServerName(bot) {
   const discord = bot?.discord || {};
   const servers = Array.isArray(discord.servers) && discord.servers.length ? discord.servers : discord.guildId ? [discord] : [];
@@ -1594,7 +1630,16 @@ onAction('bot-connect-server', async (el) => {
   if (!bot) return;
   try {
     const result = await api(`/api/bots/${bot.id}/discord/sync`, { method: 'POST', body: JSON.stringify({ guildId: el.dataset.guild }) });
-    toast(`${result.guildName || 'Serveur'} connecté : ${result.channels} salons et ${result.roles} rôles.`, 'success');
+    let commandInfo = '';
+    let tone = 'success';
+    try {
+      const sync = await api(`/api/bots/${bot.id}/commands/sync`, { method: 'POST' });
+      commandInfo = ` ${sync.count} commande(s) enregistrée(s).`;
+    } catch (error) {
+      commandInfo = ` Commandes non synchronisées : ${error.message}`;
+      tone = 'info';
+    }
+    toast(`${result.guildName || 'Serveur'} connecté : ${result.channels} salons et ${result.roles} rôles.${commandInfo}`, tone);
     await refresh();
   } catch (error) {
     toast(error.message, 'error');
