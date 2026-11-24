@@ -26,6 +26,7 @@ import ffmpegPath from 'ffmpeg-static';
 import { db, persist } from './db.js';
 import { recordEvent } from './activity.js';
 import { formatDuration, formatSignedDuration, normalizeModalFields, parseDurationInput, runFlow } from './flows.js';
+import { cleanAIPrompt, localAIResponse } from './local-ai.js';
 import { decryptSecret } from './secrets.js';
 import { safeFetch } from './url-safety.js';
 import { activeDiscordServer, upsertDiscordServer } from './discord.js';
@@ -679,21 +680,16 @@ function scheduleGiveaway({ message, channel, prize, winners, emoji, duration })
   timer.unref?.();
 }
 
-function localAIResponse(prompt) {
-  const clean = String(prompt || '').replace(/\s+/g, ' ').trim();
-  const excerpt = clean.slice(0, 280);
-  const lower = clean.toLowerCase();
-  if (!clean) return 'Je suis là, mais je n’ai pas reçu de question. Écris-moi ce que tu veux savoir.';
-  if (/^(bonjour|salut|hello|hey)\b/.test(lower)) return 'Bonjour ! Je suis l’assistant IA de KyllBot Studio. Pose-moi ta question et je te répondrai.';
-  if (lower.includes('qui es-tu') || lower.includes('qui es tu')) return 'Je suis l’assistant IA intégré à KyllBot Studio. Je réponds aux messages de ton serveur sans clé API obligatoire.';
-  if (lower.includes('merci')) return 'Avec plaisir ! Si tu as une autre question, je suis là.';
-  return `Je fonctionne en mode local sans API. J’ai bien reçu : « ${excerpt} ». Pour une réponse plus détaillée, active le mode automatique avec Internet ou ajoute une clé OpenAI dans les paramètres du serveur.`;
-}
+const AI_SYSTEM_PROMPT =
+  'Tu es KyllBot, un assistant francophone intégré à KyllBot Studio, un outil pour créer des bots Discord. ' +
+  'Réponds toujours en français, de façon naturelle, chaleureuse et concise (2 à 4 phrases). ' +
+  'Ne parle jamais de clé API, de mode local, de limitations techniques ou de service externe.';
 
 async function askAI({ model, prompt, maxTokens, provider = 'auto' }) {
   const key = process.env.OPENAI_API_KEY;
+  const userPrompt = cleanAIPrompt(prompt);
   const mode = provider === 'local' ? 'local' : provider === 'openai' ? (key ? 'openai' : 'local') : (key ? 'openai' : 'free');
-  if (mode === 'local') return localAIResponse(prompt);
+  if (mode === 'local') return localAIResponse(userPrompt);
 
   if (mode === 'openai') {
     try {
@@ -702,7 +698,10 @@ async function askAI({ model, prompt, maxTokens, provider = 'auto' }) {
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: model || 'gpt-4o-mini',
-          messages: [{ role: 'user', content: prompt }],
+          messages: [
+            { role: 'system', content: AI_SYSTEM_PROMPT },
+            { role: 'user', content: userPrompt },
+          ],
           max_tokens: Math.min(Math.max(Number(maxTokens) || 300, 50), 4000),
         }),
         signal: AbortSignal.timeout(20000),
@@ -714,7 +713,7 @@ async function askAI({ model, prompt, maxTokens, provider = 'auto' }) {
     } catch {
       // The local fallback keeps the flow alive when the API is unavailable.
     }
-    return localAIResponse(prompt);
+    return localAIResponse(userPrompt);
   }
 
   try {
@@ -723,9 +722,13 @@ async function askAI({ model, prompt, maxTokens, provider = 'auto' }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'openai',
-        messages: [{ role: 'user', content: prompt }],
+        messages: [
+          { role: 'system', content: AI_SYSTEM_PROMPT },
+          { role: 'user', content: userPrompt },
+        ],
+        max_tokens: Math.min(Math.max(Number(maxTokens) || 300, 50), 1000),
       }),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(20000),
     });
     if (response.ok) {
       const data = await response.json();
@@ -735,7 +738,7 @@ async function askAI({ model, prompt, maxTokens, provider = 'auto' }) {
   } catch {
     // Fall back to a local answer when the no-key service is unreachable.
   }
-  return localAIResponse(prompt);
+  return localAIResponse(userPrompt);
 }
 
 async function deliverFlowPayload({ output, target, payload, member, interaction, interactionUsed }) {

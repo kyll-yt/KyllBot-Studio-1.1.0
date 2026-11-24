@@ -12,6 +12,7 @@ const APP_CHANGELOG = [
     date: '2026-11-21',
     title: 'Variantes de commandes et connexion sécurisée',
     items: [
+      'Correction du bloc « Réponse IA » : réponses locales naturelles, sans message répétitif sur l’API.',
       'Chaque commande peut contenir jusqu’à 20 variantes de réponse, tirées au hasard selon un poids configurable.',
       'Connexion email renforcée : limitation des tentatives, comparaison sécurisée des codes et code de démonstration masqué en production.',
       'Les blocs webhook et musique refusent les adresses locales ou privées.',

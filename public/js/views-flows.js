@@ -524,7 +524,7 @@ function flowNewBlock(type, x = 120, y = 120) {
     case 'forumDelete':
       return { ...base, channel: '', post: '', message: 'last' };
     case 'ai':
-      return { ...base, channel: '', prompt: 'Réponds à {{message}}', provider: 'auto', model: 'gpt-4o-mini', maxTokens: 300, variable: 'ia' };
+      return { ...base, channel: '', prompt: '{{message}}', provider: 'auto', model: 'gpt-4o-mini', maxTokens: 300, variable: 'ia' };
     case 'image':
       return { ...base, channel: '', url: '', alt: '' };
     case 'music':
@@ -1198,7 +1198,7 @@ function flowBlockRows(block) {
       return flowSummaryRows([['Post', block.post || 'post actuel'], ['Message', block.message || 'dernier']]);
     case 'ai':
       return flowSummaryRows([
-        ['Mode', block.provider === 'local' ? 'local sans API' : block.provider === 'openai' ? 'OpenAI (clé serveur)' : 'automatique sans clé'],
+        ['Mode', block.provider === 'local' ? 'réponses intégrées' : block.provider === 'openai' ? 'OpenAI (clé serveur)' : 'automatique sans clé'],
         ['Modèle', block.model || 'gpt-4o-mini'],
         ['Invite', block.prompt],
         ['Variable', block.variable],
@@ -2162,7 +2162,7 @@ function renderNodeFields(block) {
           ${nodeField('Mode IA', `<select class="select" ${bind('provider')}>
             <option value="auto" ${provider === 'auto' ? 'selected' : ''}>Automatique — sans clé</option>
             <option value="openai" ${provider === 'openai' ? 'selected' : ''}>OpenAI — clé serveur</option>
-            <option value="local" ${provider === 'local' ? 'selected' : ''}>Local — sans Internet</option>
+            <option value="local" ${provider === 'local' ? 'selected' : ''}>Local — réponses intégrées</option>
           </select>`, 'grow')}
           ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel), 'grow')}
         </div>
@@ -2173,11 +2173,11 @@ function renderNodeFields(block) {
           </select>`, 'grow')}
           ${nodeField('Variable', `<input class="input" ${bind('variable')} value="${esc(block.variable || '')}" placeholder="ia">`, 'shrink')}
         </div>
-        ${nodeField('Invite / prompt', `<textarea class="textarea" rows="3" ${bind('prompt')} placeholder="Réponds à {{message}}">${esc(block.prompt)}</textarea>`)}
+        ${nodeField('Invite / prompt', `<textarea class="textarea" rows="3" ${bind('prompt')} placeholder="{{message}}">${esc(block.prompt)}</textarea>`)}
         <div class="fld-row">
           ${nodeField('Tokens max', `<input class="input" type="number" min="50" max="4000" ${bind('maxTokens')} value="${block.maxTokens || 300}">`, 'shrink')}
         </div>
-        <p class="hint">Aucune clé API n’est obligatoire. Le mode automatique utilise l’IA intégrée sans clé ; si Internet ou le service est indisponible, une réponse locale est générée. Le mode OpenAI utilise la clé du serveur si elle existe.</p>`;
+        <p class="hint">Le mode automatique fonctionne sans configuration. S’il n’y a pas d’Internet, KyllBot utilise ses réponses intégrées. Le mode OpenAI est réservé aux serveurs qui ont une clé.</p>`;
     }
     case 'image':
       return `<div class="fld-row">
@@ -2854,7 +2854,7 @@ function renderOutput(output) {
     return `<div class="dc-effect">${icon('message')} Post forum <b>${esc(output.title)}</b>${output.tags ? ` · ${esc(output.tags)}` : ''}</div>`;
   }
   if (output.kind === 'ai') {
-    const mode = output.provider === 'local' ? 'local sans API' : output.provider === 'openai' ? 'API serveur' : 'sans clé';
+    const mode = output.provider === 'local' ? 'réponses intégrées' : output.provider === 'openai' ? 'API serveur' : 'sans clé';
     return `<div class="dc-ai">
       <div class="dc-ai-head">${icon('spark')} <b>Réponse IA</b><span>${esc(output.model)}</span><span class="dc-sim">${esc(mode)}</span></div>
       <p>${esc(output.text)}</p>
