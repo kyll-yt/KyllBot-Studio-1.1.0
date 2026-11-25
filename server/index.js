@@ -20,10 +20,12 @@ import {
   googleAuthUrl,
   googleConfigured,
   googleRedirectUri,
+  loginWithPassword,
   mailConfigured,
   mailMode,
   parseCookies,
   publicUser,
+  registerWithPassword,
   requireAuth,
   requestLoginCode,
   sessionCookie,
@@ -741,6 +743,7 @@ function workspacePayload(user, req) {
       google: googleConfigured,
       mail: mailConfigured,
       mailMode,
+      passwordSignup: !mailConfigured || process.env.ALLOW_PASSWORD_SIGNUP === '1',
       googleRedirectUri: req ? googleRedirectUri(req) : '',
       discordOAuthRedirectUri: req ? discordOAuthRedirectUri(req) : '',
     },
@@ -756,6 +759,7 @@ app.get('/api/auth/config', (req, res) => {
     google: googleConfigured,
     mail: mailConfigured,
     mailMode,
+    passwordSignup: !mailConfigured || process.env.ALLOW_PASSWORD_SIGNUP === '1',
     devLogin: devLoginEnabled,
     demo: true,
     googleRedirectUri: googleRedirectUri(req),
@@ -776,6 +780,18 @@ app.post(
   wrap(async (req, res) => {
     const result = verifyLoginCode(req.body?.email, req.body?.code, req);
     res.json(result);
+  }),
+);
+
+app.post(
+  '/api/auth/password',
+  wrap(async (req, res) => {
+    const mode = req.body?.mode === 'register' ? 'register' : 'login';
+    const result = mode === 'register'
+      ? registerWithPassword(req.body?.email, req.body?.password, req)
+      : loginWithPassword(req.body?.email, req.body?.password, req);
+    res.setHeader('Set-Cookie', [sessionCookie(result.token), clearDemoCookie()]);
+    res.json({ user: result.user, mode });
   }),
 );
 

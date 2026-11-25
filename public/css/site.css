@@ -833,6 +833,11 @@ section[id] { scroll-margin-top: 92px; }
 
 .auth-mail-note { margin: 10px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--muted-2); }
 .auth-mail-note.warn { color: #fbbf24; }
+.auth-alt { margin: 12px 0 0; text-align: center; }
+.auth-alt .link-btn { font-size: 12.5px; }
+#passwordModeToggle, #passwordBack { display: block; margin: 14px auto 0; }
+#passwordBack { margin-top: 10px; }
+#passwordModeToggle[hidden], #passwordBack[hidden] { display: none; }
 .dev-note {
   margin-top: 14px;
   border: 1px dashed rgba(251, 191, 36, 0.4);

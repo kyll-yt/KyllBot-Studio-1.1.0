@@ -7,7 +7,19 @@ const els = {
   emailForm: document.getElementById('emailForm'),
   email: document.getElementById('email'),
   emailSubmit: document.getElementById('emailSubmit'),
+  emailCodeBox: document.getElementById('emailCodeBox'),
   mailNote: document.getElementById('mailNote'),
+  passwordBox: document.getElementById('passwordBox'),
+  passwordForm: document.getElementById('passwordForm'),
+  passwordEmail: document.getElementById('passwordEmail'),
+  password: document.getElementById('password'),
+  passwordConfirm: document.getElementById('passwordConfirm'),
+  passwordConfirmField: document.getElementById('passwordConfirmField'),
+  passwordSubmit: document.getElementById('passwordSubmit'),
+  passwordModeToggle: document.getElementById('passwordModeToggle'),
+  passwordBack: document.getElementById('passwordBack'),
+  passwordNote: document.getElementById('passwordNote'),
+  showPassword: document.getElementById('showPassword'),
   emailDisplay: document.getElementById('emailDisplay'),
   codeForm: document.getElementById('codeForm'),
   codeRow: document.getElementById('codeRow'),
@@ -42,7 +54,22 @@ const els = {
   ownerSubmit: document.getElementById('ownerSubmit'),
 };
 
-const state = { email: '', google: false, mail: false, devLogin: false, timer: null, busy: false, ticket: '', mode: 'setup', recoveryActive: false, recoveryCode: '', emailVerified: false };
+const state = {
+  email: '',
+  google: false,
+  mail: false,
+  passwordSignup: false,
+  passwordMode: false,
+  passwordRegister: false,
+  devLogin: false,
+  timer: null,
+  busy: false,
+  ticket: '',
+  mode: 'setup',
+  recoveryActive: false,
+  recoveryCode: '',
+  emailVerified: false,
+};
 const inputs = [...els.codeRow.querySelectorAll('input')];
 
 function showError(message) {
@@ -69,7 +96,34 @@ function showStep(name) {
   clearError();
   if (name === 'code') setTimeout(() => inputs[0].focus(), 120);
   else if (name === 'security') setTimeout(() => els.securityCode.focus(), 120);
-  else if (name === 'email') els.email.focus();
+  else if (name === 'email') (state.passwordMode ? els.passwordEmail : els.email).focus();
+}
+
+function renderPasswordMode() {
+  const active = state.passwordMode;
+  const register = active && state.passwordRegister;
+  els.emailCodeBox.hidden = active;
+  els.passwordBox.hidden = !active;
+  els.showPassword.hidden = active;
+  els.passwordBack.hidden = !state.mail;
+  els.passwordModeToggle.hidden = !state.passwordSignup;
+  els.passwordConfirmField.hidden = !register;
+  els.passwordConfirm.required = register;
+  els.password.autocomplete = register ? 'new-password' : 'current-password';
+  els.passwordSubmit.textContent = register ? 'Créer mon compte' : 'Se connecter';
+  els.passwordModeToggle.textContent = register ? 'J’ai déjà un compte' : 'Créer un compte';
+  els.passwordNote.textContent = register
+    ? '8 caractères minimum. Ton compte est prêt immédiatement.'
+    : 'Entre ton email et ton mot de passe.';
+}
+
+function setPasswordMode(active, register = false) {
+  state.passwordMode = active;
+  state.passwordRegister = Boolean(active && register && state.passwordSignup);
+  if (active && !els.passwordEmail.value && els.email.value) els.passwordEmail.value = els.email.value;
+  renderPasswordMode();
+  clearError();
+  (active ? els.passwordEmail : els.email).focus();
 }
 
 function setBusy(button, busy, label) {
@@ -138,6 +192,54 @@ async function requestCode(email) {
   startCountdown(30);
   return true;
 }
+
+els.passwordForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  clearError();
+  const email = els.passwordEmail.value.trim();
+  const password = els.password.value;
+  const confirm = els.passwordConfirm.value;
+  if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(email)) {
+    showError('Entrez une adresse email valide.');
+    els.passwordEmail.focus();
+    return;
+  }
+  if (password.length < 8) {
+    showError('Le mot de passe doit contenir au moins 8 caractères.');
+    els.password.focus();
+    return;
+  }
+  if (state.passwordRegister && password !== confirm) {
+    showError('Les deux mots de passe ne correspondent pas.');
+    els.passwordConfirm.focus();
+    return;
+  }
+  setBusy(els.passwordSubmit, true, state.passwordRegister ? 'Création…' : 'Connexion…');
+  try {
+    await api('/api/auth/password', {
+      method: 'POST',
+      body: JSON.stringify({
+        email,
+        password,
+        mode: state.passwordRegister ? 'register' : 'login',
+      }),
+    });
+    els.passwordSubmit.textContent = 'Bienvenue ! Redirection…';
+    window.location.href = '/app';
+  } catch (error) {
+    showError(error.message);
+    els.password.value = '';
+    els.passwordConfirm.value = '';
+    els.password.focus();
+    setBusy(els.passwordSubmit, false);
+  }
+});
+
+els.passwordModeToggle.addEventListener('click', () => setPasswordMode(true, !state.passwordRegister));
+
+els.passwordBack.addEventListener('click', () => setPasswordMode(false, false));
+
+els.showPassword.addEventListener('click', () => setPasswordMode(true, state.passwordSignup && !state.mail));
 
 els.emailForm.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -469,10 +571,16 @@ els.ownerForm?.addEventListener('submit', async (event) => {
     const config = await api('/api/auth/config');
     state.google = Boolean(config.google);
     state.mail = Boolean(config.mail);
+    state.passwordSignup = Boolean(config.passwordSignup);
     state.devLogin = Boolean(config.devLogin);
     els.googleBtn.title = state.google
       ? 'Se connecter avec Google'
       : 'Google OAuth non configuré sur cette instance';
+    if (!state.mail) {
+      state.passwordMode = true;
+      state.passwordRegister = state.passwordSignup;
+    }
+    renderPasswordMode();
     if (els.mailNote) {
       els.mailNote.hidden = false;
       els.mailNote.classList.toggle('warn', !state.mail);
@@ -486,5 +594,5 @@ els.ownerForm?.addEventListener('submit', async (event) => {
     state.google = false;
   }
 
-  els.email.focus();
+  (state.passwordMode ? els.passwordEmail : els.email).focus();
 })();

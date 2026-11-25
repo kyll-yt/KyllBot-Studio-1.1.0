@@ -85,6 +85,25 @@ function verifyRecoveryCode(user, code) {
   return safeEqualHex(user.recoveryCodeHash, saltedHash(normalizeRecoveryCode(code), user.recoveryCodeSalt));
 }
 
+function setPassword(user, password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  user.passwordSalt = salt;
+  user.passwordHash = saltedHash(password, salt);
+  user.passwordSetAt = new Date().toISOString();
+}
+
+function verifyPassword(user, password) {
+  if (!user?.passwordHash || !user.passwordSalt) return false;
+  return safeEqualHex(user.passwordHash, saltedHash(password, user.passwordSalt));
+}
+
+function validatePassword(password) {
+  const value = String(password || '');
+  if (value.length < 8) throw Object.assign(new Error('Le mot de passe doit contenir au moins 8 caractères.'), { status: 400 });
+  if (value.length > 200) throw Object.assign(new Error('Le mot de passe est trop long.'), { status: 400 });
+  return value;
+}
+
 const pendingLogins = new Map();
 
 function cleanupPendingLogins() {
@@ -169,6 +188,49 @@ export function completeSecurityChallenge(ticket, input = {}, req) {
 
 export function allowDemoLogin(ip) {
   return rateLimit(`demo:${ip || 'unknown'}`, 20, 60 * 60e3);
+}
+
+export function registerWithPassword(rawEmail, password, req) {
+  const email = normalizeEmail(rawEmail);
+  if (!isValidEmail(email)) throw Object.assign(new Error('Adresse email invalide.'), { status: 400 });
+  if (mailConfigured && process.env.ALLOW_PASSWORD_SIGNUP !== '1') {
+    throw Object.assign(new Error('La création par mot de passe est désactivée. Utilise le code reçu par email.'), { status: 403 });
+  }
+  if (!rateLimit(`password-register:${email}`, 5, 15 * 60e3)) {
+    throw Object.assign(new Error('Trop de tentatives. Réessaie dans quelques minutes.'), { status: 429 });
+  }
+  if (!rateLimit(`password-ip:${req?.ip || 'unknown'}`, 30, 60 * 60e3)) {
+    throw Object.assign(new Error('Trop de tentatives depuis cette connexion.'), { status: 429 });
+  }
+  if (findUserByEmail(email)) {
+    throw Object.assign(new Error('Un compte existe déjà avec cet email. Connecte-toi.'), { status: 409 });
+  }
+  const value = validatePassword(password);
+  const user = findOrCreateUser(email, { provider: 'password' });
+  setPassword(user, value);
+  user.emailVerified = false;
+  persist();
+  const session = createSession(user.id, req);
+  return { user: publicUser(user), token: session.token };
+}
+
+export function loginWithPassword(rawEmail, password, req) {
+  const email = normalizeEmail(rawEmail);
+  if (!isValidEmail(email)) throw Object.assign(new Error('Adresse email invalide.'), { status: 400 });
+  if (!rateLimit(`password-login:${email}`, 10, 15 * 60e3)) {
+    throw Object.assign(new Error('Trop de tentatives. Réessaie dans quelques minutes.'), { status: 429 });
+  }
+  if (!rateLimit(`password-ip:${req?.ip || 'unknown'}`, 30, 60 * 60e3)) {
+    throw Object.assign(new Error('Trop de tentatives depuis cette connexion.'), { status: 429 });
+  }
+  const user = findUserByEmail(email);
+  if (!user || !verifyPassword(user, String(password || ''))) {
+    throw Object.assign(new Error('Email ou mot de passe incorrect.'), { status: 401 });
+  }
+  user.lastLoginAt = new Date().toISOString();
+  persist();
+  const session = createSession(user.id, req);
+  return { user: publicUser(user), token: session.token };
 }
 
 export function normalizeEmail(email) {
@@ -456,6 +518,8 @@ export function publicUser(user) {
     provider: user.provider,
     createdAt: user.createdAt,
     lastLoginAt: user.lastLoginAt,
+    hasPassword: Boolean(user.passwordHash),
+    emailVerified: user.emailVerified !== false,
     hasSecurityCode: Boolean(user.securityCodeHash),
     securityCodeSetAt: user.securityCodeSetAt || null,
   };
