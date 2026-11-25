@@ -122,6 +122,11 @@
                 <label for="passwordConfirm">Confirme ton mot de passe</label>
                 <input class="input" type="password" id="passwordConfirm" name="confirm" placeholder="Retape ton mot de passe" autocomplete="new-password" minlength="8" />
               </div>
+              <div class="field" id="passwordSecurityField" hidden>
+                <label for="passwordSecurityCode">Code de sécurité ou code de secours</label>
+                <input class="input" type="text" id="passwordSecurityCode" name="securityCode" placeholder="123456 ou KB-XXXX-XXXX-XXXX" autocomplete="one-time-code" />
+                <p class="auth-field-hint">Celui que tu as créé lors de ta première connexion.</p>
+              </div>
               <button class="btn btn-primary btn-block" type="submit" id="passwordSubmit">Se connecter</button>
               <button class="link-btn" type="button" id="passwordModeToggle">Créer un compte</button>
               <button class="link-btn" type="button" id="passwordBack">Recevoir un code par email</button>

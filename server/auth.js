@@ -190,7 +190,11 @@ export function allowDemoLogin(ip) {
   return rateLimit(`demo:${ip || 'unknown'}`, 20, 60 * 60e3);
 }
 
-export function registerWithPassword(rawEmail, password, req) {
+function authError(message, status, code) {
+  return Object.assign(new Error(message), { status, code });
+}
+
+export function registerWithPassword(rawEmail, password, req, securityCode = '') {
   const email = normalizeEmail(rawEmail);
   if (!isValidEmail(email)) throw Object.assign(new Error('Adresse email invalide.'), { status: 400 });
   if (mailConfigured && process.env.ALLOW_PASSWORD_SIGNUP !== '1') {
@@ -202,10 +206,33 @@ export function registerWithPassword(rawEmail, password, req) {
   if (!rateLimit(`password-ip:${req?.ip || 'unknown'}`, 30, 60 * 60e3)) {
     throw Object.assign(new Error('Trop de tentatives depuis cette connexion.'), { status: 429 });
   }
-  if (findUserByEmail(email)) {
-    throw Object.assign(new Error('Un compte existe déjà avec cet email. Connecte-toi.'), { status: 409 });
-  }
   const value = validatePassword(password);
+  const existing = findUserByEmail(email);
+  if (existing) {
+    const hasSecondFactor = Boolean(existing.securityCodeHash || existing.recoveryCodeHash);
+    const provided = String(securityCode || '').trim();
+    if (hasSecondFactor) {
+      if (!provided) {
+        throw authError(
+          existing.passwordHash
+            ? 'Ce compte existe déjà. Entre ton code de sécurité ou ton code de secours pour choisir un nouveau mot de passe.'
+            : 'Ce compte existe déjà. Entre ton code de sécurité ou ton code de secours pour activer ton mot de passe.',
+          409,
+          'SECURITY_CODE_REQUIRED',
+        );
+      }
+      if (!verifySecurityCode(existing, provided) && !verifyRecoveryCode(existing, provided)) {
+        throw authError('Code de sécurité ou code de secours incorrect.', 401, 'INVALID_SECURITY_CODE');
+      }
+    } else if (existing.passwordHash) {
+      throw authError('Un compte existe déjà avec cet email. Connecte-toi.', 409, 'ACCOUNT_EXISTS');
+    }
+    setPassword(existing, value);
+    existing.lastLoginAt = new Date().toISOString();
+    persist();
+    const session = createSession(existing.id, req);
+    return { user: publicUser(existing), token: session.token };
+  }
   const user = findOrCreateUser(email, { provider: 'password' });
   setPassword(user, value);
   user.emailVerified = false;
@@ -224,7 +251,17 @@ export function loginWithPassword(rawEmail, password, req) {
     throw Object.assign(new Error('Trop de tentatives depuis cette connexion.'), { status: 429 });
   }
   const user = findUserByEmail(email);
-  if (!user || !verifyPassword(user, String(password || ''))) {
+  if (!user) {
+    throw Object.assign(new Error('Email ou mot de passe incorrect.'), { status: 401 });
+  }
+  if (!user.passwordHash) {
+    throw authError(
+      'Ce compte n’a pas encore de mot de passe. Définis-le avec ton code de sécurité.',
+      409,
+      'PASSWORD_NOT_SET',
+    );
+  }
+  if (!verifyPassword(user, String(password || ''))) {
     throw Object.assign(new Error('Email ou mot de passe incorrect.'), { status: 401 });
   }
   user.lastLoginAt = new Date().toISOString();

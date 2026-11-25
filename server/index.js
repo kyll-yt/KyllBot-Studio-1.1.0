@@ -788,7 +788,7 @@ app.post(
   wrap(async (req, res) => {
     const mode = req.body?.mode === 'register' ? 'register' : 'login';
     const result = mode === 'register'
-      ? registerWithPassword(req.body?.email, req.body?.password, req)
+      ? registerWithPassword(req.body?.email, req.body?.password, req, req.body?.securityCode)
       : loginWithPassword(req.body?.email, req.body?.password, req);
     res.setHeader('Set-Cookie', [sessionCookie(result.token), clearDemoCookie()]);
     res.json({ user: result.user, mode });
@@ -2515,7 +2515,10 @@ app.use((error, req, res, next) => {
   const status = error.status || 500;
   if (status >= 500) console.error(error);
   if (res.headersSent) return next(error);
-  res.status(status).json({ error: status >= 500 ? 'Une erreur interne est survenue.' : error.message });
+  res.status(status).json({
+    error: status >= 500 ? 'Une erreur interne est survenue.' : error.message,
+    ...(error.code ? { code: error.code } : {}),
+  });
 });
 
 let migratedAtBoot = false;

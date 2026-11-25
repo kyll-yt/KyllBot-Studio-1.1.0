@@ -15,6 +15,8 @@ const els = {
   password: document.getElementById('password'),
   passwordConfirm: document.getElementById('passwordConfirm'),
   passwordConfirmField: document.getElementById('passwordConfirmField'),
+  passwordSecurityField: document.getElementById('passwordSecurityField'),
+  passwordSecurityCode: document.getElementById('passwordSecurityCode'),
   passwordSubmit: document.getElementById('passwordSubmit'),
   passwordModeToggle: document.getElementById('passwordModeToggle'),
   passwordBack: document.getElementById('passwordBack'),
@@ -61,6 +63,7 @@ const state = {
   passwordSignup: false,
   passwordMode: false,
   passwordRegister: false,
+  passwordNeedsSecurity: false,
   devLogin: false,
   timer: null,
   busy: false,
@@ -102,6 +105,7 @@ function showStep(name) {
 function renderPasswordMode() {
   const active = state.passwordMode;
   const register = active && state.passwordRegister;
+  const needsSecurity = register && state.passwordNeedsSecurity;
   els.emailCodeBox.hidden = active;
   els.passwordBox.hidden = !active;
   els.showPassword.hidden = active;
@@ -109,17 +113,23 @@ function renderPasswordMode() {
   els.passwordModeToggle.hidden = !state.passwordSignup;
   els.passwordConfirmField.hidden = !register;
   els.passwordConfirm.required = register;
+  els.passwordSecurityField.hidden = !needsSecurity;
+  els.passwordSecurityCode.required = needsSecurity;
   els.password.autocomplete = register ? 'new-password' : 'current-password';
   els.passwordSubmit.textContent = register ? 'Créer mon compte' : 'Se connecter';
   els.passwordModeToggle.textContent = register ? 'J’ai déjà un compte' : 'Créer un compte';
-  els.passwordNote.textContent = register
-    ? '8 caractères minimum. Ton compte est prêt immédiatement.'
-    : 'Entre ton email et ton mot de passe.';
+  els.passwordNote.textContent = needsSecurity
+    ? 'Entre ton code de sécurité ou ton code de secours, puis choisis un mot de passe.'
+    : register
+      ? '8 caractères minimum. Ton compte est prêt immédiatement.'
+      : 'Entre ton email et ton mot de passe.';
 }
 
 function setPasswordMode(active, register = false) {
   state.passwordMode = active;
   state.passwordRegister = Boolean(active && register && state.passwordSignup);
+  state.passwordNeedsSecurity = false;
+  els.passwordSecurityCode.value = '';
   if (active && !els.passwordEmail.value && els.email.value) els.passwordEmail.value = els.email.value;
   renderPasswordMode();
   clearError();
@@ -148,7 +158,11 @@ async function api(url, options = {}) {
   } catch {
     /* réponse vide */
   }
-  if (!response.ok) throw new Error(payload.error || 'Une erreur est survenue.');
+  if (!response.ok) {
+    const error = new Error(payload.error || 'Une erreur est survenue.');
+    error.code = payload.code || '';
+    throw error;
+  }
   return payload;
 }
 
@@ -199,6 +213,7 @@ els.passwordForm.addEventListener('submit', async (event) => {
   const email = els.passwordEmail.value.trim();
   const password = els.password.value;
   const confirm = els.passwordConfirm.value;
+  const securityCode = els.passwordSecurityCode.value.trim();
   if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(email)) {
     showError('Entrez une adresse email valide.');
     els.passwordEmail.focus();
@@ -214,6 +229,11 @@ els.passwordForm.addEventListener('submit', async (event) => {
     els.passwordConfirm.focus();
     return;
   }
+  if (state.passwordNeedsSecurity && !securityCode) {
+    showError('Entre ton code de sécurité ou ton code de secours.');
+    els.passwordSecurityCode.focus();
+    return;
+  }
   setBusy(els.passwordSubmit, true, state.passwordRegister ? 'Création…' : 'Connexion…');
   try {
     await api('/api/auth/password', {
@@ -221,17 +241,35 @@ els.passwordForm.addEventListener('submit', async (event) => {
       body: JSON.stringify({
         email,
         password,
+        securityCode,
         mode: state.passwordRegister ? 'register' : 'login',
       }),
     });
     els.passwordSubmit.textContent = 'Bienvenue ! Redirection…';
     window.location.href = '/app';
   } catch (error) {
-    showError(error.message);
-    els.password.value = '';
-    els.passwordConfirm.value = '';
-    els.password.focus();
     setBusy(els.passwordSubmit, false);
+    if (error.code === 'PASSWORD_NOT_SET' || error.code === 'SECURITY_CODE_REQUIRED') {
+      state.passwordMode = true;
+      state.passwordRegister = true;
+      state.passwordNeedsSecurity = true;
+      if (!els.passwordConfirm.value) els.passwordConfirm.value = password;
+      renderPasswordMode();
+      showError(error.message);
+      els.passwordSecurityCode.focus();
+      return;
+    }
+    if (error.code === 'ACCOUNT_EXISTS') {
+      setPasswordMode(true, false);
+      showError(error.message);
+      return;
+    }
+    showError(error.message);
+    if (error.code === 'INVALID_SECURITY_CODE') {
+      els.passwordSecurityCode.focus();
+      return;
+    }
+    els.password.focus();
   }
 });
 
