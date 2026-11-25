@@ -29,7 +29,7 @@ import { formatDuration, formatSignedDuration, normalizeModalFields, parseDurati
 import { cleanAIPrompt, localAIResponse } from './local-ai.js';
 import { decryptSecret } from './secrets.js';
 import { safeFetch } from './url-safety.js';
-import { activeDiscordServer, itemMatchesGuild, scopedServerId, upsertDiscordServer } from './discord.js';
+import { activeDiscordServer, itemMatchesGuild, resolveDiscordServer, scopedServerId, upsertDiscordServer } from './discord.js';
 import { savedMessageHasEmbed } from './messages.js';
 import { scheduledMessageDue } from './scheduled.js';
 import { addServicePenalty, applyServiceTokens, applyServiceTokensDeep, ensureServiceState, safeTimezone, serviceDisplayName, serviceEntry, servicePeriodLabel, serviceResetLabel, serviceTokens, serviceTotals } from './service.js';
@@ -2102,7 +2102,13 @@ function matchReaction(trigger, emoji) {
 }
 
 async function runTriggeredFlows({ bot, ws, type, guild, member, channel, message, interaction, match, vars = {} }) {
-  const flows = (bot.flows || []).filter((flow) => flow.enabled !== false && flow.trigger?.type === type);
+  const guildId = String(guild?.id || '').trim();
+  const flows = (bot.flows || []).filter(
+    (flow) =>
+      flow.enabled !== false &&
+      flow.trigger?.type === type &&
+      (!guildId || itemMatchesGuild(bot, flow, guildId)),
+  );
   let count = 0;
   for (const flow of flows) {
     if (type === 'keyword' && !matchKeyword(flow.trigger, message?.content || '')) continue;
@@ -2115,12 +2121,16 @@ async function runTriggeredFlows({ bot, ws, type, guild, member, channel, messag
   return count;
 }
 
-export async function runAutomationTrigger(botId, automationType, extraVars = {}) {
+export async function runAutomationTrigger(botId, automationType, extraVars = {}, automation = null) {
   const context = getBotContext(botId);
   if (!context) return { count: 0 };
   const { ws, bot } = context;
   const runtime = ensureRuntime(botId);
-  const guild = runtime.client?.guilds?.cache?.get(bot.discord?.guildId) || runtime.client?.guilds?.cache?.first() || null;
+  const server = automation ? resolveDiscordServer(bot.discord, automation.serverId) : activeDiscordServer(bot.discord);
+  const guild =
+    runtime.client?.guilds?.cache?.get(server?.guildId || bot.discord?.guildId) ||
+    runtime.client?.guilds?.cache?.first() ||
+    null;
   const count = await runTriggeredFlows({
     bot,
     ws,
@@ -2646,8 +2656,12 @@ async function sendLog(guild, bot, text, channelName = '') {
 }
 
 
-function enabledAutomation(bot, type) {
-  return (bot.automations || []).find((entry) => entry.enabled && entry.type === type) || null;
+function enabledAutomation(bot, type, guild = null) {
+  return (
+    (bot.automations || []).find(
+      (entry) => entry.enabled && entry.type === type && (!guild || itemMatchesGuild(bot, entry, guild.id)),
+    ) || null
+  );
 }
 
 function channelSnapshot(channel) {
@@ -2857,7 +2871,7 @@ async function handleChannelDelete(botId, channel) {
   const context = getBotContext(botId);
   if (!context) return;
   const { bot } = context;
-  const repair = enabledAutomation(bot, 'repair');
+  const repair = enabledAutomation(bot, 'repair', guild);
   if (!repair || repair.config?.repairChannels === false) return;
   const runtime = ensureRuntime(botId);
   const count = noteDeletion(runtime, guild.id, 'channels', repair.config);
@@ -2880,7 +2894,7 @@ async function handleRoleDelete(botId, role) {
   const context = getBotContext(botId);
   if (!context) return;
   const { bot } = context;
-  const repair = enabledAutomation(bot, 'repair');
+  const repair = enabledAutomation(bot, 'repair', guild);
   if (!repair || repair.config?.repairRoles === false) return;
   const runtime = ensureRuntime(botId);
   const count = noteDeletion(runtime, guild.id, 'roles', repair.config);
@@ -2901,7 +2915,7 @@ async function handleRaidJoin(botId, member) {
   const context = getBotContext(botId);
   if (!context) return false;
   const { ws, bot } = context;
-  const antiRaid = enabledAutomation(bot, 'antiRaid');
+  const antiRaid = enabledAutomation(bot, 'antiRaid', member.guild);
   if (!antiRaid) return false;
   const runtime = ensureRuntime(botId);
   const now = Date.now();
@@ -3032,7 +3046,9 @@ async function handleMessage(botId, message) {
     }
   }
 
-  const automod = (bot.automations || []).find((entry) => entry.enabled && entry.type === 'autoMod' && entry.config?.blockLinks);
+  const automod = (bot.automations || []).find(
+    (entry) => entry.enabled && entry.type === 'autoMod' && entry.config?.blockLinks && itemMatchesGuild(bot, entry, guild.id),
+  );
   if (automod && /(https?:\/\/|discord\.gg\/)/i.test(message.content)) {
     await message.delete().catch(() => {});
     await channel.send({ content: `${message.author}, les liens ne sont pas autorisés ici.` }).catch(() => {});
@@ -3042,7 +3058,10 @@ async function handleMessage(botId, message) {
   }
 
   const antiSpam = (bot.automations || []).find(
-    (entry) => entry.enabled && (entry.type === 'antiSpam' || (entry.type === 'moderation' && entry.config?.antiSpam)),
+    (entry) =>
+      entry.enabled &&
+      (entry.type === 'antiSpam' || (entry.type === 'moderation' && entry.config?.antiSpam)) &&
+      itemMatchesGuild(bot, entry, guild.id),
   );
   if (antiSpam) {
     const key = `${bot.id}:${message.author.id}`;
@@ -3072,7 +3091,7 @@ async function handleMemberAdd(botId, member) {
   const guild = member.guild;
   const raided = await handleRaidJoin(botId, member);
   if (raided) return;
-  const welcome = (bot.automations || []).find((entry) => entry.enabled && entry.type === 'welcome');
+  const welcome = enabledAutomation(bot, 'welcome', guild);
   if (welcome) {
     const channel = resolveChannel(guild, welcome.config?.channel) || guild.systemChannel;
     if (channel) {
@@ -3087,7 +3106,7 @@ async function handleMemberAdd(botId, member) {
       await runTriggeredFlows({ bot, ws, type: 'automation', guild, member, channel, message: null, interaction: null, match: 'welcome', vars: { automation: 'welcome' } });
     }
   }
-  const autorole = (bot.automations || []).find((entry) => entry.enabled && entry.type === 'autorole');
+  const autorole = enabledAutomation(bot, 'autorole', guild);
   if (autorole) {
     const role = resolveRole(guild, autorole.config?.role);
     if (role) {
@@ -3505,10 +3524,11 @@ async function resolveTargetChannel(bot, target, token) {
   if (!ref) throw new Error('Aucun salon configuré pour ce message.');
   if (/^\d{17,20}$/.test(ref)) return { id: ref, name: target.channelName || ref };
 
-  const guildId = String(bot.discord?.guildId || '').trim();
+  const server = resolveDiscordServer(bot.discord, target.serverId);
+  const guildId = String(server?.guildId || bot.discord?.guildId || '').trim();
   if (!guildId) throw new Error('Renseigne l’ID du serveur Discord dans les paramètres du bot.');
   const wanted = ref.replace(/^#/, '').toLowerCase();
-  const known = (bot.discord?.channels || []).find(
+  const known = (server?.channels?.length ? server.channels : bot.discord?.channels || []).find(
     (channel) => channel.id === ref || String(channel.name || '').toLowerCase() === wanted,
   );
   if (known && /^\d{17,20}$/.test(known.id)) return { id: known.id, name: known.name };

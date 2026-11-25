@@ -692,12 +692,14 @@ function flowLayout() {
 /* ------------------------------------------------------------------ */
 
 function viewBotFlows(bot) {
-  const flows = bot.flows || [];
+  const server = activeBotServer(bot);
+  const serverName = server?.guildName || server?.name || 'ce serveur';
+  const flows = server ? (bot.flows || []).filter((flow) => itemServerKey(bot, flow) === server.id) : bot.flows || [];
   const active = flows.filter((flow) => flow.enabled).length;
 
   return `<div class="panel">
     <div class="panel-head">
-      <h3>Flux</h3>
+      <h3>Flux · ${esc(serverName)}</h3>
       <div class="ph-actions">
         <span class="pill violet">${active} actif(s)</span>
         <button class="btn btn-primary btn-sm" data-action="new-flow" data-id="${esc(bot.id)}">${icon('plus')} Nouveau flux</button>
@@ -733,7 +735,7 @@ function viewBotFlows(bot) {
               .join('')}</div>`
           : `<div class="empty" style="padding:38px 20px">
               <div class="ic">${icon('flow')}</div>
-              <h3>Aucun flux</h3>
+              <h3>Aucun flux sur ${esc(serverName)}</h3>
               <p>Un flux part d’un déclencheur puis enchaîne des blocs reliés entre eux.</p>
               <button class="btn btn-primary" data-action="new-flow" data-id="${esc(bot.id)}">Créer un premier flux</button>
             </div>`
@@ -3721,11 +3723,15 @@ onAction('flow-bank-theme', (el) => {
 
 onAction('new-flow', (el) => {
   const botId = el.dataset.id;
+  const bot = state.ws.bots.find((entry) => entry.id === botId);
+  const server = activeBotServer(bot);
+  const serverName = server?.guildName || server?.name || 'Aucun serveur';
   openModal({
     title: 'Nouveau flux',
     subtitle: 'Partez d’un modèle ou d’une page blanche.',
     submitLabel: 'Créer le flux',
-    body: `<div class="field"><label for="nfName">Nom du flux</label><input class="input" id="nfName" name="name" value="Nouveau flux" required></div>
+    body: `<div class="field"><label>Serveur du flux</label><input class="input" value="${esc(serverName)}" disabled><div class="hint">Le flux sera créé uniquement sur ce serveur.</div></div>
+      <div class="field"><label for="nfName">Nom du flux</label><input class="input" id="nfName" name="name" value="Nouveau flux" required></div>
       <div class="field"><label>Modèle</label>
         <div class="template-pick">
           ${FLOW_TEMPLATES.map(
@@ -3742,6 +3748,7 @@ onAction('new-flow', (el) => {
         body: JSON.stringify({
           name: String(formData.get('name') || '').trim(),
           template: String(formData.get('template') || ''),
+          serverId: server?.id || '',
         }),
       });
       const bot = state.ws.bots.find((entry) => entry.id === botId);

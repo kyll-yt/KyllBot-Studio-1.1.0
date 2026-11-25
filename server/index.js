@@ -259,6 +259,16 @@ function migrateWorkspace(ws) {
     const servers = bot.discord?.servers || [];
     const fallbackServerId = servers[0]?.id || activeDiscordServer(bot.discord)?.id || '';
     const serverIds = new Set(servers.flatMap((server) => [server.id, server.guildId]).filter(Boolean));
+    const inferServerId = (values = []) => {
+      const keys = values.map((value) => String(value || '').replace(/^#/, '').trim()).filter(Boolean);
+      if (!keys.length) return '';
+      for (const server of servers) {
+        if ((server.channels || []).some((channel) => keys.includes(String(channel.id)) || keys.includes(String(channel.name)))) return server.id;
+        if ((server.categories || []).some((category) => keys.includes(String(category)))) return server.id;
+        if ((server.roles || []).some((role) => keys.includes(String(role.id)) || keys.includes(String(role.name)))) return server.id;
+      }
+      return '';
+    };
     for (const command of bot.commands || []) {
       if (!command.serverId || !serverIds.has(command.serverId)) {
         command.serverId = fallbackServerId;
@@ -266,8 +276,22 @@ function migrateWorkspace(ws) {
       }
     }
     for (const flow of bot.flows || []) {
-      if (flow.trigger?.type === 'slash' && (!flow.serverId || !serverIds.has(flow.serverId))) {
+      if (!flow.serverId || !serverIds.has(flow.serverId)) {
         flow.serverId = fallbackServerId;
+        changed = true;
+      }
+    }
+    for (const automation of bot.automations || []) {
+      if (!automation.serverId || !serverIds.has(automation.serverId)) {
+        automation.serverId =
+          inferServerId([automation.config?.channel, automation.config?.channelId, automation.config?.category, automation.config?.role]) ||
+          fallbackServerId;
+        changed = true;
+      }
+    }
+    for (const message of bot.scheduledMessages || []) {
+      if (!message.serverId || !serverIds.has(message.serverId)) {
+        message.serverId = inferServerId([message.channelId, message.channelName]) || fallbackServerId;
         changed = true;
       }
     }
@@ -1435,9 +1459,12 @@ app.post(
     const bot = findOr404(ws.bots, req.params.id, 'Bot');
     const type = str(req.body?.type, 40);
     if (!Object.hasOwn(AUTOMATION_TYPE_LABELS, type)) throw bad('Type d’automatisation inconnu.');
+    const targetServer =
+      resolveDiscordServer(bot.discord, req.body?.serverId || req.body?.guildId) || activeDiscordServer(bot.discord);
     const automation = {
       id: newId(),
       type,
+      serverId: targetServer?.id || '',
       label: str(req.body?.label, 80) || AUTOMATION_TYPE_LABELS[type],
       enabled: false,
       config: sanitizeAutomationConfig(req.body?.config, {}),
@@ -1490,7 +1517,7 @@ app.post(
     const bot = findOr404(ws.bots, req.params.id, 'Bot');
     const automation = findOr404(bot.automations, req.params.automationId, 'Automatisation');
     if (!automation.enabled) throw bad('Active l’automatisation avant de la déclencher.');
-    const result = await runAutomationTrigger(bot.id, automation.type, { automationLabel: automation.label });
+    const result = await runAutomationTrigger(bot.id, automation.type, { automationLabel: automation.label }, automation);
     res.json({ ...result, automation });
   }),
 );
@@ -1615,6 +1642,9 @@ app.post(
     const scheduled = sanitizeScheduledMessage(body);
     if (!scheduled.content) throw bad('Le message à envoyer est requis.');
     if (!scheduled.channelId && !scheduled.channelName) throw bad('Choisis un salon Discord.');
+    if (!scheduled.serverId) {
+      scheduled.serverId = (resolveDiscordServer(bot.discord, body.serverId || body.guildId) || activeDiscordServer(bot.discord))?.id || '';
+    }
     if (!scheduled.label) scheduled.label = `Message de ${scheduled.time}`;
     scheduled.id = newId();
     bot.scheduledMessages.push(scheduled);

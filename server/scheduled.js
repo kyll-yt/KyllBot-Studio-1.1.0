@@ -17,6 +17,7 @@ export function sanitizeScheduledMessage(input = {}, previous = null) {
     ? { ...previous }
     : {
         label: '',
+        serverId: '',
         channelId: '',
         channelName: '',
         content: '',
@@ -34,6 +35,7 @@ export function sanitizeScheduledMessage(input = {}, previous = null) {
       };
 
   if (typeof input.label === 'string') next.label = input.label.trim().slice(0, 80);
+  if (typeof input.serverId === 'string') next.serverId = input.serverId.trim().slice(0, 60);
   if (typeof input.channelId === 'string') next.channelId = input.channelId.trim().slice(0, 60);
   if (typeof input.channelName === 'string') next.channelName = input.channelName.trim().replace(/^#/, '').slice(0, 60);
   if (typeof input.content === 'string') next.content = input.content.trim().slice(0, 2000);

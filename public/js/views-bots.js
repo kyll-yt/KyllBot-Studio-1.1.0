@@ -423,7 +423,11 @@ function viewBotMessages(bot) {
 }
 
 function viewBotScheduled(bot) {
-  const messages = bot.scheduledMessages || [];
+  const server = activeBotServer(bot);
+  const messages = server
+    ? (bot.scheduledMessages || []).filter((message) => itemServerKey(bot, message) === server.id)
+    : bot.scheduledMessages || [];
+  const serverName = server?.guildName || server?.name || 'ce serveur';
   const active = messages.filter((message) => message.enabled).length;
   const timezone = messages[0]?.timezone || 'Europe/Paris';
   const cards = messages
@@ -449,7 +453,7 @@ function viewBotScheduled(bot) {
 
   return `<div class="panel">
     <div class="panel-head">
-      <h3>Messages programmés</h3>
+      <h3>Messages programmés · ${esc(serverName)}</h3>
       <div class="ph-actions">
         <span class="pill cyan">${active} actif(s)</span>
         <button class="btn btn-primary btn-sm" data-action="new-scheduled-message" data-id="${esc(bot.id)}">${icon('plus')} Programmer</button>
@@ -462,7 +466,7 @@ function viewBotScheduled(bot) {
           ? `<div class="sched-list">${cards}</div>`
           : `<div class="empty" style="padding:38px 20px">
               <div class="ic">${icon('clock')}</div>
-              <h3>Aucun message programmé</h3>
+              <h3>Aucun message programmé sur ${esc(serverName)}</h3>
               <p>Programme une annonce, un rappel ou un message récurrent à une heure précise.</p>
               <button class="btn btn-primary" data-action="new-scheduled-message" data-id="${esc(bot.id)}">Programmer un message</button>
             </div>`
@@ -476,15 +480,14 @@ function viewBotDetail(id) {
   if (!bot) return emptyState('Bot introuvable', 'Ce bot a peut-être été supprimé.', 'Retour aux bots', 'go-bots');
 
   const tabServer = activeBotServer(bot);
-  const commandTabCount = tabServer
-    ? (bot.commands || []).filter((command) => commandServerKey(bot, command) === tabServer.id).length
-    : (bot.commands || []).length;
+  const scopedCount = (items) =>
+    tabServer ? (items || []).filter((item) => itemServerKey(bot, item) === tabServer.id).length : (items || []).length;
   const tabs = [
-    ['commands', `Commandes (${commandTabCount})`],
+    ['commands', `Commandes (${scopedCount(bot.commands)})`],
     ['messages', `Messages (${(bot.savedMessages || []).length})`],
-    ['flows', `Flux (${(bot.flows || []).length})`],
-    ['automations', `Automatisations (${bot.automations.length})`],
-    ['scheduled', `Messages programmés (${(bot.scheduledMessages || []).length})`],
+    ['flows', `Flux (${scopedCount(bot.flows)})`],
+    ['automations', `Automatisations (${scopedCount(bot.automations)})`],
+    ['scheduled', `Messages programmés (${scopedCount(bot.scheduledMessages)})`],
     ['settings', 'Paramètres'],
   ];
 
@@ -495,7 +498,7 @@ function viewBotDetail(id) {
     const activeServer = activeBotServer(bot);
     const runtime = bot.runtime || {};
     const serverName = activeServer?.guildName || activeServer?.name || 'Aucun serveur';
-    const commandsForServer = (server) => (bot.commands || []).filter((command) => commandServerKey(bot, command) === server?.id);
+    const commandsForServer = (server) => (bot.commands || []).filter((command) => itemServerKey(bot, command) === server?.id);
     const visibleCommands = activeServer ? commandsForServer(activeServer) : bot.commands || [];
     const knownGuilds = Array.isArray(bot.discordAccount?.guilds) ? bot.discordAccount.guilds : [];
     const unconfiguredGuilds = knownGuilds.filter((guild) => !servers.some((server) => server.guildId === guild.id));
@@ -603,12 +606,16 @@ function viewBotDetail(id) {
   } else if (state.botTab === 'scheduled') {
     body = viewBotScheduled(bot);
   } else if (state.botTab === 'automations') {
+    const automations = tabServer
+      ? (bot.automations || []).filter((automation) => itemServerKey(bot, automation) === tabServer.id)
+      : bot.automations || [];
+    const serverName = tabServer?.guildName || tabServer?.name || 'ce serveur';
     body = `<div class="panel">
-      <div class="panel-head"><h3>Automatisations</h3><div class="ph-actions"><span class="pill violet">${bot.automations.filter((a) => a.enabled).length} active(s)</span><button class="btn btn-primary btn-sm" data-action="new-automation" data-id="${esc(bot.id)}">${icon('plus')} Ajouter</button></div></div>
+      <div class="panel-head"><h3>Automatisations · ${esc(serverName)}</h3><div class="ph-actions"><span class="pill violet">${automations.filter((a) => a.enabled).length} active(s)</span><button class="btn btn-primary btn-sm" data-action="new-automation" data-id="${esc(bot.id)}">${icon('plus')} Ajouter</button></div></div>
       <div class="panel-body">
         ${
-          bot.automations.length
-            ? bot.automations
+          automations.length
+            ? automations
                 .map(
                   (automation) => `<div class="auto-card">
                     <span class="a-ic">${icon(automationIcon(automation.type))}</span>
@@ -626,7 +633,7 @@ function viewBotDetail(id) {
                 .join('')
             : `<div class="empty" style="padding:38px 20px">
                 <div class="ic">${icon('zap')}</div>
-                <h3>Aucune automatisation</h3>
+                <h3>Aucune automatisation sur ${esc(serverName)}</h3>
                 <p>Choisissez un salon ou une catégorie, puis activez l’automatisation.</p>
                 <button class="btn btn-primary" data-action="new-automation" data-id="${esc(bot.id)}">Ajouter une automatisation</button>
               </div>`
@@ -1032,6 +1039,8 @@ function savedMessageModal(bot, message = null) {
 }
 
 function scheduledMessageModal(bot, message = null) {
+  const server = activeBotServer(bot);
+  const serverName = server?.guildName || server?.name || 'Aucun serveur';
   const channels = (bot.discord?.channels || []).filter((channel) => channel.type !== 'voice');
   const days = Array.isArray(message?.days) ? message.days : [0, 1, 2, 3, 4, 5, 6];
   const dayOptions = [
@@ -1048,6 +1057,10 @@ function scheduledMessageModal(bot, message = null) {
     subtitle: 'Choisis le salon, l’heure fixe et les jours d’envoi.',
     submitLabel: message ? 'Enregistrer' : 'Programmer le message',
     body: `
+      <div class="field">
+        <label>Serveur du message</label>
+        <input class="input" value="${esc(serverName)}" disabled>
+      </div>
       <div class="field">
         <label for="schedLabel">Nom du message</label>
         <input class="input" id="schedLabel" name="label" maxlength="80" value="${esc(message?.label || '')}" placeholder="Annonce du lundi">
@@ -1114,6 +1127,7 @@ function scheduledMessageModal(bot, message = null) {
       const selectedDays = [...form.querySelectorAll('input[name="days"]:checked')].map((input) => Number(input.value));
       const payload = {
         label: String(formData.get('label') || '').trim(),
+        serverId: message?.serverId || server?.id || '',
         channelId,
         channelName,
         time: String(formData.get('time') || '').trim(),
@@ -1312,8 +1326,8 @@ function activeBotServer(bot) {
   return servers.find((server) => server.id === key || server.guildId === key) || servers[0] || null;
 }
 
-function commandServerKey(bot, command) {
-  const key = String(command?.serverId || '').trim();
+function itemServerKey(bot, item) {
+  const key = String(item?.serverId || '').trim();
   if (!key) return activeBotServer(bot)?.id || '';
   const found = botDiscordServers(bot).find((server) => server.id === key || server.guildId === key);
   return found?.id || '';
@@ -1569,9 +1583,9 @@ function moveCommandsModal(bot) {
     toast('Ajoute d’abord un second serveur Discord à ce bot.', 'info');
     return;
   }
-  const commandCount = (bot.commands || []).filter((command) => commandServerKey(bot, command) === source.id).length;
+  const commandCount = (bot.commands || []).filter((command) => itemServerKey(bot, command) === source.id).length;
   const flowCount = (bot.flows || []).filter(
-    (flow) => flow.trigger?.type === 'slash' && commandServerKey(bot, flow) === source.id,
+    (flow) => flow.trigger?.type === 'slash' && itemServerKey(bot, flow) === source.id,
   ).length;
   openModal({
     title: 'Déplacer les commandes',
@@ -1927,6 +1941,8 @@ onAction('toggle-command', async (el) => {
 onAction('new-automation', (el) => {
   const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
   if (!bot) return;
+  const server = activeBotServer(bot);
+  const serverName = server?.guildName || server?.name || 'Aucun serveur';
   const datalists = `
     <datalist id="channelSuggestions">${(bot.discord?.channels?.length ? bot.discord.channels.filter((channel) => channel.type !== 'voice').map((channel) => `#${channel.name}`) : CHANNEL_SUGGESTIONS).map((item) => `<option value="${esc(item)}"></option>`).join('')}</datalist>
     <datalist id="categorySuggestions">${(bot.discord?.categories?.length ? bot.discord.categories : CATEGORY_SUGGESTIONS).map((item) => `<option value="${esc(item)}"></option>`).join('')}</datalist>
@@ -1936,6 +1952,7 @@ onAction('new-automation', (el) => {
     subtitle: 'Choisissez le type, le salon ou la catégorie, puis activez-la.',
     submitLabel: 'Ajouter l’automatisation',
     body: `
+      <div class="field"><label>Serveur de l’automatisation</label><input class="input" value="${esc(serverName)}" disabled><div class="hint">Elle sera active uniquement sur ce serveur.</div></div>
       <div class="field"><label for="autoType">Type d’automatisation</label>
         <select class="select" id="autoType" name="type">
           ${AUTOMATION_TYPES.map((entry) => `<option value="${esc(entry.type)}">${esc(entry.label)}</option>`).join('')}
@@ -1958,7 +1975,7 @@ onAction('new-automation', (el) => {
       }
       await api(`/api/bots/${bot.id}/automations`, {
         method: 'POST',
-        body: JSON.stringify({ type, label: formData.get('label'), config }),
+        body: JSON.stringify({ type, label: formData.get('label'), config, serverId: server?.id || '' }),
       });
       await refresh();
       toast('Automatisation ajoutée.');
