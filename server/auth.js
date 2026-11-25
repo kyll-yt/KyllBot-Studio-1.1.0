@@ -239,7 +239,11 @@ async function sendWithResend(email, code) {
       html: codeEmail(code),
     }),
   });
-  if (!response.ok) throw new Error(`Envoi email impossible (${response.status})`);
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    console.error(`[KyllBot Studio] Resend a refusé l'envoi (${response.status}) : ${detail.slice(0, 400)}`);
+    throw new Error(`Envoi email impossible (${response.status})`);
+  }
 }
 
 async function sendWithSmtp(email, code) {
@@ -459,9 +463,22 @@ export function publicUser(user) {
 
 /* ---------------- Google OAuth ---------------- */
 
+function isLocalHostname(hostname) {
+  return ['localhost', '127.0.0.1', '::1'].includes(hostname) || hostname.endsWith('.local');
+}
+
 export function googleRedirectUri(req) {
-  const base = process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
-  return `${base.replace(/\/$/, '')}/api/auth/google/callback`;
+  const explicit = String(process.env.GOOGLE_REDIRECT_URI || '').trim();
+  if (explicit) return explicit;
+  const requestBase = `${req.protocol}://${req.get('host')}`;
+  let base = requestBase;
+  try {
+    const configured = new URL(String(process.env.PUBLIC_URL || '').trim());
+    if (!isLocalHostname(configured.hostname)) base = configured.origin;
+  } catch {
+    /* PUBLIC_URL absent ou invalide : on garde l'origine de la requête */
+  }
+  return `${String(base).replace(/\/$/, '')}/api/auth/google/callback`;
 }
 
 export function googleAuthUrl(req, state) {
@@ -492,6 +509,10 @@ export async function exchangeGoogleCode(req, code) {
   if (!response.ok) throw new Error('Échange du code Google impossible.');
   const tokens = await response.json();
   const payload = JSON.parse(Buffer.from(tokens.id_token.split('.')[1], 'base64url').toString('utf8'));
+  const validIssuer = payload.iss === 'https://accounts.google.com' || payload.iss === 'accounts.google.com';
+  if (!validIssuer || payload.aud !== process.env.GOOGLE_CLIENT_ID) {
+    throw new Error('Réponse Google invalide.');
+  }
   if (!payload.email || payload.email_verified === false) throw new Error('Compte Google non vérifié.');
   return {
     email: normalizeEmail(payload.email),

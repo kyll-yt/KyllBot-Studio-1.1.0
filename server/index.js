@@ -1,3 +1,4 @@
+import './env.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -18,6 +19,7 @@ import {
   findOrCreateUser,
   googleAuthUrl,
   googleConfigured,
+  googleRedirectUri,
   mailConfigured,
   mailMode,
   parseCookies,
@@ -735,7 +737,13 @@ function workspacePayload(user, req) {
       purchases: ws.purchases || [],
       invoices: ws.invoices || [],
     },
-    config: { google: googleConfigured, mail: mailConfigured, mailMode, discordOAuthRedirectUri: req ? discordOAuthRedirectUri(req) : '' },
+    config: {
+      google: googleConfigured,
+      mail: mailConfigured,
+      mailMode,
+      googleRedirectUri: req ? googleRedirectUri(req) : '',
+      discordOAuthRedirectUri: req ? discordOAuthRedirectUri(req) : '',
+    },
   };
 }
 
@@ -744,7 +752,15 @@ function workspacePayload(user, req) {
 /* ------------------------------------------------------------------ */
 
 app.get('/api/auth/config', (req, res) => {
-  res.json({ google: googleConfigured, mail: mailConfigured, mailMode, devLogin: devLoginEnabled, demo: true, discordRedirectUri: discordOAuthRedirectUri(req) });
+  res.json({
+    google: googleConfigured,
+    mail: mailConfigured,
+    mailMode,
+    devLogin: devLoginEnabled,
+    demo: true,
+    googleRedirectUri: googleRedirectUri(req),
+    discordRedirectUri: discordOAuthRedirectUri(req),
+  });
 });
 
 app.post(
