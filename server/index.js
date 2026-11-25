@@ -256,17 +256,18 @@ function migrateWorkspace(ws) {
       bot.discord = discord;
       changed = true;
     }
-    const activeServer = activeDiscordServer(bot.discord);
-    const serverIds = new Set((bot.discord?.servers || []).flatMap((server) => [server.id, server.guildId]).filter(Boolean));
+    const servers = bot.discord?.servers || [];
+    const fallbackServerId = servers[0]?.id || activeDiscordServer(bot.discord)?.id || '';
+    const serverIds = new Set(servers.flatMap((server) => [server.id, server.guildId]).filter(Boolean));
     for (const command of bot.commands || []) {
       if (!command.serverId || !serverIds.has(command.serverId)) {
-        command.serverId = activeServer?.id || '';
+        command.serverId = fallbackServerId;
         changed = true;
       }
     }
     for (const flow of bot.flows || []) {
       if (flow.trigger?.type === 'slash' && (!flow.serverId || !serverIds.has(flow.serverId))) {
-        flow.serverId = activeServer?.id || '';
+        flow.serverId = fallbackServerId;
         changed = true;
       }
     }
@@ -1366,7 +1367,9 @@ app.patch(
       ? (bot.discord?.servers || []).find((server) => server.id === requestedServerId || server.guildId === requestedServerId)
       : null;
     if (changesServer && !targetServer) throw bad('Serveur introuvable pour cette commande.');
-    const nextServerId = changesServer ? targetServer.id : scopedServerId(bot, command);
+    const nextServerId = changesServer
+      ? targetServer.id
+      : scopedServerId(bot, command) || bot.discord?.servers?.[0]?.id || '';
     let nextName = command.name;
     if (body.name !== undefined) {
       nextName = str(body.name, 40).replace(/\s+/g, '-').toLowerCase();

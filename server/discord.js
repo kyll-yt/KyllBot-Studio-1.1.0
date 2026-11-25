@@ -192,13 +192,17 @@ export function resolveDiscordServer(discord, key) {
 }
 
 export function scopedServerId(bot, item) {
-  const found = resolveDiscordServer(bot?.discord, item?.serverId);
-  if (found) return found.id;
-  return activeDiscordServer(bot?.discord)?.id || '';
+  const key = String(item?.serverId || '').trim();
+  if (!key) return activeDiscordServer(bot?.discord)?.id || '';
+  const servers = Array.isArray(bot?.discord?.servers) ? bot.discord.servers : [];
+  const found = servers.find((server) => server.id === key || server.guildId === key);
+  return found?.id || '';
 }
 
 export function itemMatchesGuild(bot, item, guildId) {
-  const server = resolveDiscordServer(bot?.discord, scopedServerId(bot, item));
+  const serverId = scopedServerId(bot, item);
+  if (!serverId) return false;
+  const server = resolveDiscordServer(bot?.discord, serverId);
   const target = String(guildId || '').trim();
   if (!server || !target) return false;
   return String(server.id) === target || String(server.guildId) === target;

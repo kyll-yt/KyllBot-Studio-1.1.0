@@ -1314,8 +1314,9 @@ function activeBotServer(bot) {
 
 function commandServerKey(bot, command) {
   const key = String(command?.serverId || '').trim();
+  if (!key) return activeBotServer(bot)?.id || '';
   const found = botDiscordServers(bot).find((server) => server.id === key || server.guildId === key);
-  return (found || activeBotServer(bot))?.id || '';
+  return found?.id || '';
 }
 
 async function openBotGuildsModal(bot) {
@@ -1387,15 +1388,18 @@ function commandModal(bot, command) {
   };
   const initialVariants = commandVariants(value);
   const servers = botDiscordServers(bot);
-  const targetServerId = command?.serverId || activeBotServer(bot)?.id || '';
-
-  const form = openModal({
-    title: command ? 'Modifier la commande' : 'Nouvelle commande',
-    subtitle: 'Prévisualisez le rendu Discord en direct. La commande est liée à un seul serveur.',
-    wide: true,
-    submitLabel: command ? 'Enregistrer' : 'Créer la commande',
-    body: `
-      <div class="field">
+  const activeServer = activeBotServer(bot);
+  const editingServer = command
+    ? servers.find((server) => server.id === command.serverId || server.guildId === command.serverId) || null
+    : null;
+  const targetServerId = editingServer?.id || command?.serverId || activeServer?.id || '';
+  const serverField = command
+    ? `<div class="field">
+        <label>Serveur de la commande</label>
+        <input class="input" value="${esc(editingServer?.guildName || editingServer?.name || 'Serveur introuvable')}" disabled>
+        <div class="hint">Le serveur ne change pas quand tu modifies une commande. Utilise « Déplacer » pour la transférer vers un autre serveur.</div>
+      </div>`
+    : `<div class="field">
         <label for="cServer">Serveur cible</label>
         <select class="select" id="cServer" name="serverId" ${servers.length ? '' : 'disabled'}>
           ${
@@ -1412,7 +1416,15 @@ function commandModal(bot, command) {
           }
         </select>
         <div class="hint">La commande sera créée uniquement sur ce serveur. Elle restera invisible sur les autres.</div>
-      </div>
+      </div>`;
+
+  const form = openModal({
+    title: command ? 'Modifier la commande' : 'Nouvelle commande',
+    subtitle: 'Prévisualisez le rendu Discord en direct. La commande est liée à un seul serveur.',
+    wide: true,
+    submitLabel: command ? 'Enregistrer' : 'Créer la commande',
+    body: `
+      ${serverField}
       <div class="field">
         <label>Actions prêtes à l’emploi</label>
         <div class="preset-grid">
@@ -1460,7 +1472,6 @@ function commandModal(bot, command) {
         .slice(0, 20);
       const payload = {
         name: formData.get('name'),
-        serverId: String(formData.get('serverId') || targetServerId),
         description: formData.get('description'),
         response: formData.get('response'),
         cooldown: Number(formData.get('cooldown')),
@@ -1473,6 +1484,7 @@ function commandModal(bot, command) {
           footer: formData.get('embedFooter'),
         },
       };
+      if (!command) payload.serverId = String(formData.get('serverId') || targetServerId);
       if (!String(payload.name || '').trim()) throw new Error('Le nom de la commande est requis.');
       if (command) {
         await api(`/api/bots/${bot.id}/commands/${command.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
