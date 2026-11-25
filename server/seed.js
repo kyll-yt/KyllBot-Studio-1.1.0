@@ -59,7 +59,7 @@ export function seedWorkspace(user, { includeBots = true } = {}) {
       ],
       automations: [
         automation('welcome', "Message d'accueil", true, { channel: '#bienvenue', message: 'Bienvenue {user} !' }),
-        automation('autorole', 'Rôle automatique', true, { role: 'Membre' }),
+        automation('autorole', 'Rôle automatique', true, { roles: ['Membre'] }),
         automation('levels', 'Système de niveaux', true, { xpPerMessage: 15 }),
         automation('ticketPanel', 'Panneau de tickets', false, { category: 'Support' }),
         automation('moderation', 'Modération automatique', true, { antiSpam: true }),

@@ -290,7 +290,13 @@ function migrateWorkspace(ws) {
     for (const automation of bot.automations || []) {
       if (!automation.serverId || !serverIds.has(automation.serverId)) {
         automation.serverId =
-          inferServerId([automation.config?.channel, automation.config?.channelId, automation.config?.category, automation.config?.role]) ||
+          inferServerId([
+            automation.config?.channel,
+            automation.config?.channelId,
+            automation.config?.category,
+            automation.config?.role,
+            ...(Array.isArray(automation.config?.roles) ? automation.config.roles : []),
+          ]) ||
           fallbackServerId;
         changed = true;
       }
@@ -545,6 +551,7 @@ const AUTOMATION_CONFIG_KEYS = new Set([
   'category',
   'message',
   'role',
+  'roles',
   'cron',
   'threshold',
   'xpPerMessage',
@@ -586,12 +593,22 @@ const AUTOMATION_CONFIG_KEYS = new Set([
 function sanitizeAutomationConfig(input, previous = {}) {
   const next = { ...previous };
   if (!input || typeof input !== 'object' || Array.isArray(input)) return next;
+  let hasRoles = false;
+  let hasLegacyRole = false;
   for (const [key, value] of Object.entries(input)) {
     if (!AUTOMATION_CONFIG_KEYS.has(key)) continue;
     if (typeof value === 'boolean') next[key] = value;
     else if (typeof value === 'number' && Number.isFinite(value)) next[key] = Math.max(0, Math.min(1_000_000, value));
-    else if (typeof value === 'string') next[key] = str(value, 200);
+    else if (typeof value === 'string') {
+      next[key] = str(value, 200);
+      if (key === 'role') hasLegacyRole = true;
+    } else if (key === 'roles' && Array.isArray(value)) {
+      hasRoles = true;
+      next.roles = [...new Set(value.map((role) => str(role, 100)).filter(Boolean))].slice(0, 25);
+    }
   }
+  if (hasRoles) delete next.role;
+  else if (hasLegacyRole) delete next.roles;
   return next;
 }
 

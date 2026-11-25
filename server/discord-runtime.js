@@ -3392,12 +3392,18 @@ async function handleMemberAdd(botId, member) {
   }
   const autorole = enabledAutomation(bot, 'autorole', guild);
   if (autorole) {
-    const role = resolveRole(guild, autorole.config?.role);
-    if (role) {
+    const configuredRoles = Array.isArray(autorole.config?.roles)
+      ? autorole.config.roles
+      : [autorole.config?.role];
+    const roles = [...new Set(configuredRoles.map((entry) => String(entry || '').trim()).filter(Boolean))]
+      .map((entry) => resolveRole(guild, entry))
+      .filter(Boolean);
+    if (roles.length) {
       await member.roles
-        .add(role, 'KyllBot Studio — autorole')
+        .add(roles, 'KyllBot Studio — autorole')
         .catch((error) => log(ensureRuntime(botId), 'error', `Autorole : ${error.message}`));
-      await runTriggeredFlows({ bot, ws, type: 'automation', guild, member, channel: guild.systemChannel, message: null, interaction: null, match: 'autorole', vars: { automation: 'autorole', role: role.name } });
+      const roleNames = roles.map((role) => role.name).join(', ');
+      await runTriggeredFlows({ bot, ws, type: 'automation', guild, member, channel: guild.systemChannel, message: null, interaction: null, match: 'autorole', vars: { automation: 'autorole', role: roleNames, roles: roleNames } });
     }
   }
   await runTriggeredFlows({

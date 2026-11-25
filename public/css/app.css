@@ -1731,6 +1731,10 @@ input[type='color'].input { width: 56px; max-width: 56px; height: 42px; padding:
 .preset-chip:hover { border-color: rgba(124, 92, 255, 0.55); background: rgba(124, 92, 255, 0.1); }
 .check-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text); }
 .check-row input { width: 15px; height: 15px; accent-color: #7c5cff; }
+.role-picker { border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2, rgba(255,255,255,.02)); padding: 10px; }
+.role-picker-list { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; max-height: 170px; overflow-y: auto; margin-bottom: 10px; }
+.role-picker .form-row { grid-template-columns: 1fr auto; }
+@media (max-width: 620px) { .role-picker-list { grid-template-columns: 1fr; } }
 .token-row {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px;
   border: 1px solid var(--line); border-radius: 11px; background: rgba(255, 255, 255, 0.025);

@@ -196,7 +196,7 @@ function viewBots() {
 
 const AUTOMATION_DESCRIPTIONS = {
   welcome: 'Envoie un message personnalisé à chaque nouveau membre.',
-  autorole: 'Attribue automatiquement un rôle à l’arrivée.',
+  autorole: 'Attribue automatiquement un ou plusieurs rôles à l’arrivée.',
   levels: 'Gagne de l’XP en discutant et débloque des rôles.',
   ticketPanel: 'Panneau de tickets pour le support.',
   moderation: 'Filtre les messages et applique les sanctions.',
@@ -231,7 +231,7 @@ const AUTOMATION_FIELDS = {
     { key: 'message', label: 'Message de bienvenue', type: 'textarea', placeholder: 'Bienvenue {user} !' },
   ],
   autorole: [
-    { key: 'role', label: 'Rôle attribué', placeholder: 'Membre', list: 'roleSuggestions' },
+    { key: 'roles', label: 'Rôles attribués', type: 'roles', placeholder: 'Membre', list: 'roleSuggestions' },
     { key: 'category', label: 'Catégorie', placeholder: 'Arrivées', list: 'categorySuggestions' },
   ],
   levels: [
@@ -357,10 +357,10 @@ const AUTOMATION_PRESETS = [
     id: 'autorole-membre',
     type: 'autorole',
     label: 'Rôle de membre',
-    description: 'Donne automatiquement le rôle Membre à chaque arrivée.',
+    description: 'Donne automatiquement un ou plusieurs rôles à chaque arrivée.',
     icon: 'shield',
     tone: 'green',
-    config: { role: 'Membre' },
+    config: { roles: ['Membre'] },
   },
   {
     id: 'automod-complet',
@@ -501,6 +501,11 @@ function automationFields(type) {
   );
 }
 
+function roleList(value) {
+  const entries = Array.isArray(value) ? value : String(value || '').split(',');
+  return [...new Set(entries.map((entry) => String(entry || '').trim().replace(/^@/, '')).filter(Boolean))];
+}
+
 function automationSummary(automation) {
   const config = automation.config || {};
   const pills = [];
@@ -508,7 +513,7 @@ function automationSummary(automation) {
   if (config.category) pills.push(`<span class="pill violet">${esc(config.category)}</span>`);
   const details = Object.entries(config)
     .filter(([key]) => !['channel', 'category'].includes(key))
-    .map(([key, value]) => `${esc(key)}: ${esc(typeof value === 'boolean' ? (value ? 'oui' : 'non') : value)}`);
+    .map(([key, value]) => `${esc(key)}: ${esc(Array.isArray(value) ? value.join(' · ') : typeof value === 'boolean' ? (value ? 'oui' : 'non') : value)}`);
   return `<div class="auto-config">
     ${pills.join('')}
     ${details.length ? `<span class="auto-detail">${details.join(' · ')}</span>` : ''}
@@ -558,6 +563,22 @@ function automationFieldControl(field, value, discord = {}) {
     return `<div class="field"><label for="auto-${esc(field.key)}">${esc(field.label)}</label>
       <textarea class="textarea" ${common} placeholder="${esc(field.placeholder || '')}">${esc(value ?? '')}</textarea></div>`;
   }
+  if (field.type === 'roles') {
+    const selected = roleList(value);
+    const options = [...new Set([...roleOptions, ...selected].map((role) => String(role || '').trim()).filter(Boolean))];
+    return `<div class="field"><label>${esc(field.label)}</label>
+      <div class="role-picker" data-role-picker="${esc(field.key)}">
+        <div class="role-picker-list">
+          ${options.map((role) => `<label class="check-row"><input type="checkbox" name="${esc(field.key)}" value="${esc(role)}" ${selected.includes(role) ? 'checked' : ''}> <span>${esc(role)}</span></label>`).join('')}
+        </div>
+        <div class="form-row">
+          <input class="input" data-role-custom list="${esc(field.list || '')}" placeholder="Ajouter un autre rôle…">
+          <button type="button" class="btn btn-ghost btn-sm" data-role-add>${icon('plus')} Ajouter</button>
+        </div>
+      </div>
+      <div class="hint">Coche plusieurs rôles ou ajoute-en un nouveau. Le bot les attribuera tous à l’arrivée.</div>
+    </div>`;
+  }
   if (field.list) {
     const options = field.list === 'channelSuggestions'
       ? (channelOptions.length ? channelOptions : CHANNEL_SUGGESTIONS)
@@ -586,6 +607,41 @@ function bindAutomationPickers(form) {
         input.value = select.value;
         input.focus();
       }
+    });
+  });
+  form.querySelectorAll('[data-role-picker]').forEach((picker) => {
+    const input = picker.querySelector('[data-role-custom]');
+    const list = picker.querySelector('.role-picker-list');
+    const name = picker.dataset.rolePicker;
+    const add = () => {
+      const role = String(input?.value || '').trim().replace(/^@/, '');
+      if (!role || !list) return;
+      const existing = [...list.querySelectorAll('input[type="checkbox"]')].find(
+        (checkbox) => checkbox.value.toLowerCase() === role.toLowerCase(),
+      );
+      if (existing) {
+        existing.checked = true;
+      } else {
+        const label = document.createElement('label');
+        label.className = 'check-row';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.name = name;
+        checkbox.value = role;
+        checkbox.checked = true;
+        const text = document.createElement('span');
+        text.textContent = role;
+        label.append(checkbox, text);
+        list.append(label);
+      }
+      input.value = '';
+      input.focus();
+    };
+    picker.querySelector('[data-role-add]')?.addEventListener('click', add);
+    input?.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      add();
     });
   });
 }
@@ -2198,6 +2254,7 @@ onAction('new-automation', (el) => {
       for (const field of automationFields(type)) {
         if (field.type === 'boolean') config[field.key] = formData.get(field.key) === 'on';
         else if (field.type === 'number') config[field.key] = Number(formData.get(field.key)) || 0;
+        else if (field.type === 'roles') config[field.key] = roleList(formData.getAll(field.key));
         else config[field.key] = String(formData.get(field.key) || '').trim();
       }
       await api(`/api/bots/${bot.id}/automations`, {
@@ -2290,7 +2347,7 @@ onAction('config-automation', (el) => {
       <div class="field"><label for="autoLabel">Nom de l’automatisation</label>
         <input class="input" id="autoLabel" name="label" value="${esc(automation.label)}" maxlength="80">
       </div>
-      ${fields.map((field) => automationFieldControl(field, config[field.key], bot.discord || {})).join('')}
+      ${fields.map((field) => automationFieldControl(field, field.type === 'roles' ? config.roles ?? config.role : config[field.key], bot.discord || {})).join('')}
       <datalist id="channelSuggestions">${(bot.discord?.channels?.length ? bot.discord.channels.filter((channel) => channel.type !== 'voice').map((channel) => `#${channel.name}`) : CHANNEL_SUGGESTIONS).map((item) => `<option value="${esc(item)}"></option>`).join('')}</datalist>
       <datalist id="categorySuggestions">${(bot.discord?.categories?.length ? bot.discord.categories : CATEGORY_SUGGESTIONS).map((item) => `<option value="${esc(item)}"></option>`).join('')}</datalist>
       <datalist id="roleSuggestions">${(bot.discord?.roles || FLOW_ROLES_FALLBACK.map((name) => ({ name }))).map((role) => `<option value="${esc(role.name)}"></option>`).join('')}</datalist>
@@ -2301,6 +2358,7 @@ onAction('config-automation', (el) => {
       for (const field of fields) {
         if (field.type === 'boolean') nextConfig[field.key] = formData.get(field.key) === 'on';
         else if (field.type === 'number') nextConfig[field.key] = Number(formData.get(field.key)) || 0;
+        else if (field.type === 'roles') nextConfig[field.key] = roleList(formData.getAll(field.key));
         else nextConfig[field.key] = String(formData.get(field.key) || '').trim();
       }
       await api(`/api/bots/${bot.id}/automations/${automation.id}`, {
