@@ -1861,7 +1861,7 @@ app.post(
     const bot = findOr404(ws.bots, req.params.id, 'Bot');
     const flows = ensureBotFlows(bot);
     const flow = findOr404(flows, req.params.flowId, 'Flux');
-    const result = runFlow(flow, { ...req.body, bot: bot.name });
+    const result = await runFlow(flow, { ...req.body, bot: bot.name });
     if (req.body?.live) {
       flow.runs = (flow.runs || 0) + 1;
       flow.lastRunAt = new Date().toISOString();

@@ -1,4 +1,6 @@
+import { askAI } from './ai.js';
 import { newId } from './db.js';
+import { localAIResponse } from './local-ai.js';
 
 /* ------------------------------------------------------------------ */
 /* vocabulaire                                                         */
@@ -1293,7 +1295,8 @@ function pickVariant(variants) {
   return variants[variants.length - 1];
 }
 
-export function runFlow(flow, input = {}) {
+export async function runFlow(flow, input = {}) {
+  const aiHistory = Array.isArray(input.aiHistory) ? input.aiHistory : [];
   const ctx = {
     user: {
       name: str(input.user?.name, 40) || 'Alex',
@@ -1816,7 +1819,15 @@ export function runFlow(flow, input = {}) {
       }
       case 'ai': {
         const prompt = interpolate(block.prompt, ctx, vars);
-        const text = `Réponse simulée pour : ${prompt}`;
+        let text = '';
+        try {
+          text = await askAI({ model: block.model, prompt, maxTokens: block.maxTokens, provider: block.provider, history: aiHistory });
+        } catch {
+          text = localAIResponse(prompt);
+        }
+        if (!text) text = localAIResponse(prompt);
+        aiHistory.push({ role: 'user', content: prompt });
+        aiHistory.push({ role: 'assistant', content: text });
         vars[block.variable] = text;
         outputs.push({
           kind: 'ai',
@@ -1827,9 +1838,9 @@ export function runFlow(flow, input = {}) {
           text,
           variable: block.variable,
           maxTokens: block.maxTokens,
-          simulated: true,
+          simulated: false,
         });
-        entry.detail = `${block.provider === 'local' ? 'local' : block.provider === 'openai' ? 'API' : 'sans clé'} · ${block.model} · ${text.slice(0, 80)}`;
+        entry.detail = `${block.provider || 'auto'} · ${block.model} · ${text.slice(0, 80)}`;
         break;
       }
       case 'image': {

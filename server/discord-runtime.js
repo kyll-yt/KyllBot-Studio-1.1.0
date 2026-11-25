@@ -26,7 +26,7 @@ import ffmpegPath from 'ffmpeg-static';
 import { db, persist } from './db.js';
 import { recordEvent } from './activity.js';
 import { formatDuration, formatSignedDuration, normalizeModalFields, parseDurationInput, runFlow } from './flows.js';
-import { cleanAIPrompt, localAIResponse } from './local-ai.js';
+import { aiHistoryKey, readAIHistory, rememberAIMessage } from './ai.js';
 import { decryptSecret } from './secrets.js';
 import { safeFetch } from './url-safety.js';
 import { activeDiscordServer, itemMatchesGuild, resolveDiscordServer, scopedServerId, upsertDiscordServer } from './discord.js';
@@ -702,66 +702,6 @@ function scheduleGiveaway({ message, channel, prize, winners, emoji, duration })
   timer.unref?.();
 }
 
-const AI_SYSTEM_PROMPT =
-  'Tu es KyllBot, un assistant francophone intégré à KyllBot Studio, un outil pour créer des bots Discord. ' +
-  'Réponds toujours en français, de façon naturelle, chaleureuse et concise (2 à 4 phrases). ' +
-  'Ne parle jamais de clé API, de mode local, de limitations techniques ou de service externe.';
-
-async function askAI({ model, prompt, maxTokens, provider = 'auto' }) {
-  const key = process.env.OPENAI_API_KEY;
-  const userPrompt = cleanAIPrompt(prompt);
-  const mode = provider === 'local' ? 'local' : provider === 'openai' ? (key ? 'openai' : 'local') : (key ? 'openai' : 'free');
-  if (mode === 'local') return localAIResponse(userPrompt);
-
-  if (mode === 'openai') {
-    try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: model || 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: AI_SYSTEM_PROMPT },
-            { role: 'user', content: userPrompt },
-          ],
-          max_tokens: Math.min(Math.max(Number(maxTokens) || 300, 50), 4000),
-        }),
-        signal: AbortSignal.timeout(20000),
-      });
-      if (!response.ok) throw new Error(`API IA ${response.status}`);
-      const data = await response.json();
-      const text = data?.choices?.[0]?.message?.content;
-      if (text) return String(text).trim();
-    } catch {
-      // The local fallback keeps the flow alive when the API is unavailable.
-    }
-    return localAIResponse(userPrompt);
-  }
-
-  try {
-    const response = await fetch('https://text.pollinations.ai/openai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'openai',
-        messages: [
-          { role: 'system', content: AI_SYSTEM_PROMPT },
-          { role: 'user', content: userPrompt },
-        ],
-        max_tokens: Math.min(Math.max(Number(maxTokens) || 300, 50), 1000),
-      }),
-      signal: AbortSignal.timeout(20000),
-    });
-    if (response.ok) {
-      const data = await response.json();
-      const text = data?.choices?.[0]?.message?.content;
-      if (text) return String(text).trim();
-    }
-  } catch {
-    // Fall back to a local answer when the no-key service is unreachable.
-  }
-  return localAIResponse(userPrompt);
-}
 
 async function deliverFlowPayload({ output, target, payload, member, interaction, interactionUsed }) {
   if (output.dm) {
@@ -791,6 +731,19 @@ async function deliverFlowPayload({ output, target, payload, member, interaction
   return { sent: Boolean(sentMessage), message: sentMessage, channel: target, interactionUsed };
 }
 
+function interactionInputText(interaction) {
+  const options = [...(interaction?.options?.data || [])];
+  while (options.length) {
+    const option = options.shift();
+    if (Array.isArray(option.options)) options.push(...option.options);
+    if (typeof option.value === 'string' && option.value.trim()) return option.value.trim();
+  }
+  for (const field of interaction?.fields?.fields?.values?.() || []) {
+    if (typeof field.value === 'string' && field.value.trim()) return field.value.trim();
+  }
+  return '';
+}
+
 async function executeFlow({ bot, ws, flow, guild, member, channel, message, interaction, startBlock, vars = {} }) {
   const runtime = ensureRuntime(bot.id);
   const user = member?.user || interaction?.user || message?.author;
@@ -799,7 +752,10 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
   const persistedVars = Object.fromEntries(
     Object.entries(bot.flowDatabase).map(([key, value]) => [`db:${key}`, value]),
   );
-  const result = runFlow(flow, {
+  const historyKey = aiHistoryKey({ bot, guild, channel, member, interaction });
+  const aiHistory = [...readAIHistory(historyKey)];
+  const historyStart = aiHistory.length;
+  const result = await runFlow(flow, {
     user: {
       name: member?.displayName || user?.globalName || user?.username || 'Membre',
       id: user?.id || '',
@@ -811,11 +767,15 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
     },
     server: guild?.name || 'Message privé',
     channel: channel?.name ? `#${channel.name}` : '',
-    message: message?.content || '',
+    message: message?.content || interactionInputText(interaction),
     bot: bot.name,
     startBlock,
     vars: { ...persistedVars, ...vars },
+    aiHistory,
   });
+  for (const entry of aiHistory.slice(historyStart)) {
+    rememberAIMessage(historyKey, entry.role, entry.content);
+  }
   let lastMessage = null;
   let lastChannel = channel || null;
   let stopped = false;
@@ -1455,14 +1415,8 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
         case 'ai': {
           const target = resolveChannel(guild, output.channel) || channel;
           if (!target) break;
-          let text = null;
-          try {
-            text = await askAI({ model: output.model, prompt: output.prompt, maxTokens: output.maxTokens, provider: output.provider });
-          } catch (error) {
-            log(runtime, 'warn', `Bloc IA : ${error.message}`);
-          }
-          if (!text) text = localAIResponse(output.prompt);
-          lastMessage = await target.send({ content: String(text).slice(0, 2000) });
+          const text = output.text || 'Je n’ai pas pu générer de réponse.';
+          lastMessage = await target.send({ content: String(text).slice(0, 2000), allowedMentions: { parse: [] } });
           lastChannel = target;
           sent = true;
           break;

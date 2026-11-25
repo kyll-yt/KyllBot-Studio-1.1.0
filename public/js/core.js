@@ -4,9 +4,21 @@
 /* état & utilitaires                                                  */
 /* ------------------------------------------------------------------ */
 
-const APP_VERSION = '1.1.4';
+const APP_VERSION = '1.1.5';
 
 const APP_CHANGELOG = [
+  {
+    version: '1.1.5',
+    date: '2026-11-21',
+    title: 'IA polyvalente et mémoire de conversation',
+    items: [
+      'Le bloc « Réponse IA » utilise maintenant la vraie IA dans les flux : fini le texte simulé.',
+      'L’IA répond à toutes les questions, même hors sujet Discord, avec des faits directs et sans formule vide.',
+      'Mémoire de conversation par salon et par membre : elle retient un prénom et le réutilise dans les messages suivants.',
+      'Faits vérifiés via Wikipédia et Wikidata, avec les réponses intégrées en secours si le réseau est indisponible.',
+      'Les questions sur les planètes, la météo ou les dirigeants français reçoivent une réponse réelle, sans invention.',
+    ],
+  },
   {
     version: '1.1.4',
     date: '2026-11-21',

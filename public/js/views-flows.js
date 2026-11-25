@@ -2192,7 +2192,7 @@ function renderNodeFields(block) {
         <div class="fld-row">
           ${nodeField('Tokens max', `<input class="input" type="number" min="50" max="4000" ${bind('maxTokens')} value="${block.maxTokens || 300}">`, 'shrink')}
         </div>
-        <p class="hint">Le mode automatique fonctionne sans configuration. S’il n’y a pas d’Internet, KyllBot utilise ses réponses intégrées. Le mode OpenAI est réservé aux serveurs qui ont une clé.</p>`;
+        <p class="hint">Le mode automatique répond à toutes les questions avec une IA gratuite, puis bascule sur Wikipédia et les réponses intégrées si le réseau est indisponible. Les questions courantes reçoivent une réponse immédiate et le bot garde le contexte des derniers messages du salon. Le mode OpenAI utilise la clé du serveur pour des réponses encore plus précises.</p>`;
     }
     case 'image':
       return `<div class="fld-row">

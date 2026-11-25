@@ -1,4 +1,4 @@
-const CACHE = 'kyllbot-studio-1.1.4-serveur-complet';
+const CACHE = 'kyllbot-studio-1.1.5-serveur-complet';
 const PRECACHE = [
   '/login',
   '/offline.html',
