@@ -18,9 +18,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/v17/site.css" />
+  <link rel="stylesheet" href="/css/v18/site.css" />
 </head>
 <body>
+  <div class="kb-intro" id="kbIntro" hidden aria-hidden="true">
+    <div class="kb-intro-stage">
+      <div class="kb-intro-rings"><i></i><i></i><i></i></div>
+      <div class="kb-intro-logo"><img src="/assets/logo.svg" alt="" width="54" height="54" /></div>
+      <div class="kb-intro-title" aria-label="KyllBot"><span>K</span><span>y</span><span>l</span><span>l</span><span>B</span><span>o</span><span>t</span></div>
+      <div class="kb-intro-sub">Studio officiel <b>· 1.1.4</b></div>
+      <div class="kb-intro-loader"><i></i></div>
+    </div>
+  </div>
   <header class="site-nav" id="siteNav">
     <div class="container nav-inner">
       <a class="brand" href="/" aria-label="KyllBot Studio, accueil">
@@ -57,7 +66,7 @@
     <section class="hero">
       <div class="container hero-grid">
         <div>
-          <span class="badge"><span class="dot"></span> KyllBot Studio Officiel · v2</span>
+          <span class="badge"><span class="dot"></span> KyllBot Studio Officiel · v1.1.4</span>
           <h1>Créez vos bots Discord et vos <span class="gradient-text">formations interactives</span>. Sans coder.</h1>
           <p class="lead">
             Un seul studio pour construire des bots Discord, scénariser des cours, évaluer vos apprenants
@@ -86,6 +95,7 @@
         </div>
 
         <div class="hero-visual">
+          <div class="hero-orb" aria-hidden="true"><img src="/assets/hero-core.svg" alt="" /></div>
           <div class="float-card one">
             <span class="ic">
               <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2.5 8.5 6 12l7.5-8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -388,7 +398,8 @@
               <li><i class="check">✓</i> 3 bots Discord</li>
               <li><i class="check">✓</i> 3 formations</li>
               <li><i class="check">✓</i> 100 apprenants</li>
-              <li><i class="check">✓</i> 50 commandes par bot</li>
+              <li><i class="check">✓</i> 60 commandes par bot</li>
+              <li><i class="check">✓</i> AutoMod &amp; bouclier anti-bots</li>
               <li><i class="check">✓</i> Récompense quotidienne</li>
               <li><i class="check">✓</i> Certificats &amp; export JSON</li>
             </ul>
@@ -399,10 +410,11 @@
             <div class="price-amount"><b>300</b><span>crédits / mois</span></div>
             <p class="price-desc">Pour animer une communauté active.</p>
             <ul class="price-list">
-              <li><i class="check">✓</i> 10 bots Discord</li>
-              <li><i class="check">✓</i> 25 formations</li>
-              <li><i class="check">✓</i> 1 000 apprenants</li>
-              <li><i class="check">✓</i> 120 commandes par bot</li>
+              <li><i class="check">✓</i> 15 bots Discord</li>
+              <li><i class="check">✓</i> 30 formations</li>
+              <li><i class="check">✓</i> 2 000 apprenants</li>
+              <li><i class="check">✓</i> 150 commandes par bot</li>
+              <li><i class="check">✓</i> AutoMod avancé &amp; anti-bots</li>
               <li><i class="check">✓</i> Certificats &amp; exports</li>
               <li><i class="check">✓</i> Webhooks simples</li>
             </ul>
@@ -413,10 +425,10 @@
             <div class="price-amount"><b>600</b><span>crédits / mois</span></div>
             <p class="price-desc">Pour les communautés actives et les formateurs indépendants.</p>
             <ul class="price-list">
-              <li><i class="check">✓</i> 25 bots Discord</li>
-              <li><i class="check">✓</i> 100 formations</li>
-              <li><i class="check">✓</i> 5 000 apprenants</li>
-              <li><i class="check">✓</i> 200 commandes par bot</li>
+              <li><i class="check">✓</i> 40 bots Discord</li>
+              <li><i class="check">✓</i> 150 formations</li>
+              <li><i class="check">✓</i> 10 000 apprenants</li>
+              <li><i class="check">✓</i> 300 commandes par bot</li>
               <li><i class="check">✓</i> Webhooks illimités &amp; API</li>
               <li><i class="check">✓</i> Marque blanche</li>
               <li><i class="check">✓</i> Support sous 24 h</li>
@@ -433,6 +445,7 @@
               <li><i class="check">✓</i> 500 commandes par bot</li>
               <li><i class="check">✓</i> Marque blanche</li>
               <li><i class="check">✓</i> API avancée &amp; exports planifiés</li>
+              <li><i class="check">✓</i> Audit de sécurité &amp; onboarding</li>
               <li><i class="check">✓</i> SLA 4 h &amp; support dédié</li>
             </ul>
             <a class="btn btn-ghost" href="/login">Choisir Studio</a>
@@ -495,7 +508,8 @@
     </div>
   </footer>
 
-  <script src="/js/pwa.js"></script>
-  <script src="/js/v17/landing.js"></script>
+  <script src="/js/v18/pwa.js"></script>
+  <script src="/js/v18/landing.js"></script>
+  <script src="/js/v18/intro.js"></script>
 </body>
 </html>

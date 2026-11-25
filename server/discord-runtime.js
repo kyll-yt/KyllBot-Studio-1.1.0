@@ -40,7 +40,10 @@ const DISCORD_API = 'https://discord.com/api/v10';
 const runtimes = new Map();
 const cooldowns = new Map();
 const spamBuckets = new Map();
+const repeatBuckets = new Map();
+const guardPunished = new Map();
 const flowCooldowns = new Map();
+const activeFlowRuns = new Set();
 const pendingSelects = new Map();
 const pendingModals = new Map();
 const pendingAwaits = new Map();
@@ -1858,6 +1861,24 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
             persist();
           }
           break;
+        case 'automationRun': {
+          const automationType = String(output.automationType || '').trim();
+          if (!automationType) break;
+          const count = await runTriggeredFlows({
+            bot,
+            ws,
+            type: 'automation',
+            guild,
+            member,
+            channel,
+            message,
+            interaction: null,
+            match: automationType,
+            vars: { automation: automationType, automationLabel: automationType },
+          });
+          if (output.notify !== false) log(runtime, 'info', `Automatisation « ${automationType} » déclenchée par un flux (${count} réaction(s)).`);
+          break;
+        }
         case 'accountCheck': {
           if (!output.pass) {
             const target = resolveChannel(guild, output.channel) || channel;
@@ -2114,9 +2135,16 @@ async function runTriggeredFlows({ bot, ws, type, guild, member, channel, messag
     if (type === 'keyword' && !matchKeyword(flow.trigger, message?.content || '')) continue;
     if (type === 'reaction' && !matchReaction(flow.trigger, match)) continue;
     if (type === 'automation' && flow.trigger?.automationType && flow.trigger.automationType !== match) continue;
-    await executeFlow({ bot, ws, flow, guild, member, channel, message, interaction, vars });
-    bumpFlow(ws, bot, flow, `discord:${type}`, member?.user || interaction?.user);
-    count += 1;
+    const runKey = flow.id || flow.name;
+    if (runKey && activeFlowRuns.has(runKey)) continue;
+    if (runKey) activeFlowRuns.add(runKey);
+    try {
+      await executeFlow({ bot, ws, flow, guild, member, channel, message, interaction, vars });
+      bumpFlow(ws, bot, flow, `discord:${type}`, member?.user || interaction?.user);
+      count += 1;
+    } finally {
+      if (runKey) activeFlowRuns.delete(runKey);
+    }
   }
   return count;
 }
@@ -2981,6 +3009,259 @@ async function handleMemberUpdate(botId, oldMember, newMember) {
   }
 }
 
+const SUSPICIOUS_NAME = /(nitro|free.?gift|steam.?gift|airdrop|scam|spam|hack|cheat|casino|crypto|giveaway|self.?bot|token.?grab|account.?gen)/i;
+const SUSPICIOUS_SHORT_NAME = /(^|[_\-.\s])(bot|admin|mod|support)([_\-.\s]|$)/i;
+const INVITE_PATTERN = /(discord\.(gg|me)\/|discord\.com\/invite\/)/i;
+const NITRO_SCAM_PATTERN = /(free\s*nitro|nitro\s*gift|steam\s*gift|gift\s*card|airdrop|claim\s+(your|now)|nitro\s+for\s+free|t\.me\/|onlyfans|casino|crypto\s*giveaway)/i;
+const LINK_PATTERN = /(https?:\/\/|www\.)/i;
+
+function parseWordList(value) {
+  return String(value || '')
+    .split(/[\n,;]+/)
+    .map((word) => word.trim().toLowerCase())
+    .filter((word) => word.length >= 3)
+    .slice(0, 100);
+}
+
+function mentionsCount(message) {
+  const mentions = message?.mentions;
+  if (!mentions) return 0;
+  return (mentions.users?.size || 0) + (mentions.roles?.size || 0) + (mentions.channels?.size || 0);
+}
+
+function capsRatio(text) {
+  const letters = String(text || '').replace(/[^A-Za-zÀ-ÿ]/g, '');
+  if (letters.length < 12) return 0;
+  const caps = (letters.match(/[A-ZÀ-Þ]/g) || []).length;
+  return caps / letters.length;
+}
+
+function zalgoCount(text) {
+  return (String(text || '').match(/[\u0300-\u036f\u1ab0-\u1aff\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f]/g) || []).length;
+}
+
+function emojiCount(text) {
+  return (String(text || '').match(/[\p{Extended_Pictographic}]/gu) || []).length;
+}
+
+function repeatCount(botId, guildId, userId, content, windowSeconds) {
+  const key = `${botId}:${guildId}:${userId}`;
+  const now = Date.now();
+  const windowMs = Math.max(5, Number(windowSeconds) || 15) * 1000;
+  const normalized = String(content || '').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 240);
+  const bucket = (repeatBuckets.get(key) || []).filter((entry) => now - entry.at < windowMs);
+  bucket.push({ at: now, content: normalized });
+  repeatBuckets.set(key, bucket);
+  if (repeatBuckets.size > 5000) {
+    for (const [mapKey, entries] of repeatBuckets) {
+      if (!entries.some((entry) => now - entry.at < windowMs)) repeatBuckets.delete(mapKey);
+    }
+  }
+  return bucket.filter((entry) => entry.content === normalized).length;
+}
+
+function autoModViolation(config, message, botId = 'bot') {
+  const content = String(message?.content || '');
+  if (!content.trim()) return null;
+  if (config.blockInvites && INVITE_PATTERN.test(content)) return 'invitation Discord';
+  if (config.blockNitro && NITRO_SCAM_PATTERN.test(content)) return 'faux cadeau / arnaque Nitro';
+  if (config.blockLinks && LINK_PATTERN.test(content)) return 'lien non autorisé';
+  if (config.blockBadWords) {
+    const lowered = content.toLowerCase();
+    const found = parseWordList(config.badWords).find((word) =>
+      word.includes(' ') ? lowered.includes(word) : new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(lowered),
+    );
+    if (found) return `mot interdit « ${found} »`;
+  }
+  if (config.blockMentions && mentionsCount(message) > Math.max(2, Number(config.maxMentions) || 5)) {
+    return 'trop de mentions';
+  }
+  if (config.blockCaps && capsRatio(content) >= Math.max(50, Number(config.capsThreshold) || 75) / 100) {
+    return 'abus de majuscules';
+  }
+  if (config.blockZalgo && zalgoCount(content) > 10) return 'texte zalgo';
+  if (config.blockEmojiSpam && emojiCount(content) > 10) return 'rafale d’emojis';
+  if (config.blockRepeat && message?.guildId && message?.author?.id) {
+    const repeats = repeatCount(botId, message.guildId, message.author.id, content, config.repeatWindow);
+    if (repeats >= 3) return 'message répété';
+  }
+  return null;
+}
+
+function assessAccountRisk(member, config = {}) {
+  const user = member?.user || {};
+  const reasons = [];
+  let score = 0;
+  const created = Number(user.createdTimestamp) || 0;
+  const ageDays = created ? (Date.now() - created) / 86400000 : 999;
+  const minAge = Math.max(0, Number(config.minAccountAgeDays) || 0);
+  if (minAge > 0 && created && ageDays < minAge) {
+    score += ageDays < 1 ? 4 : 2;
+    reasons.push(`compte récent (${Math.max(0, Math.floor(ageDays))} j)`);
+  }
+  if (config.requireAvatar && !user.avatar) {
+    score += 1;
+    reasons.push('aucun avatar');
+  }
+  const username = String(user.username || '');
+  if (config.suspiciousNames && (SUSPICIOUS_NAME.test(username) || SUSPICIOUS_SHORT_NAME.test(username))) {
+    score += 3;
+    reasons.push('pseudo suspect');
+  }
+  if (/\d{6,}/.test(username)) {
+    score += 1;
+    reasons.push('pseudo avec beaucoup de chiffres');
+  }
+  if (config.blockBotAccounts && user.bot) {
+    score += 6;
+    reasons.push('compte bot');
+  }
+  return { score: Math.min(score, 10), reasons };
+}
+
+function assessMessageRisk(message, config = {}) {
+  const content = String(message?.content || '');
+  const reasons = [];
+  let score = 0;
+  if (NITRO_SCAM_PATTERN.test(content) || INVITE_PATTERN.test(content)) {
+    score += 4;
+    reasons.push('contenu de type arnaque');
+  } else if (LINK_PATTERN.test(content)) {
+    score += 2;
+    reasons.push('lien externe');
+  }
+  if (mentionsCount(message) > 8) {
+    score += 2;
+    reasons.push('mentions massives');
+  }
+  if (capsRatio(content) > 0.85) {
+    score += 1;
+    reasons.push('majuscules anormales');
+  }
+  if (zalgoCount(content) > 10) {
+    score += 1;
+    reasons.push('texte zalgo');
+  }
+  if (emojiCount(content) > 12) {
+    score += 1;
+    reasons.push('rafale d’emojis');
+  }
+  if (message?.guildId && message?.author?.id) {
+    const repeats = repeatCount(message.client?.user?.id || 'bot', message.guildId, message.author.id, content, 30);
+    if (repeats >= 3) {
+      score += 2;
+      reasons.push('message répété');
+    }
+  }
+  return { score: Math.min(score, 10), reasons };
+}
+
+async function applyAutoModAction({ bot, ws, guild, member, message, channel, config, reason }) {
+  const action = ['delete', 'timeout', 'kick', 'ban'].includes(config.action) ? config.action : 'delete';
+  const reasonText = `AutoMod — ${reason}`.slice(0, 500);
+  let detail = 'message supprimé';
+  await message.delete().catch(() => {});
+  try {
+    if (action === 'timeout' && member?.moderatable) {
+      const minutes = Math.min(Math.max(1, Number(config.timeoutMinutes) || 10), 10080);
+      await member.timeout(minutes * 60000, reasonText);
+      detail = `exclusion ${minutes} min`;
+    } else if (action === 'kick' && member?.kickable) {
+      await member.kick(reasonText);
+      detail = 'membre expulsé';
+    } else if (action === 'ban' && member?.bannable) {
+      await member.ban({ reason: reasonText, deleteMessageSeconds: 3600 });
+      detail = 'membre banni';
+    }
+  } catch (error) {
+    detail = `action impossible (${error.message})`;
+  }
+  const warn = String(config.warnMessage || 'Ce message ne respecte pas les règles du serveur.').slice(0, 500);
+  await channel?.send?.({ content: `${message.author}, ${warn}`, allowedMentions: { parse: [] } }).catch(() => {});
+  await sendLog(guild, bot, `🛡️ AutoMod · ${reason} · ${message.author.tag || message.author.username} · ${detail}`, config.logChannel);
+  await runTriggeredFlows({
+    bot,
+    ws,
+    type: 'automation',
+    guild,
+    member,
+    channel,
+    message,
+    interaction: null,
+    match: 'autoMod',
+    vars: { automation: 'autoMod', reason },
+  });
+}
+
+async function applyBotGuardAction({ bot, ws, guild, member, channel, config, reasons, score }) {
+  const action = ['timeout', 'quarantine', 'kick', 'ban', 'alert'].includes(config.action) ? config.action : 'timeout';
+  const reason = `Bouclier anti-bots — score ${score}/10 · ${reasons.join(', ')}`.slice(0, 500);
+  let detail = 'alerte envoyée au staff';
+  try {
+    if (action === 'timeout' && member?.moderatable) {
+      const minutes = Math.min(Math.max(1, Number(config.timeoutMinutes) || 60), 10080);
+      await member.timeout(minutes * 60000, reason);
+      detail = `exclusion ${minutes} min`;
+    } else if (action === 'quarantine' && member?.manageable) {
+      const role = resolveRole(guild, config.quarantineRole);
+      if (role) {
+        await member.roles.set([role], reason);
+        detail = `quarantaine via @${role.name}`;
+      } else {
+        await member.timeout(24 * 3600e3, reason);
+        detail = 'quarantaine 24 h (aucun rôle configuré)';
+      }
+    } else if (action === 'kick' && member?.kickable) {
+      await member.kick(reason);
+      detail = 'membre expulsé';
+    } else if (action === 'ban' && member?.bannable) {
+      await member.ban({ reason, deleteMessageSeconds: 3600 });
+      detail = 'membre banni';
+    }
+  } catch (error) {
+    detail = `action impossible (${error.message})`;
+  }
+  await sendLog(guild, bot, `🤖 Bouclier anti-bots · ${member.user?.tag || member.user?.username || 'membre'} · score ${score}/10 · ${reasons.join(', ')} · ${detail}`, config.logChannel);
+  await runTriggeredFlows({
+    bot,
+    ws,
+    type: 'automation',
+    guild,
+    member,
+    channel: channel || guild.systemChannel,
+    message: null,
+    interaction: null,
+    match: 'botGuard',
+    vars: { automation: 'botGuard', reasons: reasons.join(', '), score: String(score) },
+  });
+}
+
+async function runBotGuard(bot, ws, guild, member, message, channel, config = {}) {
+  const key = `${bot.id}:${guild?.id || ''}:${member?.id || ''}`;
+  if (Date.now() - (guardPunished.get(key) || 0) < 10 * 60e3) return false;
+  const account = assessAccountRisk(member, config);
+  const content = message && config.scanMessages !== false ? assessMessageRisk(message, config) : { score: 0, reasons: [] };
+  const score = Math.min(10, account.score + content.score);
+  const threshold = Math.min(Math.max(Number(config.scoreThreshold) || 5, 2), 10);
+  if (score < threshold) return false;
+  guardPunished.set(key, Date.now());
+  if (guardPunished.size > 3000) {
+    const cutoff = Date.now() - 10 * 60e3;
+    for (const [mapKey, at] of guardPunished) if (at < cutoff) guardPunished.delete(mapKey);
+  }
+  await applyBotGuardAction({
+    bot,
+    ws,
+    guild,
+    member,
+    channel,
+    config,
+    reasons: [...account.reasons, ...content.reasons],
+    score,
+  });
+  return config.action !== 'alert';
+}
+
 async function handleMessage(botId, message) {
   if (!message || message.author?.bot) return;
   const context = getBotContext(botId);
@@ -3046,16 +3327,17 @@ async function handleMessage(botId, message) {
     }
   }
 
-  const automod = (bot.automations || []).find(
-    (entry) => entry.enabled && entry.type === 'autoMod' && entry.config?.blockLinks && itemMatchesGuild(bot, entry, guild.id),
-  );
-  if (automod && /(https?:\/\/|discord\.gg\/)/i.test(message.content)) {
-    await message.delete().catch(() => {});
-    await channel.send({ content: `${message.author}, les liens ne sont pas autorisés ici.` }).catch(() => {});
-    await sendLog(guild, bot, `Lien supprimé pour ${message.author.tag}`);
-    await runTriggeredFlows({ bot, ws, type: 'automation', guild, member, channel, message, interaction: null, match: 'autoMod', vars: { automation: 'autoMod' } });
-    return;
+  const autoMod = enabledAutomation(bot, 'autoMod', guild);
+  if (autoMod) {
+    const reason = autoModViolation(autoMod.config || {}, message, bot.id);
+    if (reason) {
+      await applyAutoModAction({ bot, ws, guild, member, message, channel, config: autoMod.config || {}, reason });
+      return;
+    }
   }
+
+  const botGuard = enabledAutomation(bot, 'botGuard', guild);
+  if (botGuard && (await runBotGuard(bot, ws, guild, member, message, channel, botGuard.config || {}))) return;
 
   const antiSpam = (bot.automations || []).find(
     (entry) =>
@@ -3091,6 +3373,8 @@ async function handleMemberAdd(botId, member) {
   const guild = member.guild;
   const raided = await handleRaidJoin(botId, member);
   if (raided) return;
+  const botGuard = enabledAutomation(bot, 'botGuard', guild);
+  if (botGuard && (await runBotGuard(bot, ws, guild, member, null, guild.systemChannel, botGuard.config || {}))) return;
   const welcome = enabledAutomation(bot, 'welcome', guild);
   if (welcome) {
     const channel = resolveChannel(guild, welcome.config?.channel) || guild.systemChannel;

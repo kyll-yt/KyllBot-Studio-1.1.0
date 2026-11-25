@@ -7,8 +7,10 @@ import { db, findUserByEmail, findUserById, flushPersistence, newId, persist, st
 import { remoteStoreInfo } from './supabase-store.js';
 import {
   allowDemoLogin,
+  beginSecurityChallenge,
   clearCookie,
   clearDemoCookie,
+  completeSecurityChallenge,
   createSession,
   destroySession,
   devLoginEnabled,
@@ -325,12 +327,12 @@ function migrateWorkspace(ws) {
       }
     }
   }
-  const learners = (ws.learners || []).filter((learner) => !FAKE_EMAIL.test(learner.email));
+  const learners = (ws.learners || []).filter((learner) => !FAKE_EMAIL.test(learner.email) && !FAKE_NAME.test(learner.name || ''));
   if (learners.length !== (ws.learners || []).length) {
     ws.learners = learners;
     changed = true;
   }
-  const team = (ws.team || []).filter((member) => !FAKE_EMAIL.test(member.email));
+  const team = (ws.team || []).filter((member) => !FAKE_EMAIL.test(member.email) && !FAKE_NAME.test(member.name || ''));
   if (team.length !== (ws.team || []).length) {
     ws.team = team;
     changed = true;
@@ -530,6 +532,7 @@ const AUTOMATION_TYPE_LABELS = {
   logs: 'Journaux de modération',
   reminders: 'Rappels de formation',
   antiRaid: 'Anti-raid',
+  botGuard: 'Bouclier anti-bots',
   repair: 'Réparation des salons et rôles',
 };
 
@@ -543,6 +546,25 @@ const AUTOMATION_CONFIG_KEYS = new Set([
   'xpPerMessage',
   'antiSpam',
   'blockLinks',
+  'blockInvites',
+  'blockNitro',
+  'blockBadWords',
+  'badWords',
+  'blockCaps',
+  'capsThreshold',
+  'blockMentions',
+  'maxMentions',
+  'blockRepeat',
+  'repeatWindow',
+  'blockZalgo',
+  'blockEmojiSpam',
+  'timeoutMinutes',
+  'warnMessage',
+  'scoreThreshold',
+  'suspiciousNames',
+  'blockBotAccounts',
+  'quarantineRole',
+  'scanMessages',
   'logChannel',
   'joinThreshold',
   'joinWindow',
@@ -736,9 +758,17 @@ app.post(
 app.post(
   '/api/auth/verify-code',
   wrap(async (req, res) => {
-    const { user, token } = verifyLoginCode(req.body?.email, req.body?.code, req);
-    res.setHeader('Set-Cookie', [sessionCookie(token), clearDemoCookie()]);
-    res.json({ user: publicUser(user) });
+    const result = verifyLoginCode(req.body?.email, req.body?.code, req);
+    res.json(result);
+  }),
+);
+
+app.post(
+  '/api/auth/security-code',
+  wrap(async (req, res) => {
+    const result = completeSecurityChallenge(req.body?.ticket, req.body || {}, req);
+    res.setHeader('Set-Cookie', [sessionCookie(result.token), clearDemoCookie()]);
+    res.json({ user: result.user, recoveryCode: result.recoveryCode || '', mode: result.mode });
   }),
 );
 
@@ -791,9 +821,9 @@ app.get(
         googleId: profile.googleId,
         provider: 'google',
       });
-      const { token } = createSession(user.id, req);
-      res.setHeader('Set-Cookie', [sessionCookie(token), 'kyll_oauth=; Path=/; Max-Age=0', clearDemoCookie()]);
-      res.redirect('/app');
+      const challenge = beginSecurityChallenge(user);
+      res.setHeader('Set-Cookie', ['kyll_oauth=; Path=/; Max-Age=0', clearDemoCookie()]);
+      res.redirect(`/login?security=${encodeURIComponent(challenge.ticket)}&mode=${challenge.mode}`);
     } catch (error) {
       console.error('Google OAuth:', error.message);
       res.redirect('/login?google=error');
@@ -1466,7 +1496,7 @@ app.post(
       type,
       serverId: targetServer?.id || '',
       label: str(req.body?.label, 80) || AUTOMATION_TYPE_LABELS[type],
-      enabled: false,
+      enabled: req.body?.enabled === true,
       config: sanitizeAutomationConfig(req.body?.config, {}),
     };
     bot.automations.push(automation);

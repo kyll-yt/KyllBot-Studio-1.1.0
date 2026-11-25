@@ -57,6 +57,8 @@ function viewDashboard() {
       ${statCard('Apprenants', fmt(stats.learners), `${stats.avgProgress} % de progression moyenne`, 'users')}
     </div>
 
+    <p class="stats-note">${icon('check')} Chiffres calculés en temps réel à partir de tes vrais bots, formations et apprenants. Aucun profil de démonstration n’est compté.</p>
+
     ${dailyRewardCard()}
 
     <div class="dash-grid">
@@ -203,6 +205,7 @@ const AUTOMATION_DESCRIPTIONS = {
   logs: 'Journalise les actions de modération.',
   reminders: 'Envoie des rappels de cours aux apprenants.',
   antiRaid: 'Détecte les vagues d’arrivées, sanctionne les comptes suspects et verrouille le serveur.',
+  botGuard: 'Analyse les comptes suspects, les self-bots et les comportements automatisés, puis isole ou sanctionne.',
   repair: 'Restaure automatiquement les salons, rôles et messages du bot après une suppression massive.',
 };
 
@@ -215,6 +218,7 @@ const AUTOMATION_TYPES = [
   { type: 'antiSpam', label: 'Anti-spam' },
   { type: 'autoMod', label: 'Auto-modération' },
   { type: 'antiRaid', label: 'Anti-raid' },
+  { type: 'botGuard', label: 'Bouclier anti-bots' },
   { type: 'repair', label: 'Réparation salons / rôles' },
   { type: 'logs', label: 'Journaux de modération' },
   { type: 'reminders', label: 'Rappels de formation' },
@@ -250,6 +254,57 @@ const AUTOMATION_FIELDS = {
   autoMod: [
     { key: 'category', label: 'Catégorie', placeholder: 'Modération', list: 'categorySuggestions' },
     { key: 'blockLinks', label: 'Bloquer les liens', type: 'boolean' },
+    { key: 'blockInvites', label: 'Bloquer les invitations Discord', type: 'boolean' },
+    { key: 'blockNitro', label: 'Bloquer les faux cadeaux Nitro / Steam', type: 'boolean' },
+    { key: 'blockBadWords', label: 'Filtrer les mots interdits', type: 'boolean' },
+    { key: 'badWords', label: 'Mots interdits (séparés par des virgules)', placeholder: 'insulte, scam, arnaque' },
+    { key: 'blockCaps', label: 'Limiter les majuscules', type: 'boolean' },
+    { key: 'capsThreshold', label: 'Pourcentage de majuscules', type: 'number', min: 50, max: 100, default: 75 },
+    { key: 'blockMentions', label: 'Limiter les mentions', type: 'boolean' },
+    { key: 'maxMentions', label: 'Mentions maximum', type: 'number', min: 2, max: 50, default: 5 },
+    { key: 'blockRepeat', label: 'Bloquer les messages répétés', type: 'boolean' },
+    { key: 'repeatWindow', label: 'Fenêtre anti-répétition (secondes)', type: 'number', min: 5, max: 300, default: 15 },
+    { key: 'blockZalgo', label: 'Bloquer le texte zalgo', type: 'boolean' },
+    { key: 'blockEmojiSpam', label: 'Bloquer les rafales d’emojis', type: 'boolean' },
+    {
+      key: 'action',
+      label: 'Sanction automatique',
+      type: 'select',
+      default: 'delete',
+      options: [
+        ['delete', 'Supprimer le message'],
+        ['timeout', 'Supprimer + exclure 10 minutes'],
+        ['kick', 'Supprimer + expulser'],
+        ['ban', 'Supprimer + bannir'],
+      ],
+    },
+    { key: 'timeoutMinutes', label: 'Durée d’exclusion (minutes)', type: 'number', min: 1, max: 10080, default: 10 },
+    { key: 'warnMessage', label: 'Message d’avertissement', placeholder: 'Ce message ne respecte pas les règles.' },
+    { key: 'logChannel', label: 'Salon des alertes', placeholder: '#logs', list: 'channelSuggestions' },
+  ],
+  botGuard: [
+    { key: 'minAccountAgeDays', label: 'Âge minimum du compte (jours)', type: 'number', min: 0, max: 365, default: 3 },
+    { key: 'requireAvatar', label: 'Exiger une photo de profil', type: 'boolean' },
+    { key: 'suspiciousNames', label: 'Détecter les pseudos suspects', type: 'boolean' },
+    { key: 'blockBotAccounts', label: 'Bloquer les bots non autorisés', type: 'boolean' },
+    { key: 'scoreThreshold', label: 'Seuil de risque (2 à 10)', type: 'number', min: 2, max: 10, default: 5 },
+    {
+      key: 'action',
+      label: 'Action sur un compte suspect',
+      type: 'select',
+      default: 'timeout',
+      options: [
+        ['timeout', 'Exclure temporairement'],
+        ['quarantine', 'Mettre en quarantaine'],
+        ['kick', 'Expulser'],
+        ['ban', 'Bannir'],
+        ['alert', 'Alerter le staff seulement'],
+      ],
+    },
+    { key: 'timeoutMinutes', label: 'Durée d’exclusion (minutes)', type: 'number', min: 1, max: 10080, default: 60 },
+    { key: 'quarantineRole', label: 'Rôle de quarantaine', placeholder: 'Quarantaine', list: 'roleSuggestions' },
+    { key: 'logChannel', label: 'Salon des alertes', placeholder: '#logs', list: 'channelSuggestions' },
+    { key: 'scanMessages', label: 'Analyser aussi les messages', type: 'boolean', default: true },
   ],
   antiRaid: [
     { key: 'joinThreshold', label: 'Arrivées avant déclenchement', type: 'number', min: 2, max: 100, default: 10 },
@@ -285,6 +340,154 @@ const AUTOMATION_FIELDS = {
   ],
 };
 
+const AUTOMATION_PRESETS = [
+  {
+    id: 'welcome-express',
+    type: 'welcome',
+    label: 'Accueil express',
+    description: 'Message de bienvenue chaleureux, avec mention et présentation.',
+    icon: 'userPlus',
+    tone: 'violet',
+    config: {
+      channel: '#bienvenue',
+      message: 'Bienvenue {user} sur **{server}** ! Passe lire les règles puis présente-toi dans #présentations. 🎉',
+    },
+  },
+  {
+    id: 'autorole-membre',
+    type: 'autorole',
+    label: 'Rôle de membre',
+    description: 'Donne automatiquement le rôle Membre à chaque arrivée.',
+    icon: 'shield',
+    tone: 'green',
+    config: { role: 'Membre' },
+  },
+  {
+    id: 'automod-complet',
+    type: 'autoMod',
+    label: 'AutoMod complet',
+    description: 'Liens, invitations, faux Nitro, majuscules, mentions, spam et mots interdits.',
+    icon: 'shield',
+    tone: 'pink',
+    config: {
+      blockLinks: true,
+      blockInvites: true,
+      blockNitro: true,
+      blockBadWords: true,
+      badWords: 'scam, arnaque, free nitro, hack, cheat',
+      blockCaps: true,
+      capsThreshold: 80,
+      blockMentions: true,
+      maxMentions: 5,
+      blockRepeat: true,
+      repeatWindow: 15,
+      blockZalgo: true,
+      blockEmojiSpam: true,
+      action: 'timeout',
+      timeoutMinutes: 10,
+      warnMessage: 'Ce message ne respecte pas les règles du serveur.',
+      logChannel: '#logs',
+    },
+  },
+  {
+    id: 'antispam-express',
+    type: 'antiSpam',
+    label: 'Anti-spam express',
+    description: 'Exclut 1 minute les membres qui envoient trop de messages d’un coup.',
+    icon: 'zap',
+    tone: 'amber',
+    config: { threshold: 5, channel: '#général' },
+  },
+  {
+    id: 'anti-raid',
+    type: 'antiRaid',
+    label: 'Anti-raid renforcé',
+    description: 'Détecte les vagues d’arrivées et verrouille la vérification du serveur.',
+    icon: 'shield',
+    tone: 'pink',
+    config: {
+      joinThreshold: 8,
+      joinWindow: 10,
+      minAccountAgeDays: 7,
+      action: 'kick',
+      lockdown: true,
+      logChannel: '#logs',
+    },
+  },
+  {
+    id: 'bot-shield',
+    type: 'botGuard',
+    label: 'Bouclier anti-bots',
+    description: 'Score les comptes suspects : âge, avatar, pseudo, self-bots et messages automatisés.',
+    icon: 'bot',
+    tone: 'cyan',
+    config: {
+      minAccountAgeDays: 3,
+      requireAvatar: true,
+      suspiciousNames: true,
+      blockBotAccounts: true,
+      scoreThreshold: 5,
+      action: 'timeout',
+      timeoutMinutes: 60,
+      logChannel: '#logs',
+      scanMessages: true,
+    },
+  },
+  {
+    id: 'tickets-support',
+    type: 'ticketPanel',
+    label: 'Panneau de tickets',
+    description: 'Un salon #support et une catégorie pour ouvrir des tickets proprement.',
+    icon: 'ticket',
+    tone: 'violet',
+    config: { channel: '#support', category: 'Support' },
+  },
+  {
+    id: 'logs-moderation',
+    type: 'logs',
+    label: 'Journal de modération',
+    description: 'Centralise les suppressions, sanctions et alertes dans #logs.',
+    icon: 'terminal',
+    tone: 'grey',
+    config: { channel: '#logs' },
+  },
+  {
+    id: 'niveaux-xp',
+    type: 'levels',
+    label: 'Niveaux & XP',
+    description: 'Donne de l’XP en discutant et annonce les montées de niveau.',
+    icon: 'award',
+    tone: 'green',
+    config: { channel: '#niveaux', xpPerMessage: 15 },
+  },
+  {
+    id: 'repair-express',
+    type: 'repair',
+    label: 'Réparation automatique',
+    description: 'Restaure les salons, rôles et messages du bot après une suppression massive.',
+    icon: 'gear',
+    tone: 'amber',
+    config: {
+      channelDeleteThreshold: 3,
+      roleDeleteThreshold: 2,
+      windowSeconds: 60,
+      restoreMessages: true,
+      repairChannels: true,
+      repairRoles: true,
+      logChannel: '#logs',
+    },
+  },
+  {
+    id: 'rappels-formation',
+    type: 'reminders',
+    label: 'Rappels de formation',
+    description: 'Envoie un rappel chaque lundi matin dans #annonces.',
+    icon: 'clock',
+    tone: 'cyan',
+    config: { channel: '#annonces', cron: 'lundi 09:00' },
+  },
+];
+
 const CHANNEL_SUGGESTIONS = ['#bienvenue', '#général', '#annonces', '#logs', '#support', '#niveaux', '#règles'];
 const CATEGORY_SUGGESTIONS = ['Accueil', 'Support', 'Modération', 'Formation', 'Logs', 'Annonces'];
 const FLOW_ROLES_FALLBACK = ['everyone', 'Membre', 'Modérateur', 'Administrateur', 'Bot', 'VIP'];
@@ -310,6 +513,27 @@ function automationSummary(automation) {
     ${pills.join('')}
     ${details.length ? `<span class="auto-detail">${details.join(' · ')}</span>` : ''}
     ${!pills.length && !details.length ? '<span class="auto-detail">Aucun salon configuré pour l’instant.</span>' : ''}
+  </div>`;
+}
+
+function automationPresetGrid(bot) {
+  return `<div class="preset-section">
+    <div class="preset-head">
+      <div>
+        <h4>${icon('spark')} Automatisations prêtes à l’emploi</h4>
+        <p>Un clic pour activer une base solide. Tu pourras ensuite ajuster les salons et les options.</p>
+      </div>
+      <span class="pill violet">${AUTOMATION_PRESETS.length} modèles</span>
+    </div>
+    <div class="preset-grid">
+      ${AUTOMATION_PRESETS.map(
+        (preset) => `<button type="button" class="preset-card" data-action="add-automation-preset" data-id="${esc(bot.id)}" data-preset="${esc(preset.id)}">
+          <span class="preset-ic tone-${esc(preset.tone || 'violet')}">${icon(preset.icon || 'zap')}</span>
+          <span class="preset-main"><b>${esc(preset.label)}</b><small>${esc(preset.description)}</small></span>
+          <span class="preset-add">${icon('plus')}</span>
+        </button>`,
+      ).join('')}
+    </div>
   </div>`;
 }
 
@@ -613,6 +837,8 @@ function viewBotDetail(id) {
     body = `<div class="panel">
       <div class="panel-head"><h3>Automatisations · ${esc(serverName)}</h3><div class="ph-actions"><span class="pill violet">${automations.filter((a) => a.enabled).length} active(s)</span><button class="btn btn-primary btn-sm" data-action="new-automation" data-id="${esc(bot.id)}">${icon('plus')} Ajouter</button></div></div>
       <div class="panel-body">
+        ${automationPresetGrid(bot)}
+        <div class="auto-list">
         ${
           automations.length
             ? automations
@@ -638,6 +864,7 @@ function viewBotDetail(id) {
                 <button class="btn btn-primary" data-action="new-automation" data-id="${esc(bot.id)}">Ajouter une automatisation</button>
               </div>`
         }
+        </div>
       </div>
     </div>`;
   } else {
@@ -1995,6 +2222,42 @@ onAction('new-automation', (el) => {
   };
   typeSelect?.addEventListener('change', renderFields);
   renderFields();
+});
+
+onAction('add-automation-preset', async (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  const preset = AUTOMATION_PRESETS.find((entry) => entry.id === el.dataset.preset);
+  if (!bot || !preset) return;
+  const server = activeBotServer(bot);
+  if (!server) {
+    toast('Choisis d’abord un serveur Discord.', 'error');
+    return;
+  }
+  const existing = (bot.automations || []).find(
+    (entry) => entry.type === preset.type && entry.label === preset.label && itemServerKey(bot, entry) === server.id,
+  );
+  if (existing) {
+    toast('Cette automatisation est déjà installée sur ce serveur.', 'info');
+    return;
+  }
+  el.disabled = true;
+  try {
+    await api(`/api/bots/${bot.id}/automations`, {
+      method: 'POST',
+      body: JSON.stringify({
+        type: preset.type,
+        label: preset.label,
+        config: preset.config,
+        serverId: server.id,
+        enabled: true,
+      }),
+    });
+    await refresh();
+    toast(`« ${preset.label} » activée sur ${server.guildName || server.name}.`, 'success');
+  } catch (error) {
+    toast(error.message, 'error');
+    el.disabled = false;
+  }
 });
 
 onAction('delete-automation', (el) => {

@@ -60,6 +60,7 @@ export const BLOCKS = {
   giveaway: { label: 'Giveaway', group: 'interaction' },
   await: { label: 'Attendre interaction', group: 'interaction' },
   accountCheck: { label: 'Vérifier le compte', group: 'moderation' },
+  automationRun: { label: 'Lancer une automatisation', group: 'moderation' },
   moderation: { label: 'Modération complète', group: 'moderation' },
   timeout: { label: 'Exclure temporairement', group: 'moderation' },
   kick: { label: 'Expulser', group: 'moderation' },
@@ -623,6 +624,12 @@ function normalizeBlock(block) {
         kind: ['button', 'reaction', 'message'].includes(block?.kind) ? block.kind : 'button',
         timeout: num(block?.timeout, 5, 3600, 60),
       };
+    case 'automationRun':
+      return {
+        ...base,
+        automationType: str(block?.automationType, 40) || 'autoMod',
+        notify: block?.notify === undefined ? true : Boolean(block.notify),
+      };
     case 'accountCheck':
       return {
         ...base,
@@ -1153,6 +1160,39 @@ export function flowTemplate(template, botName = 'KyllBot') {
       trigger: { type: 'booster' },
       blocks: [
         { type: 'message', channel: '#général', text: 'Merci {{user.mention}} pour ton boost sur **{{server.name}}** ! 💜' },
+      ],
+    });
+  }
+
+  if (template === 'botguard') {
+    return sanitizeFlow({
+      ...base,
+      name: 'Bouclier anti-bots',
+      description: 'Vérifie chaque arrivée et isole les comptes suspects.',
+      trigger: { type: 'join' },
+      blocks: [
+        {
+          type: 'accountCheck',
+          minAgeDays: 3,
+          requireAvatar: true,
+          blockBots: true,
+          failAction: 'continue',
+          failMessage: '🚫 Ton compte est trop récent ou suspect. Contacte le staff.',
+          variable: 'account_ok',
+          channel: '#logs',
+        },
+        {
+          type: 'condition',
+          mode: 'all',
+          rules: [{ left: '{{account_ok}}', op: 'eq', right: 'non' }],
+          then: [
+            { type: 'moderation', action: 'timeout', duration: 60, durationUnit: 'minutes', reason: 'Compte suspect — bouclier anti-bots', logChannel: '#logs' },
+            { type: 'log', text: 'Bouclier anti-bots : {{user.name}} isolé ({{account_reasons}}).' },
+          ],
+          else: [
+            { type: 'message', channel: '#bienvenue', text: 'Bienvenue {{user.mention}} ! Ton compte est vérifié. 🎉' },
+          ],
+        },
       ],
     });
   }
@@ -1693,6 +1733,15 @@ export function runFlow(flow, input = {}) {
         const text = interpolate(block.text, ctx, vars);
         outputs.push({ kind: 'log', text });
         entry.detail = text;
+        break;
+      }
+      case 'automationRun': {
+        outputs.push({
+          kind: 'automationRun',
+          automationType: block.automationType || 'autoMod',
+          notify: block.notify !== false,
+        });
+        entry.detail = `automatisation ${block.automationType || 'autoMod'}`;
         break;
       }
       case 'note': {

@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 900" fill="none" role="img" aria-label="Cœur numérique KyllBot">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="45%" r="55%">
+      <stop offset="0" stop-color="#241a55" stop-opacity=".85"/>
+      <stop offset=".55" stop-color="#0d0a1d" stop-opacity=".5"/>
+      <stop offset="1" stop-color="#07060d" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="violet" x1="180" y1="160" x2="720" y2="760" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#b45cff"/><stop offset=".5" stop-color="#7c5cff"/><stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+    <linearGradient id="cyan" x1="240" y1="720" x2="680" y2="180" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#22d3ee"/><stop offset="1" stop-color="#7c5cff" stop-opacity=".25"/>
+    </linearGradient>
+    <radialGradient id="core" cx="42%" cy="36%" r="62%">
+      <stop stop-color="#ffffff"/><stop offset=".14" stop-color="#dcd2ff"/><stop offset=".38" stop-color="#8c6bff"/><stop offset=".7" stop-color="#3b247d"/><stop offset="1" stop-color="#120d28"/>
+    </radialGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="10" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="soft" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="28"/>
+    </filter>
+    <pattern id="grid" width="56" height="56" patternUnits="userSpaceOnUse">
+      <path d="M56 0H0V56" stroke="#8f7bff" stroke-opacity=".11" stroke-width="1"/>
+    </pattern>
+    <clipPath id="clip"><circle cx="450" cy="450" r="430"/></clipPath>
+  </defs>
+
+  <circle cx="450" cy="450" r="440" fill="url(#bg)"/>
+  <g clip-path="url(#clip)" opacity=".8">
+    <rect x="20" y="20" width="860" height="860" fill="url(#grid)" transform="rotate(-12 450 450)"/>
+  </g>
+
+  <g opacity=".55" filter="url(#soft)">
+    <circle cx="320" cy="280" r="150" fill="#7c5cff" fill-opacity=".55"/>
+    <circle cx="640" cy="570" r="160" fill="#22d3ee" fill-opacity=".28"/>
+    <circle cx="500" cy="430" r="210" fill="#b45cff" fill-opacity=".2"/>
+  </g>
+
+  <g class="orbit orbit-a" style="transform-origin:450px 450px">
+    <ellipse cx="450" cy="450" rx="330" ry="132" transform="rotate(-28 450 450)" stroke="url(#violet)" stroke-opacity=".6" stroke-width="1.4"/>
+    <ellipse cx="450" cy="450" rx="330" ry="132" transform="rotate(28 450 450)" stroke="url(#cyan)" stroke-opacity=".38" stroke-width="1.1" stroke-dasharray="4 10"/>
+  </g>
+  <g class="orbit orbit-b" style="transform-origin:450px 450px">
+    <ellipse cx="450" cy="450" rx="260" ry="260" stroke="url(#violet)" stroke-opacity=".25" stroke-width="1.2"/>
+    <ellipse cx="450" cy="450" rx="205" ry="205" stroke="#22d3ee" stroke-opacity=".2" stroke-width="1" stroke-dasharray="2 9"/>
+  </g>
+
+  <g stroke="url(#violet)" stroke-opacity=".45" stroke-width="1.4">
+    <path d="M450 110v82M450 708v82M110 450h82M708 450h82"/>
+    <path d="m208 208 58 58M634 634l58 58M692 208l-58 58M266 634l-58 58" stroke-dasharray="3 8"/>
+  </g>
+  <g fill="#a99cff">
+    <circle cx="450" cy="104" r="4"/><circle cx="450" cy="796" r="3" fill="#22d3ee"/>
+    <circle cx="104" cy="450" r="3" fill="#22d3ee"/><circle cx="796" cy="450" r="4"/>
+    <circle cx="208" cy="208" r="2.5" fill="#22d3ee"/><circle cx="692" cy="692" r="2.5"/>
+  </g>
+
+  <g class="core-glow" filter="url(#glow)">
+    <circle cx="450" cy="450" r="118" fill="#7c5cff" fill-opacity=".22"/>
+    <circle cx="450" cy="450" r="92" fill="url(#core)" stroke="url(#violet)" stroke-width="2"/>
+    <circle cx="450" cy="450" r="72" fill="none" stroke="#fff" stroke-opacity=".28" stroke-width="1"/>
+    <path d="M424 410v80M424 450h26l30-40h26l-34 40 34 40h-27l-29-36h-26" stroke="#fff" stroke-opacity=".92" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <g class="pulse-ring" style="transform-origin:450px 450px">
+    <circle cx="450" cy="450" r="130" stroke="#b45cff" stroke-opacity=".5" stroke-width="1.4"/>
+    <circle cx="450" cy="450" r="160" stroke="#22d3ee" stroke-opacity=".28" stroke-width="1"/>
+  </g>
+
+  <g fill="#e9e5ff">
+    <circle class="star s1" cx="280" cy="210" r="2.2"/><circle class="star s2" cx="650" cy="250" r="1.7"/>
+    <circle class="star s3" cx="230" cy="610" r="1.8"/><circle class="star s4" cx="690" cy="650" r="2.3"/>
+    <circle class="star s5" cx="560" cy="170" r="1.4"/><circle class="star s6" cx="340" cy="740" r="1.5"/>
+  </g>
+
+  <g opacity=".9" font-family="'JetBrains Mono',monospace" font-size="11" fill="#b9afff">
+    <text x="590" y="360">AUTOMOD · ON</text>
+    <text x="218" y="540" fill="#7de7f7">FLOW · READY</text>
+  </g>
+
+  <style>
+    @keyframes kbSpin { to { transform: rotate(360deg); } }
+    @keyframes kbSpinBack { to { transform: rotate(-360deg); } }
+    @keyframes kbPulse { 0%,100% { opacity:.28; transform:scale(.96); } 50% { opacity:.8; transform:scale(1.04); } }
+    @keyframes kbTwinkle { 0%,100% { opacity:.3; } 50% { opacity:1; } }
+    .orbit-a { animation: kbSpin 34s linear infinite; }
+    .orbit-b { animation: kbSpinBack 48s linear infinite; }
+    .pulse-ring { animation: kbPulse 4.5s ease-in-out infinite; }
+    .core-glow { animation: kbPulse 5.5s ease-in-out infinite; }
+    .star { animation: kbTwinkle 3.4s ease-in-out infinite; }
+    .s2 { animation-delay:-.8s } .s3 { animation-delay:-1.6s } .s4 { animation-delay:-2.2s } .s5 { animation-delay:-2.8s } .s6 { animation-delay:-3.1s }
+  </style>
+</svg>

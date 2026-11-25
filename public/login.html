@@ -19,9 +19,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/site.css" />
+  <link rel="stylesheet" href="/css/v18/site.css" />
 </head>
 <body>
+  <div class="kb-intro" id="kbIntro" hidden aria-hidden="true">
+    <div class="kb-intro-stage">
+      <div class="kb-intro-rings"><i></i><i></i><i></i></div>
+      <div class="kb-intro-logo"><img src="/assets/logo.svg" alt="" width="54" height="54" /></div>
+      <div class="kb-intro-title" aria-label="KyllBot"><span>K</span><span>y</span><span>l</span><span>l</span><span>B</span><span>o</span><span>t</span></div>
+      <div class="kb-intro-sub">Studio officiel <b>· 1.1.4</b></div>
+      <div class="kb-intro-loader"><i></i></div>
+    </div>
+  </div>
   <div class="auth-shell">
     <aside class="auth-aside">
       <a class="brand" href="/">
@@ -130,6 +139,57 @@
           </form>
         </section>
 
+        <section class="auth-step" id="stepSecurity">
+          <h2 id="securityTitle">Ton code de sécurité</h2>
+          <p class="sub" id="securitySub">Ce code à 6 chiffres protège ton studio et tes sauvegardes.</p>
+          <div class="security-badge">
+            <span class="security-badge-ic">🔐</span>
+            <div>
+              <b id="securityModeLabel">Sécurité renforcée</b>
+              <span id="securityEmailDisplay">—</span>
+            </div>
+          </div>
+          <form id="securityForm" novalidate>
+            <div class="field">
+              <label for="securityCode" id="securityCodeLabel">Code de sécurité (6 chiffres)</label>
+              <input class="input code-secret" type="password" id="securityCode" name="code" inputmode="numeric" autocomplete="new-password" maxlength="6" placeholder="••••••" required />
+            </div>
+            <div class="field" id="securityConfirmField">
+              <label for="securityConfirm">Confirme ton code</label>
+              <input class="input code-secret" type="password" id="securityConfirm" name="confirm" inputmode="numeric" autocomplete="new-password" maxlength="6" placeholder="••••••" required />
+            </div>
+            <div id="recoveryFields" hidden>
+              <div class="field">
+                <label for="recoveryCode">Code de secours</label>
+                <input class="input" id="recoveryCode" name="recoveryCode" placeholder="KB-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="field">
+                <label for="recoveryNewCode">Nouveau code de sécurité</label>
+                <input class="input code-secret" type="password" id="recoveryNewCode" name="newCode" inputmode="numeric" autocomplete="new-password" maxlength="6" placeholder="••••••" />
+              </div>
+              <div class="field">
+                <label for="recoveryConfirm">Confirme le nouveau code</label>
+                <input class="input code-secret" type="password" id="recoveryConfirm" name="recoveryConfirm" inputmode="numeric" autocomplete="new-password" maxlength="6" placeholder="••••••" />
+              </div>
+            </div>
+            <button class="btn btn-primary btn-block" type="submit" id="securitySubmit">Continuer</button>
+            <button class="link-btn" type="button" id="recoveryToggle" style="display:block;margin:16px auto 0">Code oublié ? Utiliser mon code de secours</button>
+            <button class="link-btn" type="button" id="securityBack" style="display:block;margin:10px auto 0">Utiliser une autre adresse</button>
+          </form>
+          <p class="auth-legal" style="margin-top:18px">Ton studio et tes sauvegardes restent liés à ton compte, même après une déconnexion.</p>
+        </section>
+
+        <section class="auth-step" id="stepRecovery">
+          <h2>Ton code de secours</h2>
+          <p class="sub">Garde ce code précieusement. Il permet de retrouver ton studio si tu oublies ton code de sécurité.</p>
+          <div class="recovery-code-box">
+            <code id="recoveryCodeValue">KB-XXXX-XXXX-XXXX</code>
+            <button class="btn btn-ghost btn-sm" type="button" id="copyRecovery">Copier</button>
+          </div>
+          <p class="auth-legal">Ce code ne sera plus affiché. Note-le dans un endroit sûr, ou dans ton gestionnaire de mots de passe.</p>
+          <button class="btn btn-primary btn-block" type="button" id="recoveryDone" style="margin-top:18px">J’ai sauvegardé mon code</button>
+        </section>
+
         <p class="auth-legal" style="margin-top:26px">
           Vous découvrez ? <a href="#" id="demoLink">Ouvrir un compte de démonstration</a>
         </p>
@@ -154,7 +214,8 @@
     </main>
   </div>
 
-  <script src="/js/pwa.js"></script>
-  <script src="/js/auth.js"></script>
+  <script src="/js/v18/pwa.js"></script>
+  <script src="/js/v18/auth.js"></script>
+  <script src="/js/v18/intro.js"></script>
 </body>
 </html>

@@ -4,9 +4,31 @@
 /* état & utilitaires                                                  */
 /* ------------------------------------------------------------------ */
 
-const APP_VERSION = '1.1.3';
+const APP_VERSION = '1.1.4';
 
 const APP_CHANGELOG = [
+  {
+    version: '1.1.4',
+    date: '2026-11-21',
+    title: 'Sécurité, automatisations et expérience',
+    items: [
+      'Connexion renforcée : un code de sécurité à 6 chiffres est obligatoire, avec un code de secours pour retrouver son studio.',
+      'Les sauvegardes restent liées au compte après une déconnexion : rien n’est effacé.',
+      'Nouvelle animation d’entrée et nouveau visuel de cœur numérique KyllBot.',
+      'Automatisations prêtes à l’emploi en un clic : accueil, rôles, AutoMod, anti-spam, anti-raid, tickets, logs, niveaux et réparation.',
+      'Nouveau bouclier anti-bots : score des comptes suspects, quarantaine, exclusion, expulsion ou bannissement.',
+      'AutoMod enrichi : invitations, faux Nitro, liens, mots interdits, majuscules, mentions, messages répétés, zalgo et rafales d’emojis.',
+      'Commandes prêtes à l’emploi : 13 modèles (bienvenue, règles, ticket, sondage, giveaway, vérification…).',
+      'Nouveau bloc « Lancer une automatisation » et modèle de flux « Bouclier anti-bots » dans l’éditeur 2D.',
+      'Statistiques calculées uniquement à partir de votre activité réelle, sans profils fictifs.',
+      'Récompense quotidienne en crédits et boutique : achats immédiats avec le solde, sans carte bancaire.',
+      'Plan Gratuit amélioré : 60 commandes par bot, AutoMod, bouclier anti-bots et statistiques réelles.',
+      'Fiches apprenants et équipe : badge « compte lié » et suppression directe des personnes.',
+      'Formations : explication concrète de l’utilité, des bénéfices et du suivi des apprenants.',
+      'Création de bot guidée avec le Token Discord et le choix du serveur.',
+      'Éditeur de flux 2D : démarrage guidé, blocs prêts à l’emploi et aperçu des réactions.',
+    ],
+  },
   {
     version: '1.1.3',
     date: '2026-11-21',

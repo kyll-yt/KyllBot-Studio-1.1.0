@@ -1,4 +1,4 @@
-const CACHE = 'kyllbot-studio-1.1.3-serveur-complet';
+const CACHE = 'kyllbot-studio-1.1.4-serveur-complet';
 const PRECACHE = [
   '/login',
   '/offline.html',
@@ -6,8 +6,8 @@ const PRECACHE = [
   '/assets/logo.svg',
   '/assets/icon-192.png',
   '/assets/icon-512.png',
-  '/css/v17/site.css',
-  '/css/v17/app.css',
+  '/css/v18/site.css',
+  '/css/v18/app.css',
 ];
 
 self.addEventListener('install', (event) => {

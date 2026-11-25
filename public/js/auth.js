@@ -2,6 +2,8 @@ const els = {
   error: document.getElementById('authError'),
   stepEmail: document.getElementById('stepEmail'),
   stepCode: document.getElementById('stepCode'),
+  stepSecurity: document.getElementById('stepSecurity'),
+  stepRecovery: document.getElementById('stepRecovery'),
   emailForm: document.getElementById('emailForm'),
   email: document.getElementById('email'),
   emailSubmit: document.getElementById('emailSubmit'),
@@ -12,6 +14,25 @@ const els = {
   codeSubmit: document.getElementById('codeSubmit'),
   resendBtn: document.getElementById('resendBtn'),
   changeEmail: document.getElementById('changeEmail'),
+  securityForm: document.getElementById('securityForm'),
+  securityCode: document.getElementById('securityCode'),
+  securityConfirm: document.getElementById('securityConfirm'),
+  securityConfirmField: document.getElementById('securityConfirmField'),
+  securitySubmit: document.getElementById('securitySubmit'),
+  securityTitle: document.getElementById('securityTitle'),
+  securitySub: document.getElementById('securitySub'),
+  securityModeLabel: document.getElementById('securityModeLabel'),
+  securityEmailDisplay: document.getElementById('securityEmailDisplay'),
+  securityCodeLabel: document.getElementById('securityCodeLabel'),
+  recoveryToggle: document.getElementById('recoveryToggle'),
+  recoveryFields: document.getElementById('recoveryFields'),
+  recoveryCode: document.getElementById('recoveryCode'),
+  recoveryNewCode: document.getElementById('recoveryNewCode'),
+  recoveryConfirm: document.getElementById('recoveryConfirm'),
+  securityBack: document.getElementById('securityBack'),
+  recoveryCodeValue: document.getElementById('recoveryCodeValue'),
+  copyRecovery: document.getElementById('copyRecovery'),
+  recoveryDone: document.getElementById('recoveryDone'),
   googleBtn: document.getElementById('googleBtn'),
   devNote: document.getElementById('devNote'),
   devCode: document.getElementById('devCode'),
@@ -21,7 +42,7 @@ const els = {
   ownerSubmit: document.getElementById('ownerSubmit'),
 };
 
-const state = { email: '', google: false, mail: false, devLogin: false, timer: null, busy: false };
+const state = { email: '', google: false, mail: false, devLogin: false, timer: null, busy: false, ticket: '', mode: 'setup', recoveryActive: false, recoveryCode: '', emailVerified: false };
 const inputs = [...els.codeRow.querySelectorAll('input')];
 
 function showError(message) {
@@ -43,9 +64,12 @@ function clearError() {
 function showStep(name) {
   els.stepEmail.classList.toggle('active', name === 'email');
   els.stepCode.classList.toggle('active', name === 'code');
+  els.stepSecurity.classList.toggle('active', name === 'security');
+  els.stepRecovery.classList.toggle('active', name === 'recovery');
   clearError();
   if (name === 'code') setTimeout(() => inputs[0].focus(), 120);
-  else els.email.focus();
+  else if (name === 'security') setTimeout(() => els.securityCode.focus(), 120);
+  else if (name === 'email') els.email.focus();
 }
 
 function setBusy(button, busy, label) {
@@ -124,6 +148,7 @@ els.emailForm.addEventListener('submit', async (event) => {
     els.email.focus();
     return;
   }
+  state.emailVerified = false;
   setBusy(els.emailSubmit, true, 'Envoi du code…');
   try {
     const ready = await requestCode(email);
@@ -146,11 +171,24 @@ function codeValue() {
 
 inputs.forEach((input, index) => {
   input.addEventListener('input', () => {
-    const digit = input.value.replace(/\D/g, '').slice(-1);
-    input.value = digit;
-    input.classList.toggle('filled', Boolean(digit));
+    const digits = input.value.replace(/\D/g, '');
+    if (digits.length > 1) {
+      digits
+        .slice(0, inputs.length - index)
+        .split('')
+        .forEach((digit, offset) => {
+          const target = inputs[index + offset];
+          target.value = digit;
+          target.classList.add('filled');
+        });
+      inputs[Math.min(index + digits.length, inputs.length - 1)].focus();
+    } else {
+      const digit = digits.slice(-1);
+      input.value = digit;
+      input.classList.toggle('filled', Boolean(digit));
+      if (digit && index < inputs.length - 1) inputs[index + 1].focus();
+    }
     clearError();
-    if (digit && index < inputs.length - 1) inputs[index + 1].focus();
     if (codeValue().length === 6) {
       setTimeout(() => {
         if (codeValue().length === 6) submitCode();
@@ -185,7 +223,7 @@ inputs.forEach((input, index) => {
 });
 
 async function submitCode() {
-  if (state.busy) return;
+  if (state.busy || state.emailVerified) return;
   clearError();
   const code = codeValue();
   if (code.length !== 6) {
@@ -194,10 +232,16 @@ async function submitCode() {
   }
   setBusy(els.codeSubmit, true, 'Vérification…');
   try {
-    await api('/api/auth/verify-code', {
+    const payload = await api('/api/auth/verify-code', {
       method: 'POST',
       body: JSON.stringify({ email: state.email, code }),
     });
+    if (payload.needsSecurityCode) {
+      state.emailVerified = true;
+      showSecurity(payload);
+      setBusy(els.codeSubmit, false);
+      return;
+    }
     els.codeSubmit.textContent = 'Bienvenue ! Redirection…';
     window.location.href = '/app';
   } catch (error) {
@@ -210,6 +254,111 @@ async function submitCode() {
     setBusy(els.codeSubmit, false);
   }
 }
+
+function setRecoveryMode(active) {
+  state.recoveryActive = active;
+  els.recoveryFields.hidden = !active;
+  els.securityCode.closest('.field').hidden = active;
+  els.securityConfirmField.hidden = active || state.mode !== 'setup';
+  els.recoveryToggle.textContent = active ? 'Revenir à mon code de sécurité' : 'Code oublié ? Utiliser mon code de secours';
+  els.securitySubmit.textContent = active ? 'Réinitialiser mon code' : state.mode === 'setup' ? 'Enregistrer mon code' : 'Déverrouiller mon studio';
+  clearError();
+  (active ? els.recoveryCode : els.securityCode).focus();
+}
+
+function showSecurity(payload) {
+  state.ticket = payload.ticket || state.ticket;
+  state.mode = payload.mode === 'verify' ? 'verify' : 'setup';
+  state.recoveryActive = false;
+  const setup = state.mode === 'setup';
+  els.securityTitle.textContent = setup ? 'Crée ton code de sécurité' : 'Entre ton code de sécurité';
+  els.securitySub.textContent = setup
+    ? 'Choisis 6 chiffres. Ce code protège ton studio et tes sauvegardes quand tu te déconnectes.'
+    : 'Saisis les 6 chiffres que tu as créés pour protéger ton studio.';
+  els.securityModeLabel.textContent = setup ? 'Nouveau code à créer' : 'Studio protégé par un code';
+  els.securityEmailDisplay.textContent = payload.email || state.email || 'Connexion sécurisée';
+  els.securityCodeLabel.textContent = setup ? 'Choisis un code à 6 chiffres' : 'Code de sécurité (6 chiffres)';
+  els.securityCode.value = '';
+  els.securityConfirm.value = '';
+  els.recoveryCode.value = '';
+  els.recoveryNewCode.value = '';
+  els.recoveryConfirm.value = '';
+  els.recoveryToggle.hidden = setup;
+  setRecoveryMode(false);
+  showStep('security');
+}
+
+els.securityForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  clearError();
+  const code = (state.recoveryActive ? els.recoveryNewCode.value : els.securityCode.value).replace(/\D/g, '');
+  const confirm = (state.recoveryActive ? els.recoveryConfirm.value : els.securityConfirm.value).replace(/\D/g, '');
+  if (code.length !== 6) {
+    showError('Le code de sécurité doit contenir 6 chiffres.');
+    (state.recoveryActive ? els.recoveryNewCode : els.securityCode).focus();
+    return;
+  }
+  if ((state.mode === 'setup' || state.recoveryActive) && code !== confirm) {
+    showError('Les deux codes ne correspondent pas.');
+    (state.recoveryActive ? els.recoveryConfirm : els.securityConfirm).focus();
+    return;
+  }
+  const body = { ticket: state.ticket, code };
+  if (state.mode === 'setup' || state.recoveryActive) body.confirm = confirm;
+  if (state.recoveryActive) body.recoveryCode = els.recoveryCode.value.trim();
+  if (state.recoveryActive && !body.recoveryCode) {
+    showError('Entre ton code de secours.');
+    els.recoveryCode.focus();
+    return;
+  }
+  setBusy(els.securitySubmit, true, 'Vérification…');
+  try {
+    const payload = await api('/api/auth/security-code', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    if (payload.recoveryCode) {
+      state.recoveryCode = payload.recoveryCode;
+      els.recoveryCodeValue.textContent = payload.recoveryCode;
+      els.recoveryDone.focus();
+      showStep('recovery');
+      setBusy(els.securitySubmit, false);
+      return;
+    }
+    window.location.href = '/app';
+  } catch (error) {
+    showError(error.message);
+    els.securityCode.value = '';
+    els.securityConfirm.value = '';
+    els.recoveryNewCode.value = '';
+    els.recoveryConfirm.value = '';
+    setBusy(els.securitySubmit, false);
+  }
+});
+
+els.recoveryToggle.addEventListener('click', () => setRecoveryMode(!state.recoveryActive));
+
+els.securityBack.addEventListener('click', () => {
+  clearInterval(state.timer);
+  state.ticket = '';
+  showStep('email');
+});
+
+els.copyRecovery.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(state.recoveryCode || els.recoveryCodeValue.textContent);
+    els.copyRecovery.textContent = 'Copié !';
+    setTimeout(() => {
+      els.copyRecovery.textContent = 'Copier';
+    }, 1800);
+  } catch {
+    showError('Copie impossible. Note le code à la main.');
+  }
+});
+
+els.recoveryDone.addEventListener('click', () => {
+  window.location.href = '/app';
+});
 
 els.codeForm.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -306,6 +455,14 @@ els.ownerForm?.addEventListener('submit', async (event) => {
     }
   } catch {
     /* serveur indisponible : on laisse le formulaire */
+  }
+
+  const securityTicket = params.get('security');
+  if (securityTicket) {
+    state.ticket = securityTicket;
+    state.mode = params.get('mode') === 'verify' ? 'verify' : 'setup';
+    showSecurity({ ticket: securityTicket, mode: state.mode, email: '' });
+    return;
   }
 
   try {

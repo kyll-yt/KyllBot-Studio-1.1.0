@@ -17,6 +17,7 @@ function courseHelpPanel() {
       <div>
         <h3>À quoi sert le côté Formation ?</h3>
         <p>Un parcours mesurable pour votre communauté : modules, leçons, quiz, progression réelle et certificats.</p>
+        <p style="margin-top:6px;font-size:11.5px;color:var(--muted-2)">Exemples concrets : accueil des nouveaux membres, formation des modérateurs, certification de clients ou de bénévoles.</p>
       </div>
       <button class="btn btn-ghost btn-sm" data-action="course-help">En savoir plus</button>
     </div>
@@ -306,6 +307,10 @@ onAction('course-help', () => {
       <div class="help-block">
         <h4>4. Automatiser</h4>
         <p>Le bot peut accueillir les apprenants, envoyer les rappels et attribuer un rôle Discord à la fin du parcours.</p>
+      </div>
+      <div class="help-block">
+        <h4>5. Des cas concrets</h4>
+        <p>Un serveur Discord qui accueille ses nouveaux membres, une équipe de modération à former, une association qui certifie ses bénévoles, ou un formateur qui vend un parcours à ses clients.</p>
       </div>
       <p class="hint">Les statistiques affichées sont calculées à partir des vraies inscriptions et des vrais scores. Aucune donnée de démonstration n’est ajoutée.</p>
     `,

@@ -8,6 +8,8 @@ const COOKIE = 'kyll_session';
 const SESSION_TTL = 30 * 24 * 3600e3;
 const CODE_TTL = 10 * 60e3;
 const MAX_ATTEMPTS = 5;
+const SECURITY_TTL = 10 * 60e3;
+const SECURITY_MAX_ATTEMPTS = 5;
 
 function hostedPublicly() {
   if (process.env.NODE_ENV === 'production') return true;
@@ -33,6 +35,137 @@ export const devLoginEnabled = DEV_LOGIN_CODE;
 const hash = (value) => crypto.createHash('sha256').update(String(value)).digest('hex');
 const codeHash = (email, code) => hash(`${email}:${code}:${authSecret()}`);
 const tokenHash = (token) => hash(`${token}:${authSecret()}`);
+
+function saltedHash(value, salt) {
+  return crypto.scryptSync(String(value), salt, 64).toString('hex');
+}
+
+function safeEqualHex(left, right) {
+  const a = Buffer.from(String(left || ''), 'hex');
+  const b = Buffer.from(String(right || ''), 'hex');
+  return a.length > 0 && a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function normalizeSecurityCode(value) {
+  return String(value || '').replace(/\D/g, '').slice(0, 6);
+}
+
+function normalizeRecoveryCode(value) {
+  return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
+}
+
+function newRecoveryCode() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let raw = '';
+  for (let index = 0; index < 12; index += 1) raw += alphabet[crypto.randomInt(0, alphabet.length)];
+  return `KB-${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
+}
+
+function setSecurityCode(user, code) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  user.securityCodeSalt = salt;
+  user.securityCodeHash = saltedHash(normalizeSecurityCode(code), salt);
+  user.securityCodeSetAt = new Date().toISOString();
+}
+
+function setRecoveryCode(user, recoveryCode) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  user.recoveryCodeSalt = salt;
+  user.recoveryCodeHash = saltedHash(normalizeRecoveryCode(recoveryCode), salt);
+  user.recoveryCodeSetAt = new Date().toISOString();
+}
+
+function verifySecurityCode(user, code) {
+  if (!user?.securityCodeHash || !user.securityCodeSalt) return false;
+  return safeEqualHex(user.securityCodeHash, saltedHash(normalizeSecurityCode(code), user.securityCodeSalt));
+}
+
+function verifyRecoveryCode(user, code) {
+  if (!user?.recoveryCodeHash || !user.recoveryCodeSalt) return false;
+  return safeEqualHex(user.recoveryCodeHash, saltedHash(normalizeRecoveryCode(code), user.recoveryCodeSalt));
+}
+
+const pendingLogins = new Map();
+
+function cleanupPendingLogins() {
+  const now = Date.now();
+  for (const [key, entry] of pendingLogins) if (entry.expiresAt <= now) pendingLogins.delete(key);
+}
+
+function createPendingLogin(userId, mode) {
+  cleanupPendingLogins();
+  const ticket = crypto.randomBytes(32).toString('base64url');
+  pendingLogins.set(hash(ticket), {
+    userId,
+    mode,
+    expiresAt: Date.now() + SECURITY_TTL,
+    attempts: 0,
+  });
+  return ticket;
+}
+
+function readPendingLogin(ticket) {
+  const key = hash(String(ticket || ''));
+  const entry = pendingLogins.get(key);
+  if (!entry || entry.expiresAt <= Date.now()) {
+    pendingLogins.delete(key);
+    return null;
+  }
+  return { key, entry };
+}
+
+export function beginSecurityChallenge(user) {
+  const mode = user.securityCodeHash ? 'verify' : 'setup';
+  return {
+    needsSecurityCode: true,
+    mode,
+    ticket: createPendingLogin(user.id, mode),
+    email: user.email,
+    hasRecoveryCode: Boolean(user.recoveryCodeHash),
+  };
+}
+
+export function completeSecurityChallenge(ticket, input = {}, req) {
+  const pending = readPendingLogin(ticket);
+  if (!pending) throw Object.assign(new Error('Session de connexion expirée. Recommence la connexion.'), { status: 400 });
+  const { key, entry } = pending;
+  if (entry.attempts >= SECURITY_MAX_ATTEMPTS) {
+    pendingLogins.delete(key);
+    throw Object.assign(new Error('Trop d’essais. Recommence la connexion.'), { status: 429 });
+  }
+  entry.attempts += 1;
+
+  const user = findUserById(entry.userId);
+  if (!user) {
+    pendingLogins.delete(key);
+    throw Object.assign(new Error('Compte introuvable.'), { status: 404 });
+  }
+
+  const wantsRecovery = entry.mode === 'verify' && Boolean(input.recoveryCode);
+  if (entry.mode === 'setup' || wantsRecovery) {
+    const code = normalizeSecurityCode(input.code);
+    const confirm = normalizeSecurityCode(input.confirm);
+    if (code.length !== 6) throw Object.assign(new Error('Le code de sécurité doit contenir 6 chiffres.'), { status: 400 });
+    if (confirm !== code) throw Object.assign(new Error('Les deux codes ne correspondent pas.'), { status: 400 });
+    if (wantsRecovery && !verifyRecoveryCode(user, input.recoveryCode)) {
+      throw Object.assign(new Error('Code de secours incorrect.'), { status: 401 });
+    }
+    setSecurityCode(user, code);
+    const recoveryCode = newRecoveryCode();
+    setRecoveryCode(user, recoveryCode);
+    persist();
+    pendingLogins.delete(key);
+    const session = createSession(user.id, req);
+    return { user: publicUser(user), token: session.token, recoveryCode, mode: wantsRecovery ? 'recovered' : 'setup' };
+  }
+
+  if (!verifySecurityCode(user, input.code)) {
+    throw Object.assign(new Error('Code de sécurité incorrect.'), { status: 401 });
+  }
+  pendingLogins.delete(key);
+  const session = createSession(user.id, req);
+  return { user: publicUser(user), token: session.token, mode: 'verify' };
+}
 
 export function allowDemoLogin(ip) {
   return rateLimit(`demo:${ip || 'unknown'}`, 20, 60 * 60e3);
@@ -206,8 +339,7 @@ export function verifyLoginCode(rawEmail, rawCode, req) {
   persist();
 
   const user = findOrCreateUser(email, { provider: 'email' });
-  const session = createSession(user.id, req);
-  return { user: publicUser(user), token: session.token };
+  return beginSecurityChallenge(user);
 }
 
 /* ---------------- users & sessions ---------------- */
@@ -320,6 +452,8 @@ export function publicUser(user) {
     provider: user.provider,
     createdAt: user.createdAt,
     lastLoginAt: user.lastLoginAt,
+    hasSecurityCode: Boolean(user.securityCodeHash),
+    securityCodeSetAt: user.securityCodeSetAt || null,
   };
 }
 

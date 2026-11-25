@@ -41,7 +41,7 @@ function viewBilling() {
     <div class="plan-banner">
       <div>
         <span class="pill violet">Plan actuel</span>
-        <h3 style="margin-top:8px">${esc(ws.plan)} — ${current && current.credits > 0 ? `${fmt(current.credits)} crédits / mois` : 'Gratuit'}</h3>
+        <h3 style="margin-top:8px">${esc(ws.plan)}${current && current.credits > 0 ? ` — ${fmt(current.credits)} crédits / mois` : ' — 0 crédit / mois'}</h3>
         <p>${esc(current?.tagline || 'Votre plan actuel et ses limites.')}</p>
         <p class="credit-balance">${fmt(credits)} crédits disponibles</p>
       </div>
@@ -357,6 +357,7 @@ function viewSettings() {
       <div class="panel-head"><h3>Sécurité &amp; session</h3></div>
       <div class="panel-body">
         <div class="setting-row"><div class="sr-main"><h4>Méthode de connexion</h4><p>${user.provider === 'google' ? 'Google OAuth' : user.provider === 'demo' ? 'Compte de démonstration' : 'Code à usage unique par email'}</p></div><span class="pill green">Sécurisé</span></div>
+        <div class="setting-row"><div class="sr-main"><h4>Code de sécurité</h4><p>${user.hasSecurityCode ? `Activé le ${esc(new Date(user.securityCodeSetAt).toLocaleDateString('fr-FR'))}` : 'Pas encore configuré sur ce compte.'}</p></div><span class="pill ${user.hasSecurityCode ? 'green' : 'grey'}">${user.hasSecurityCode ? 'Actif' : 'À configurer'}</span></div>
         <div class="setting-row"><div class="sr-main"><h4>Dernière connexion</h4><p>${esc(timeAgo(user.lastLoginAt))}</p></div></div>
         <div class="setting-row"><div class="sr-main"><h4>Compte créé</h4><p>${esc(new Date(user.createdAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }))}</p></div></div>
         <div class="setting-row" style="border-bottom:0">

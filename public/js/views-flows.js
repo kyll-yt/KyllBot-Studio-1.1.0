@@ -59,6 +59,7 @@ const FLOW_BLOCKS = {
   giveaway: { label: 'Giveaway', icon: 'award', tone: 'pink', group: 'interaction', hint: 'Tirage au sort avec durée' },
   await: { label: 'Attendre interaction', icon: 'clock', tone: 'grey', group: 'interaction', hint: 'Attend un clic, une réaction ou un message' },
   accountCheck: { label: 'Vérifier le compte', icon: 'shield', tone: 'amber', group: 'moderation', hint: 'Âge, avatar et comptes bots' },
+  automationRun: { label: 'Lancer une automatisation', icon: 'zap', tone: 'pink', group: 'moderation', hint: 'Déclenche une automatisation du bot' },
   moderation: { label: 'Modération complète', icon: 'shield', tone: 'pink', group: 'moderation', hint: 'Avertir, timeout, kick, ban, purge, lock, mute vocal…' },
   timeout: { label: 'Exclure temporairement', icon: 'clock', tone: 'amber', group: 'moderation', hint: 'Rend le membre muet pendant une durée' },
   kick: { label: 'Expulser', icon: 'userMinus', tone: 'pink', group: 'moderation', hint: 'Retire le membre du serveur' },
@@ -114,6 +115,7 @@ const FLOW_TEMPLATES = [
   { value: 'giveaway', label: 'Giveaway', hint: 'Tirage, sondage, attente et annonce.' },
   { value: 'booster', label: 'Remerciement boost', hint: 'Message automatique quand un membre booste le serveur.' },
   { value: 'automation', label: 'Réaction automatisation', hint: 'Journal et annonce quand une automatisation se déclenche.' },
+  { value: 'botguard', label: 'Bouclier anti-bots', hint: 'Vérifie le compte, isole les suspects et accueille les membres valides.' },
 ];
 
 
@@ -548,6 +550,8 @@ function flowNewBlock(type, x = 120, y = 120) {
       return { ...base, channel: '', prize: 'Un mois de Nitro', duration: 24, winners: 1, emoji: '🎉' };
     case 'await':
       return { ...base, kind: 'button', timeout: 60 };
+    case 'automationRun':
+      return { ...base, automationType: 'autoMod', notify: true };
     case 'accountCheck':
       return {
         ...base,
@@ -892,6 +896,7 @@ function renderTriggerCard(flow) {
       ['antiSpam', 'Anti-spam'],
       ['autoMod', 'Auto-modération'],
       ['antiRaid', 'Anti-raid'],
+      ['botGuard', 'Bouclier anti-bots'],
       ['repair', 'Réparation salons / rôles'],
       ['logs', 'Journaux de modération'],
       ['reminders', 'Rappels de formation'],
@@ -1228,6 +1233,8 @@ function flowBlockRows(block) {
       return flowSummaryRows([['Lot', block.prize], ['Durée', `${block.duration || 24} h`], ['Gagnants', `${block.winners || 1}`]]);
     case 'await':
       return flowSummaryRows([['Interaction', block.kind || 'button'], ['Délai', `${block.timeout || 60} s`]]);
+    case 'automationRun':
+      return flowSummaryRows([['Automatisation', block.automationType || 'autoMod'], ['Journal', block.notify === false ? 'non' : 'oui']]);
     case 'accountCheck':
       return flowSummaryRows([
         ['Âge minimum', `${block.minAgeDays ?? 7} j`],
@@ -1406,6 +1413,8 @@ function previewOutput(block) {
       return { kind: 'forumDelete', post: block.post || 'post actuel', message: block.message || 'dernier' };
     case 'music':
       return { kind: 'music', action: block.action || 'play', mode: block.mode || 'voice', url: block.url || '', title: block.title || '' };
+    case 'automationRun':
+      return { kind: 'automationRun', automationType: block.automationType || 'autoMod' };
     case 'accountCheck':
       return { kind: 'accountCheck', minAgeDays: block.minAgeDays ?? 7, requireAvatar: block.requireAvatar, blockBots: block.blockBots, failAction: block.failAction || 'stop' };
     case 'channel':
@@ -2459,6 +2468,19 @@ function renderNodeFieldsB(block) {
         </div>
         ${nodeField('Texte', `<textarea class="textarea" rows="4" ${bind('text')} placeholder="Écris ici une note pour l’équipe…">${esc(block.text || '')}</textarea>`)}
         <p class="hint">Cette note est enregistrée avec le flux mais n’envoie rien sur Discord.</p>`;
+    case 'automationRun':
+      return `<div class="fld-row">
+          ${nodeField('Automatisation à déclencher', `<select class="select" ${bind('automationType')}>
+            ${[
+              ['welcome', "Message d'accueil"], ['autorole', 'Rôle automatique'], ['levels', 'Niveaux et XP'],
+              ['ticketPanel', 'Panneau de tickets'], ['moderation', 'Modération automatique'], ['antiSpam', 'Anti-spam'],
+              ['autoMod', 'Auto-modération'], ['antiRaid', 'Anti-raid'], ['botGuard', 'Bouclier anti-bots'],
+              ['logs', 'Journaux de modération'], ['reminders', 'Rappels de formation'], ['repair', 'Réparation salons / rôles'],
+            ].map(([value, label]) => `<option value="${value}" ${block.automationType === value ? 'selected' : ''}>${label}</option>`).join('')}
+          </select>`, 'grow')}
+          ${nodeField('Journal', `<button class="switch ${block.notify !== false ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="notify"></button>`, 'shrink')}
+        </div>
+        <p class="hint">Le flux déclenche les réactions liées à cette automatisation sur le serveur courant.</p>`;
     case 'accountCheck':
       return `<div class="fld-row">
           ${nodeField('Âge minimum (jours)', `<input class="input" type="number" min="0" max="365" ${bind('minAgeDays')} value="${block.minAgeDays ?? 7}">`, 'shrink')}
@@ -2843,6 +2865,9 @@ function renderOutput(output) {
   if (output.kind === 'music') {
     if (output.action === 'stop') return `<div class="dc-effect">${icon('music')} Musique arrêtée</div>`;
     return `<div class="dc-effect">${icon('music')} Musique ${output.mode === 'personal' ? 'privée' : 'vocale'} · <b>${esc(output.title || output.url || 'sans source')}</b></div>`;
+  }
+  if (output.kind === 'automationRun') {
+    return `<div class="dc-effect">${icon('zap')} Déclenche l’automatisation <b>${esc(output.automationType || 'autoMod')}</b></div>`;
   }
   if (output.kind === 'accountCheck') {
     return `<div class="dc-effect">${icon('shield')} Vérifie l’âge du compte, l’avatar et les bots${output.failAction === 'stop' ? ' · arrête si suspect' : ''}</div>`;
