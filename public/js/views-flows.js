@@ -1887,12 +1887,18 @@ function openBlockEditor(blockId) {
 
 function refreshBlockEditor(blockId) {
   const body = document.querySelector('#modalRoot .modal-body');
+  const backdrop = document.querySelector('#modalRoot .modal-backdrop');
   const scrollTop = body?.scrollTop || 0;
+  const backdropTop = backdrop?.scrollTop || 0;
   openBlockEditor(blockId);
-  requestAnimationFrame(() => {
-    const next = document.querySelector('#modalRoot .modal-body');
-    if (next) next.scrollTop = scrollTop;
-  });
+  const restoreScroll = () => {
+    const nextBody = document.querySelector('#modalRoot .modal-body');
+    const nextBackdrop = document.querySelector('#modalRoot .modal-backdrop');
+    if (nextBody) nextBody.scrollTop = scrollTop;
+    if (nextBackdrop) nextBackdrop.scrollTop = backdropTop;
+  };
+  restoreScroll();
+  requestAnimationFrame(restoreScroll);
 }
 
 function renderNode(block, flow) {

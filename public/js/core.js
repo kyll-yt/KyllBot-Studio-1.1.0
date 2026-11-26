@@ -21,6 +21,7 @@ const APP_CHANGELOG = [
       'Chrono du service actuel : nouveau mode du bloc Chronomètre et modèle « Chrono service » avec la commande /chrono, pour afficher le temps de service en cours sans l’arrêter. {{chrono}} fonctionne aussi dans les messages et embeds.',
       'Chrono en ligne : nouvel encadré foncé qui liste chaque personne en service, une par ligne, avec son temps en ligne. Il s’actualise toutes les 30 secondes ou toutes les minutes, se met à jour dès un démarrage/arrêt et se restaure après un redémarrage du bot.',
       'Formulaires : jusqu’à 35 champs, répartis automatiquement en plusieurs fenêtres Discord de 5 champs, et titres de champs jusqu’à 100 caractères (45 en titre, le reste en description).',
+      'Le studio garde la position de la page et du formulaire quand tu modifies un champ, au lieu de remonter tout en haut.',
       'Le bloc « Réponse IA » utilise maintenant la vraie IA dans les flux : fini le texte simulé.',
       'L’IA répond à toutes les questions, même hors sujet Discord, avec des faits directs et sans formule vide.',
       'Mémoire de conversation par salon et par membre : elle retient un prénom et le réutilise dans les messages suivants.',
@@ -605,9 +606,17 @@ function parseHash() {
   return { name, id: id || null, sub: sub || null, subId: subId || null };
 }
 
+let lastRenderedRoute = null;
+
+function renderRouteKey(route = state.route) {
+  return [route.name, route.id, route.sub, route.subId].join('/');
+}
+
 function render() {
   const view = document.getElementById('view');
   const { name, id } = state.route;
+  const routeKey = renderRouteKey();
+  const keepScroll = lastRenderedRoute === routeKey ? window.scrollY : null;
   const routes = {
     dashboard: viewDashboard,
     bots: viewBots,
@@ -630,6 +639,8 @@ function render() {
   view.classList.remove('view');
   void view.offsetWidth;
   view.classList.add('view');
+  lastRenderedRoute = routeKey;
+  if (keepScroll !== null) requestAnimationFrame(() => window.scrollTo(0, keepScroll));
 }
 
 /* ------------------------------------------------------------------ */
