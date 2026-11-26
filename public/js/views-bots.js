@@ -1828,8 +1828,7 @@ function commandModal(bot, command) {
           text: String(text || '').trim(),
           weight: Math.min(100, Math.max(1, Number(variantWeights[index]) || 1)),
         }))
-        .filter((variant) => variant.text)
-        .slice(0, 20);
+        .filter((variant) => variant.text);
       const payload = {
         name: formData.get('name'),
         description: formData.get('description'),
@@ -1865,10 +1864,6 @@ function commandModal(bot, command) {
   };
   const addVariant = (variant = {}) => {
     if (!variantsHost) return;
-    if (variantsHost.querySelectorAll('[data-command-variant]').length >= 20) {
-      toast('20 variantes maximum par commande.', 'error');
-      return;
-    }
     variantsHost.insertAdjacentHTML('beforeend', commandVariantRow(variant));
     refreshVariantCount();
     update();

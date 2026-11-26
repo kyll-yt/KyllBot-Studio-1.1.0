@@ -61,7 +61,7 @@ const APP_CHANGELOG = [
       'Nouveau sélecteur de serveur dans l’onglet Commandes : choisis clairement le serveur Discord cible, ajoute le bot à un nouveau serveur et synchronise ses commandes en un clic.',
       'Bouton « Ajouter le bot » : invitation directe vers le serveur de ton choix.',
       'Bouton « Mes serveurs » : liste les serveurs où le bot est déjà présent et permet de les configurer en un clic.',
-      'Chaque commande peut contenir jusqu’à 20 variantes de réponse, tirées au hasard selon un poids configurable.',
+      'Chaque commande peut contenir autant de variantes de réponse que tu veux, tirées au hasard selon un poids configurable.',
       'Connexion email renforcée : limitation des tentatives, comparaison sécurisée des codes et code de démonstration masqué en production.',
       'Les blocs webhook et musique refusent les adresses locales ou privées.',
       'Les diagnostics techniques détaillés sont désormais réservés au propriétaire du studio.',

@@ -99,7 +99,6 @@ export const OPERATORS = {
 };
 
 const MAX_BLOCKS = 200;
-const MAX_VARIANTS = 20;
 const MAX_BUTTONS = 5;
 const MAX_STEPS = 400;
 
@@ -279,7 +278,7 @@ function normalizeBlock(block) {
         text: str(block?.text, 2000),
         variantMode: Boolean(block?.variantMode),
         variants: Array.isArray(block?.variants)
-          ? block.variants.slice(0, MAX_VARIANTS).map(normalizeVariant)
+          ? block.variants.map(normalizeVariant)
           : [],
         ephemeral: Boolean(block?.ephemeral),
         dm: Boolean(block?.dm),
@@ -334,7 +333,7 @@ function normalizeBlock(block) {
       return { ...base, emoji: str(block?.emoji, 8) || '👍' };
     case 'random': {
       const variants = Array.isArray(block?.variants) && block.variants.length
-        ? block.variants.slice(0, MAX_VARIANTS).map(normalizeVariant)
+        ? block.variants.map(normalizeVariant)
         : [normalizeVariant({ text: '' }), normalizeVariant({ text: '' })];
       return {
         ...base,

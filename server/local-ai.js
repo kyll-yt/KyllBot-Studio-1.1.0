@@ -102,7 +102,7 @@ const TOPICS = [
   {
     test: /(?:commande|slash).*(?:discord|bot|kyllbot|serveur|cr[ée]er|ajouter)|(?:discord|bot|kyllbot|serveur).*(?:commande|slash)/i,
     reply:
-      'Pour une commande : va dans l’onglet « Commandes » du bot, clique sur « Ajouter », choisis un modèle préfait ou écris ta réponse, puis active la commande. Tu peux ajouter jusqu’à 20 variantes de réponse par commande.',
+      'Pour une commande : va dans l’onglet « Commandes » du bot, clique sur « Ajouter », choisis un modèle préfait ou écris ta réponse, puis active la commande. Tu peux ajouter autant de variantes de réponse que tu veux par commande.',
   },
   {
     test: /(?:flux|flow).*(?:discord|bot|kyllbot|bloc|[ée]diteur|cr[ée]er)|(?:discord|bot|kyllbot|[ée]diteur|cr[ée]er).*(?:flux|flow)/i,

@@ -3805,7 +3805,6 @@ onAction('flow-add-variant', (el) => {
   const block = flowNode(el.dataset.id);
   if (!block) return;
   if (!Array.isArray(block.variants)) block.variants = [];
-  if (block.variants.length >= 20) return toast('20 variantes maximum par bloc.', 'error');
   block.variants.push({ id: flowUid(), text: '', weight: 1, next: null });
   flowEditor.dirty = true;
   if (flowEditor.editBlockId === block.id && document.getElementById('modalForm')) {
@@ -3875,7 +3874,6 @@ onAction('flow-bank-add', (el) => {
   const text = group?.items[Number(el.dataset.index)];
   if (!block || !text) return;
   if (!Array.isArray(block.variants)) block.variants = [];
-  if (block.variants.length >= 20) return toast('20 variantes maximum par bloc.', 'error');
   block.variants.push({ id: flowUid(), text, weight: 1, next: null });
   flowEditor.dirty = true;
   if (flowEditor.editBlockId === block.id) {
@@ -3892,8 +3890,7 @@ onAction('flow-bank-theme', (el) => {
   const group = VARIANT_BANK[Number(el.dataset.group)];
   if (!block || !group) return;
   if (!Array.isArray(block.variants)) block.variants = [];
-  const room = 20 - block.variants.length;
-  const added = group.items.slice(0, Math.max(0, room));
+  const added = group.items;
   for (const text of added) block.variants.push({ id: flowUid(), text, weight: 1, next: null });
   flowEditor.dirty = true;
   if (flowEditor.editBlockId === block.id) {

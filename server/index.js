@@ -447,7 +447,6 @@ function sanitizeCommandVariants(input) {
   if (!Array.isArray(input)) return [];
   const ids = new Set();
   return input
-    .slice(0, 20)
     .map((variant) => {
       const text = str(variant?.text, 1000);
       if (!text) return null;
