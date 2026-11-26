@@ -1219,6 +1219,31 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
         }
         case 'chrono': {
           const target = resolveChannel(guild, output.channel) || channel;
+          if (output.action === 'service') {
+            const state = ensureServiceState(bot, guild?.id || 'dm');
+            const entry = serviceEntry(state, user?.id, serviceDisplayName(member, user));
+            const now = Date.now();
+            const sinceMs = entry.startedAt ? Math.max(0, now - entry.startedAt) : 0;
+            const tokens = { ...serviceTokens(state, entry, { now, sinceMs }), elapsed: formatDuration(sinceMs) };
+            const template = entry.startedAt
+              ? output.serviceText || '⏱️ {{member}} est en service depuis {{elapsed}}.'
+              : output.emptyServiceText || '⚠️ Aucun service en cours pour {{member}}.';
+            const delivered = await deliverFlowPayload({
+              output,
+              target,
+              payload: { content: applyServiceTokens(template, tokens).slice(0, 2000) },
+              member,
+              interaction,
+              interactionUsed,
+            });
+            interactionUsed = delivered.interactionUsed;
+            if (delivered.message) {
+              lastMessage = delivered.message;
+              lastChannel = delivered.channel;
+            }
+            sent = delivered.sent;
+            break;
+          }
           const variable = output.variable || 'chrono_start';
           const key = `${bot.id}:${guild.id}:${variable}`;
           if (output.action === 'start') {

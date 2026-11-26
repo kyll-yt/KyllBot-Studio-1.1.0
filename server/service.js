@@ -154,6 +154,8 @@ export function serviceTokens(state, entry, extra = {}) {
     duration: formatDuration(extra.durationMs || 0),
     penalty_added: formatDuration(extra.penaltyMs || 0),
     since: formatDuration(extra.sinceMs || 0),
+    chrono: formatDuration(totals.liveMs),
+    current_service: formatDuration(totals.liveMs),
     period: servicePeriodLabel(state),
     reset: serviceResetLabel(state?.config),
   };

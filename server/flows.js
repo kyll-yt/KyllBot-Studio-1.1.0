@@ -425,11 +425,13 @@ function normalizeBlock(block) {
     case 'chrono':
       return {
         ...base,
-        action: block?.action === 'stop' ? 'stop' : 'start',
+        action: ['start', 'stop', 'service'].includes(block?.action) ? block.action : 'start',
         channel: str(block?.channel, 60),
         variable: str(block?.variable, 40).replace(/[^\w.-]/g, '') || 'chrono_start',
         startText: str(block?.startText, 1000),
         stopText: str(block?.stopText, 1000),
+        serviceText: str(block?.serviceText, 1000),
+        emptyServiceText: str(block?.emptyServiceText, 1000),
         ephemeral: Boolean(block?.ephemeral),
         dm: Boolean(block?.dm),
         silent: Boolean(block?.silent),
@@ -1062,6 +1064,22 @@ export function flowTemplate(template, botName = 'KyllBot') {
     });
   }
 
+  if (template === 'servicechrono') {
+    return sanitizeFlow({
+      ...base,
+      name: 'Chrono du service actuel',
+      trigger: { type: 'slash', command: 'chrono' },
+      blocks: [
+        {
+          type: 'chrono',
+          action: 'service',
+          serviceText: '⏱️ {{member}} est en service depuis {{elapsed}}.',
+          emptyServiceText: '⚠️ Aucun service en cours pour {{member}}.',
+        },
+      ],
+    });
+  }
+
   if (template === 'quiz') {
     return sanitizeFlow({
       ...base,
@@ -1600,7 +1618,19 @@ export async function runFlow(flow, input = {}) {
       }
       case 'chrono': {
         const variable = block.variable || 'chrono_start';
-        if (block.action === 'stop') {
+        if (block.action === 'service') {
+          outputs.push({
+            kind: 'chrono',
+            action: 'service',
+            channel: block.channel || ctx.channel,
+            serviceText: interpolate(block.serviceText, ctx, vars),
+            emptyServiceText: interpolate(block.emptyServiceText, ctx, vars),
+            ephemeral: block.ephemeral,
+            dm: block.dm,
+            silent: block.silent,
+          });
+          entry.detail = 'chrono du service actuel';
+        } else if (block.action === 'stop') {
           const started = Number(vars[variable] || 0);
           const elapsed = formatDuration(started ? Date.now() - started : 0);
           vars.elapsed = elapsed;

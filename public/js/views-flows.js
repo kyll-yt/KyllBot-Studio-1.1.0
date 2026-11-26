@@ -32,7 +32,7 @@ const FLOW_BLOCKS = {
   condition: { label: 'Condition', icon: 'branch', tone: 'amber', group: 'logique', hint: 'Deux branches vrai / faux' },
   wait: { label: 'Attendre', icon: 'clock', tone: 'grey', group: 'logique', hint: 'Pause avant de continuer' },
   timer: { label: 'Compte à rebours', icon: 'clock', tone: 'amber', group: 'logique', hint: 'Décompte avec message de fin' },
-  chrono: { label: 'Chronomètre', icon: 'clock', tone: 'amber', group: 'logique', hint: 'Démarre et arrête un chrono' },
+  chrono: { label: 'Chronomètre', icon: 'clock', tone: 'amber', group: 'logique', hint: 'Démarre, arrête ou affiche le chrono du service actuel' },
   serviceStart: { label: 'Service : démarrer', icon: 'play', tone: 'green', group: 'service', hint: 'Démarre le pointage du membre' },
   serviceStop: { label: 'Service : arrêter', icon: 'stop', tone: 'pink', group: 'service', hint: 'Ajoute le temps écoulé au total' },
   servicePenalty: { label: 'Service : pénalité', icon: 'alert', tone: 'amber', group: 'service', hint: 'Demande le membre et la durée de la pénalité' },
@@ -107,6 +107,7 @@ const FLOW_TEMPLATES = [
   { value: '', label: 'Flux vide', hint: 'Vous ajoutez les blocs vous-même, avec l’aide affichée sur le canvas.' },
   { value: 'welcome', label: 'Bienvenue', hint: 'Exemple prêt : message, condition, rôle et message privé.' },
   { value: 'ticket', label: 'Ticket support', hint: 'Exemple prêt : ticket privé avec rôle staff, logs et boutons.' },
+  { value: 'servicechrono', label: 'Chrono service', hint: 'Commande /chrono qui affiche le temps de service en cours.' },
   { value: 'quiz', label: 'Quiz', hint: 'Variantes, attente, condition et score.' },
   { value: 'moderation', label: 'Filtre anti-spam', hint: 'Anti-spam, condition et sanction.' },
   { value: 'support', label: 'Relance support', hint: 'HTTP, message privé, attente et épinglage.' },
@@ -399,6 +400,8 @@ function flowNewBlock(type, x = 120, y = 120) {
         variable: 'chrono_start',
         startText: '⏱️ Chronomètre démarré.',
         stopText: '⏱️ Temps écoulé : {{elapsed}}',
+        serviceText: '⏱️ {{member}} est en service depuis {{elapsed}}.',
+        emptyServiceText: '⚠️ Aucun service en cours pour {{member}}.',
         ephemeral: false,
         dm: false,
         silent: false,
@@ -1176,8 +1179,8 @@ function flowBlockRows(block) {
       ]);
     case 'chrono':
       return flowSummaryRows([
-        ['Action', block.action === 'stop' ? 'arrêter' : 'démarrer'],
-        ['Variable', block.variable || 'chrono_start'],
+        ['Action', block.action === 'stop' ? 'arrêter' : block.action === 'service' ? 'service actuel' : 'démarrer'],
+        ...(block.action === 'service' ? [] : [['Variable', block.variable || 'chrono_start']]),
         ['Salon', block.channel || 'salon du déclencheur'],
         ['Mode', block.dm ? 'message privé' : block.ephemeral ? 'éphémère' : 'normal'],
       ]);
@@ -1424,8 +1427,15 @@ function previewOutput(block) {
       return { kind: 'image', url: block.url, alt: block.alt };
     case 'timer':
       return { kind: 'timer', action: 'countdown', duration: block.duration || 5, unit: block.unit || 'minutes', wait: block.wait };
-    case 'chrono':
-      return { kind: 'chrono', action: block.action === 'stop' ? 'stop' : 'start', variable: block.variable || 'chrono_start', text: block.action === 'stop' ? '⏱️ Temps écoulé : …' : '⏱️ Chronomètre démarré.' };
+    case 'chrono': {
+      const action = block.action === 'stop' ? 'stop' : block.action === 'service' ? 'service' : 'start';
+      return {
+        kind: 'chrono',
+        action,
+        variable: block.variable || 'chrono_start',
+        text: action === 'stop' ? '⏱️ Temps écoulé : …' : action === 'service' ? '⏱️ Service en cours : …' : '⏱️ Chronomètre démarré.',
+      };
+    }
     case 'serviceStart':
       return { kind: 'serviceStart', text: block.startText || '▶️ Service démarré pour {{member}}.' };
     case 'serviceStop':
@@ -1554,6 +1564,12 @@ function flowVariableGroups(block) {
   if ((flow.blocks || []).some((entry) => entry.type === 'chrono' && entry.action === 'stop')) {
     chronoItems.push({ label: 'Temps écoulé', token: '{{elapsed}}' });
   }
+  if ((flow.blocks || []).some((entry) => entry.type === 'chrono' && entry.action === 'service')) {
+    chronoItems.push(
+      { label: 'Chrono du service actuel', token: '{{chrono}}' },
+      { label: 'Temps écoulé du service', token: '{{elapsed}}' },
+    );
+  }
   add('Chrono', chronoItems);
   const serviceItems = [];
   const serviceTypes = new Set(['serviceStart', 'serviceStop', 'servicePenalty', 'serviceLeaderboard', 'serviceConfig', 'serviceReset']);
@@ -1567,6 +1583,7 @@ function flowVariableGroups(block) {
       { label: 'Pénalité ajoutée', token: '{{penalty_added}}' },
       { label: 'Durée du service', token: '{{duration}}' },
       { label: 'En service depuis', token: '{{since}}' },
+      { label: 'Chrono du service actuel', token: '{{chrono}}' },
       { label: 'Période', token: '{{period}}' },
       { label: 'Remise à zéro', token: '{{reset}}' },
     );
@@ -2390,13 +2407,16 @@ function renderNodeFieldsB(block) {
         ${nodeField('Attendre la fin avant de continuer', `<button class="switch ${block.wait ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="wait"></button>`, 'shrink')}
         <p class="hint">Envoie un message de départ, puis le message de fin après le délai. Utilise <code>{{time}}</code>, <code>{{timestamp}}</code> et <code>{{duration}}</code>.</p>`;
     case 'chrono': {
-      const action = block.action === 'stop' ? 'stop' : 'start';
+      const action = block.action === 'stop' ? 'stop' : block.action === 'service' ? 'service' : 'start';
       return `<div class="fld-row">
           ${nodeField('Action', `<select class="select" ${bind('action')}>
             <option value="start" ${action === 'start' ? 'selected' : ''}>Démarrer le chronomètre</option>
             <option value="stop" ${action === 'stop' ? 'selected' : ''}>Arrêter le chronomètre</option>
+            <option value="service" ${action === 'service' ? 'selected' : ''}>Chrono du service actuel</option>
           </select>`, 'grow')}
-          ${nodeField('Variable du chrono', `<input class="input" ${bind('variable')} value="${esc(block.variable || 'chrono_start')}" placeholder="chrono_start">`, 'grow')}
+          ${action === 'service'
+            ? ''
+            : nodeField('Variable du chrono', `<input class="input" ${bind('variable')} value="${esc(block.variable || 'chrono_start')}" placeholder="chrono_start">`, 'grow')}
         </div>
         <div class="fld-row">
           ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel), 'grow')}
@@ -2406,8 +2426,12 @@ function renderNodeFieldsB(block) {
         ${action === 'start'
           ? `${nodeField('Message de départ', `<textarea class="textarea" rows="2" ${bind('startText')} placeholder="⏱️ Chronomètre démarré.">${esc(block.startText || '')}</textarea>`)}
              <p class="hint">Enregistre l’heure de départ. Le bloc « Arrêter le chronomètre » avec la même variable calcule le temps écoulé, même dans un autre déclenchement.</p>`
-          : `${nodeField('Message de fin', `<textarea class="textarea" rows="2" ${bind('stopText')} placeholder="⏱️ Temps écoulé : {{elapsed}}">${esc(block.stopText || '')}</textarea>`)}
-             <p class="hint">Utilise <code>{{elapsed}}</code> pour afficher le temps écoulé. Le chrono doit avoir été démarré avec la même variable.</p>`}`;
+          : action === 'service'
+            ? `${nodeField('Message si le membre est en service', `<textarea class="textarea" rows="2" ${bind('serviceText')} placeholder="⏱️ {{member}} est en service depuis {{elapsed}}.">${esc(block.serviceText || '')}</textarea>`)}
+               ${nodeField('Message si aucun service', `<textarea class="textarea" rows="2" ${bind('emptyServiceText')} placeholder="⚠️ Aucun service en cours pour {{member}}.">${esc(block.emptyServiceText || '')}</textarea>`)}
+               <p class="hint">Affiche le chrono du service en cours pour ce membre, sans l’arrêter. Variables : <code>{{elapsed}}</code>, <code>{{chrono}}</code>, <code>{{member}}</code>, <code>{{service}}</code>, <code>{{penalty}}</code>, <code>{{total}}</code>.</p>`
+            : `${nodeField('Message de fin', `<textarea class="textarea" rows="2" ${bind('stopText')} placeholder="⏱️ Temps écoulé : {{elapsed}}">${esc(block.stopText || '')}</textarea>`)}
+               <p class="hint">Utilise <code>{{elapsed}}</code> pour afficher le temps écoulé. Le chrono doit avoir été démarré avec la même variable.</p>`}`;
     }
     case 'serviceStart':
       return `<div class="fld-row">
@@ -2417,7 +2441,7 @@ function renderNodeFieldsB(block) {
         </div>
         ${nodeField('Message de démarrage', `<textarea class="textarea" rows="2" ${bind('startText')} placeholder="▶️ Service démarré pour {{member}}.">${esc(block.startText || '')}</textarea>`)}
         ${nodeField('Message si déjà en cours', `<textarea class="textarea" rows="2" ${bind('alreadyText')} placeholder="⚠️ Service déjà en cours depuis {{since}}.">${esc(block.alreadyText || '')}</textarea>`)}
-        <p class="hint">Le service est suivi par membre. Variables : <code>{{member}}</code>, <code>{{service}}</code>, <code>{{penalty}}</code>, <code>{{total}}</code>, <code>{{period}}</code>.</p>`;
+        <p class="hint">Le service est suivi par membre. Variables : <code>{{member}}</code>, <code>{{chrono}}</code>, <code>{{service}}</code>, <code>{{penalty}}</code>, <code>{{total}}</code>, <code>{{period}}</code>.</p>`;
     case 'serviceStop':
       return `<div class="fld-row">
           ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel, { emptyLabel: 'Salon du déclencheur' }), 'grow')}
@@ -2426,7 +2450,7 @@ function renderNodeFieldsB(block) {
         </div>
         ${nodeField('Message de fin', `<textarea class="textarea" rows="2" ${bind('stopText')} placeholder="⏹️ Service terminé : {{duration}} ajoutées.">${esc(block.stopText || '')}</textarea>`)}
         ${nodeField('Message si aucun service', `<textarea class="textarea" rows="2" ${bind('emptyText')} placeholder="⚠️ Aucun service en cours pour {{member}}.">${esc(block.emptyText || '')}</textarea>`)}
-        <p class="hint">Ajoute le temps écoulé au total du membre. Variables : <code>{{duration}}</code>, <code>{{service}}</code>, <code>{{penalty}}</code>, <code>{{total}}</code>.</p>`;
+        <p class="hint">Ajoute le temps écoulé au total du membre. Variables : <code>{{duration}}</code>, <code>{{chrono}}</code>, <code>{{service}}</code>, <code>{{penalty}}</code>, <code>{{total}}</code>.</p>`;
     case 'servicePenalty':
       return `<div class="fld-row">
           ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel, { emptyLabel: 'Salon du déclencheur' }), 'grow')}
@@ -2878,6 +2902,7 @@ function renderOutput(output) {
     return `<div class="dc-effect">${icon('clock')} Compte à rebours de <b>${esc(output.duration)} ${esc(output.unit === 'hours' ? 'h' : output.unit === 'seconds' ? 's' : 'min')}</b>${output.wait ? ' · attend la fin' : ''}</div>`;
   }
   if (output.kind === 'chrono') {
+    if (output.action === 'service') return `<div class="dc-effect">${icon('clock')} Chrono du service actuel</div>`;
     return output.action === 'stop'
       ? `<div class="dc-effect">${icon('clock')} Chronomètre arrêté · <b>${esc(output.variable)}</b></div>`
       : `<div class="dc-effect">${icon('clock')} Chronomètre démarré · <b>${esc(output.variable)}</b></div>`;

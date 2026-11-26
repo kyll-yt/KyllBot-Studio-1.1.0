@@ -18,6 +18,7 @@ const APP_CHANGELOG = [
       'AutoMod : nouvelle liste de rôles exemptés, pour ne jamais filtrer le staff, les modérateurs ou les VIP.',
       'Blocage des MP au bot : option claire, réponse personnalisable et une seule réponse par membre.',
       'Création de flux : le modèle « Bienvenue » est sélectionné par défaut pour éviter le canvas vide, avec un message clair si aucun serveur n’est choisi.',
+      'Chrono du service actuel : nouveau mode du bloc Chronomètre et modèle « Chrono service » avec la commande /chrono, pour afficher le temps de service en cours sans l’arrêter.',
       'Le bloc « Réponse IA » utilise maintenant la vraie IA dans les flux : fini le texte simulé.',
       'L’IA répond à toutes les questions, même hors sujet Discord, avec des faits directs et sans formule vide.',
       'Mémoire de conversation par salon et par membre : elle retient un prénom et le réutilise dans les messages suivants.',
