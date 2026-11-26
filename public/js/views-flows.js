@@ -1851,7 +1851,7 @@ function insertFlowToken(field, token) {
   toast('Variable insérée.', 'success');
 }
 
-function openBlockEditor(blockId) {
+function openBlockEditor(blockId, { autoFocus = true } = {}) {
   const block = flowNode(blockId);
   if (!block) return;
   closeRoleMention();
@@ -1863,6 +1863,7 @@ function openBlockEditor(blockId) {
     subtitle: meta.hint,
     wide: true,
     hideFooter: true,
+    autoFocus,
     body: `<div class="block-editor" data-edit-block="${block.id}">
       <div class="be-top">
         <span class="blk-ic tone-${meta.tone}">${icon(meta.icon)}</span>
@@ -1890,7 +1891,28 @@ function refreshBlockEditor(blockId) {
   const backdrop = document.querySelector('#modalRoot .modal-backdrop');
   const scrollTop = body?.scrollTop || 0;
   const backdropTop = backdrop?.scrollTop || 0;
-  openBlockEditor(blockId);
+  const active = document.activeElement;
+  const focused = active?.closest('#modalRoot') ? {
+    action: active.dataset.action,
+    formIndex: active.dataset.formIndex,
+    formKey: active.dataset.formKey,
+    embedIndex: active.dataset.embedIndex,
+    embedKey: active.dataset.embedKey,
+    field: active.dataset.field,
+    button: active.dataset.button,
+    buttonField: active.dataset.buttonField,
+    rule: active.dataset.rule,
+    ruleField: active.dataset.ruleField,
+    variant: active.dataset.variant,
+    variantField: active.dataset.variantField,
+  } : null;
+  const focusSelector = focused
+    ? Object.entries(focused)
+        .filter(([, value]) => value !== undefined && value !== '')
+        .map(([key, value]) => `[data-${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}="${String(value).replace(/"/g, '\\"')}"]`)
+        .join('')
+    : '';
+  openBlockEditor(blockId, { autoFocus: false });
   const restoreScroll = () => {
     const nextBody = document.querySelector('#modalRoot .modal-body');
     const nextBackdrop = document.querySelector('#modalRoot .modal-backdrop');
@@ -1898,7 +1920,11 @@ function refreshBlockEditor(blockId) {
     if (nextBackdrop) nextBackdrop.scrollTop = backdropTop;
   };
   restoreScroll();
-  requestAnimationFrame(restoreScroll);
+  requestAnimationFrame(() => {
+    const nextFocus = focusSelector ? document.querySelector(`#modalRoot ${focusSelector}`) : null;
+    nextFocus?.focus({ preventScroll: true });
+    restoreScroll();
+  });
 }
 
 function renderNode(block, flow) {

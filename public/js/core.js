@@ -446,7 +446,7 @@ function closeModal() {
   document.body.style.overflow = '';
 }
 
-function openModal({ title, subtitle = '', body, submitLabel = 'Enregistrer', wide = false, danger = false, onSubmit, hideFooter = false }) {
+function openModal({ title, subtitle = '', body, submitLabel = 'Enregistrer', wide = false, danger = false, onSubmit, hideFooter = false, autoFocus = true }) {
   const root = document.getElementById('modalRoot');
   root.innerHTML = `
     <div class="modal-backdrop">
@@ -499,8 +499,10 @@ function openModal({ title, subtitle = '', body, submitLabel = 'Enregistrer', wi
     }
   });
 
-  const first = form.querySelector('input:not([type=hidden]), textarea, select');
-  setTimeout(() => first?.focus(), 60);
+  if (autoFocus) {
+    const first = form.querySelector('input:not([type=hidden]), textarea, select');
+    setTimeout(() => first?.focus(), 60);
+  }
   return form;
 }
 
@@ -612,11 +614,32 @@ function renderRouteKey(route = state.route) {
   return [route.name, route.id, route.sub, route.subId].join('/');
 }
 
+function captureScrollState() {
+  const scroll = { window: window.scrollY, panels: {} };
+  for (const selector of ['.flow-side', '.flow-test', '.content']) {
+    const panel = document.querySelector(selector);
+    if (panel) scroll.panels[selector] = panel.scrollTop;
+  }
+  return scroll;
+}
+
+function restoreScrollState(scroll) {
+  const html = document.documentElement;
+  const previousBehavior = html.style.scrollBehavior;
+  html.style.scrollBehavior = 'auto';
+  window.scrollTo(0, scroll.window);
+  html.style.scrollBehavior = previousBehavior;
+  for (const [selector, top] of Object.entries(scroll.panels)) {
+    const panel = document.querySelector(selector);
+    if (panel) panel.scrollTop = top;
+  }
+}
+
 function render() {
   const view = document.getElementById('view');
   const { name, id } = state.route;
   const routeKey = renderRouteKey();
-  const keepScroll = lastRenderedRoute === routeKey ? window.scrollY : null;
+  const scroll = lastRenderedRoute === routeKey ? captureScrollState() : null;
   const routes = {
     dashboard: viewDashboard,
     bots: viewBots,
@@ -640,7 +663,7 @@ function render() {
   void view.offsetWidth;
   view.classList.add('view');
   lastRenderedRoute = routeKey;
-  if (keepScroll !== null) requestAnimationFrame(() => window.scrollTo(0, keepScroll));
+  if (scroll) requestAnimationFrame(() => restoreScrollState(scroll));
 }
 
 /* ------------------------------------------------------------------ */
