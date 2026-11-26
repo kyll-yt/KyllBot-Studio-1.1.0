@@ -198,10 +198,10 @@ const AUTOMATION_DESCRIPTIONS = {
   welcome: 'Envoie un message personnalisé à chaque nouveau membre.',
   autorole: 'Attribue automatiquement un ou plusieurs rôles à l’arrivée.',
   levels: 'Gagne de l’XP en discutant et débloque des rôles.',
-  ticketPanel: 'Panneau de tickets pour le support.',
+  ticketPanel: 'Panneau de tickets avec bouton, rôle staff, logs et limite par membre.',
   moderation: 'Filtre les messages et applique les sanctions.',
   antiSpam: 'Détecte et bloque les messages répétitifs.',
-  autoMod: 'Filtre automatiquement les contenus indésirables.',
+  autoMod: 'Filtre les contenus indésirables, avec rôles exemptés et blocage des MP au bot.',
   logs: 'Journalise les actions de modération.',
   reminders: 'Envoie des rappels de cours aux apprenants.',
   antiRaid: 'Détecte les vagues d’arrivées, sanctionne les comptes suspects et verrouille le serveur.',
@@ -241,6 +241,40 @@ const AUTOMATION_FIELDS = {
   ticketPanel: [
     { key: 'channel', label: 'Salon du panneau', placeholder: '#support', list: 'channelSuggestions' },
     { key: 'category', label: 'Catégorie des tickets', placeholder: 'Support', list: 'categorySuggestions' },
+    {
+      key: 'staffRole',
+      label: 'Rôle du staff',
+      placeholder: 'Support',
+      list: 'roleSuggestions',
+      hint: 'Ce rôle voit tous les tickets, peut les réclamer et les fermer.',
+    },
+    {
+      key: 'logChannel',
+      label: 'Salon des logs tickets',
+      placeholder: '#logs',
+      list: 'channelSuggestions',
+      hint: 'Reçoit une ligne à chaque ouverture et fermeture de ticket.',
+    },
+    { key: 'panelTitle', label: 'Titre du panneau', placeholder: '🎫 Support' },
+    { key: 'panelMessage', label: 'Message du panneau', type: 'textarea', placeholder: 'Clique sur le bouton pour ouvrir un ticket privé.' },
+    { key: 'buttonLabel', label: 'Texte du bouton', placeholder: 'Ouvrir un ticket' },
+    { key: 'reason', label: 'Raison du ticket', placeholder: 'Demande de support' },
+    { key: 'welcomeMessage', label: 'Message dans le ticket', type: 'textarea', placeholder: 'Ton ticket est ouvert, le staff arrive.' },
+    {
+      key: 'namePrefix',
+      label: 'Préfixe des salons',
+      placeholder: 'ticket',
+      hint: 'Les salons seront nommés par exemple ticket-lea.',
+    },
+    {
+      key: 'maxOpen',
+      label: 'Tickets ouverts max par membre',
+      type: 'number',
+      min: 1,
+      max: 10,
+      default: 1,
+      hint: 'Au-delà, le membre reçoit le lien de son ticket déjà ouvert.',
+    },
   ],
   moderation: [
     { key: 'channel', label: 'Salon de journalisation', placeholder: '#logs', list: 'channelSuggestions' },
@@ -280,6 +314,19 @@ const AUTOMATION_FIELDS = {
     },
     { key: 'timeoutMinutes', label: 'Durée d’exclusion (minutes)', type: 'number', min: 1, max: 10080, default: 10 },
     { key: 'warnMessage', label: 'Message d’avertissement', placeholder: 'Ce message ne respecte pas les règles.' },
+    {
+      key: 'exemptRoles',
+      label: 'Rôles exemptés d’AutoMod',
+      type: 'roles',
+      hint: 'Ces rôles ne seront jamais filtrés ni sanctionnés par AutoMod (staff, modérateurs, VIP…).',
+    },
+    {
+      key: 'blockDm',
+      label: 'Bloquer les MP envoyés au bot',
+      type: 'boolean',
+      hint: 'Le bot ignore les MP et répond une fois avec le message ci-dessous. Les flux déclenchés par MP ne fonctionnent plus.',
+    },
+    { key: 'dmReply', label: 'Réponse aux MP bloqués', placeholder: 'Les MP sont désactivés. Utilise le serveur ou ouvre un ticket.' },
     { key: 'logChannel', label: 'Salon des alertes', placeholder: '#logs', list: 'channelSuggestions' },
   ],
   botGuard: [
@@ -386,6 +433,9 @@ const AUTOMATION_PRESETS = [
       action: 'timeout',
       timeoutMinutes: 10,
       warnMessage: 'Ce message ne respecte pas les règles du serveur.',
+      exemptRoles: ['Modérateur', 'Administrateur'],
+      blockDm: false,
+      dmReply: 'Les messages privés sont désactivés pour ce bot. Utilise le serveur ou ouvre un ticket.',
       logChannel: '#logs',
     },
   },
@@ -437,10 +487,22 @@ const AUTOMATION_PRESETS = [
     id: 'tickets-support',
     type: 'ticketPanel',
     label: 'Panneau de tickets',
-    description: 'Un salon #support et une catégorie pour ouvrir des tickets proprement.',
+    description: 'Un panneau avec bouton, catégorie, rôle staff, logs et limite de tickets par membre.',
     icon: 'ticket',
     tone: 'violet',
-    config: { channel: '#support', category: 'Support' },
+    config: {
+      channel: '#support',
+      category: 'Support',
+      staffRole: 'Support',
+      logChannel: '#logs',
+      panelTitle: '🎫 Support',
+      panelMessage: 'Besoin d’aide ? Clique sur le bouton pour ouvrir un ticket privé avec le staff.',
+      buttonLabel: 'Ouvrir un ticket',
+      reason: 'Demande de support',
+      welcomeMessage: 'Ton ticket est ouvert. Décris ton problème, un membre du staff arrive.',
+      namePrefix: 'ticket',
+      maxOpen: 1,
+    },
   },
   {
     id: 'logs-moderation',
@@ -557,11 +619,11 @@ function automationFieldControl(field, value, discord = {}) {
       </select></div>`;
   }
   if (field.type === 'boolean') {
-    return `<label class="check-row"><input type="checkbox" ${common} ${value ? 'checked' : ''}> <span>${esc(field.label)}</span></label>`;
+    return `<label class="check-row"><input type="checkbox" ${common} ${value ? 'checked' : ''}> <span>${esc(field.label)}</span></label>${field.hint ? `<div class="hint">${esc(field.hint)}</div>` : ''}`;
   }
   if (field.type === 'textarea') {
     return `<div class="field"><label for="auto-${esc(field.key)}">${esc(field.label)}</label>
-      <textarea class="textarea" ${common} placeholder="${esc(field.placeholder || '')}">${esc(value ?? '')}</textarea></div>`;
+      <textarea class="textarea" ${common} placeholder="${esc(field.placeholder || '')}">${esc(value ?? field.default ?? '')}</textarea>${field.hint ? `<div class="hint">${esc(field.hint)}</div>` : ''}</div>`;
   }
   if (field.type === 'roles') {
     const selected = roleList(value);
@@ -576,7 +638,7 @@ function automationFieldControl(field, value, discord = {}) {
           <button type="button" class="btn btn-ghost btn-sm" data-role-add>${icon('plus')} Ajouter</button>
         </div>
       </div>
-      <div class="hint">Coche plusieurs rôles ou ajoute-en un nouveau. Le bot les attribuera tous à l’arrivée.</div>
+      <div class="hint">${esc(field.hint || 'Coche plusieurs rôles ou ajoute-en un nouveau. Le bot les attribuera tous à l’arrivée.')}</div>
     </div>`;
   }
   if (field.list) {
@@ -593,10 +655,11 @@ function automationFieldControl(field, value, discord = {}) {
         </select>
         <input class="input" ${common} list="${field.list}" placeholder="${esc(field.placeholder || '')}" value="${esc(value ?? '')}">
       </div>
+      ${field.hint ? `<div class="hint">${esc(field.hint)}</div>` : ''}
     </div>`;
   }
   return `<div class="field"><label for="auto-${esc(field.key)}">${esc(field.label)}</label>
-    <input class="input" ${common} type="${field.type || 'text'}" ${field.min !== undefined ? `min="${field.min}"` : ''} ${field.max !== undefined ? `max="${field.max}"` : ''} placeholder="${esc(field.placeholder || '')}" value="${esc(value ?? '')}"></div>`;
+    <input class="input" ${common} type="${field.type || 'text'}" ${field.min !== undefined ? `min="${field.min}"` : ''} ${field.max !== undefined ? `max="${field.max}"` : ''} placeholder="${esc(field.placeholder || '')}" value="${esc(value ?? field.default ?? '')}">${field.hint ? `<div class="hint">${esc(field.hint)}</div>` : ''}</div>`;
 }
 
 function bindAutomationPickers(form) {
@@ -2252,10 +2315,11 @@ onAction('new-automation', (el) => {
       const type = String(formData.get('type') || 'welcome');
       const config = {};
       for (const field of automationFields(type)) {
-        if (field.type === 'boolean') config[field.key] = formData.get(field.key) === 'on';
-        else if (field.type === 'number') config[field.key] = Number(formData.get(field.key)) || 0;
+        const raw = formData.get(field.key);
+        if (field.type === 'boolean') config[field.key] = raw === 'on';
+        else if (field.type === 'number') config[field.key] = raw === '' || raw === null ? (field.default ?? 0) : Number(raw) || 0;
         else if (field.type === 'roles') config[field.key] = roleList(formData.getAll(field.key));
-        else config[field.key] = String(formData.get(field.key) || '').trim();
+        else config[field.key] = String(raw || '').trim();
       }
       await api(`/api/bots/${bot.id}/automations`, {
         method: 'POST',
@@ -2299,7 +2363,7 @@ onAction('add-automation-preset', async (el) => {
   }
   el.disabled = true;
   try {
-    await api(`/api/bots/${bot.id}/automations`, {
+    const created = await api(`/api/bots/${bot.id}/automations`, {
       method: 'POST',
       body: JSON.stringify({
         type: preset.type,
@@ -2309,6 +2373,9 @@ onAction('add-automation-preset', async (el) => {
         enabled: true,
       }),
     });
+    if (preset.type === 'ticketPanel' && created?.automation?.id) {
+      await api(`/api/bots/${bot.id}/automations/${created.automation.id}/run`, { method: 'POST' }).catch(() => {});
+    }
     await refresh();
     toast(`« ${preset.label} » activée sur ${server.guildName || server.name}.`, 'success');
   } catch (error) {
@@ -2347,7 +2414,11 @@ onAction('config-automation', (el) => {
       <div class="field"><label for="autoLabel">Nom de l’automatisation</label>
         <input class="input" id="autoLabel" name="label" value="${esc(automation.label)}" maxlength="80">
       </div>
-      ${fields.map((field) => automationFieldControl(field, field.type === 'roles' ? config.roles ?? config.role : config[field.key], bot.discord || {})).join('')}
+      ${fields.map((field) => automationFieldControl(
+        field,
+        field.type === 'roles' && field.key === 'roles' ? config.roles ?? config.role : config[field.key],
+        bot.discord || {},
+      )).join('')}
       <datalist id="channelSuggestions">${(bot.discord?.channels?.length ? bot.discord.channels.filter((channel) => channel.type !== 'voice').map((channel) => `#${channel.name}`) : CHANNEL_SUGGESTIONS).map((item) => `<option value="${esc(item)}"></option>`).join('')}</datalist>
       <datalist id="categorySuggestions">${(bot.discord?.categories?.length ? bot.discord.categories : CATEGORY_SUGGESTIONS).map((item) => `<option value="${esc(item)}"></option>`).join('')}</datalist>
       <datalist id="roleSuggestions">${(bot.discord?.roles || FLOW_ROLES_FALLBACK.map((name) => ({ name }))).map((role) => `<option value="${esc(role.name)}"></option>`).join('')}</datalist>
@@ -2356,15 +2427,19 @@ onAction('config-automation', (el) => {
     onSubmit: async (formData) => {
       const nextConfig = {};
       for (const field of fields) {
-        if (field.type === 'boolean') nextConfig[field.key] = formData.get(field.key) === 'on';
-        else if (field.type === 'number') nextConfig[field.key] = Number(formData.get(field.key)) || 0;
+        const raw = formData.get(field.key);
+        if (field.type === 'boolean') nextConfig[field.key] = raw === 'on';
+        else if (field.type === 'number') nextConfig[field.key] = raw === '' || raw === null ? (field.default ?? 0) : Number(raw) || 0;
         else if (field.type === 'roles') nextConfig[field.key] = roleList(formData.getAll(field.key));
-        else nextConfig[field.key] = String(formData.get(field.key) || '').trim();
+        else nextConfig[field.key] = String(raw || '').trim();
       }
       await api(`/api/bots/${bot.id}/automations/${automation.id}`, {
         method: 'PATCH',
         body: JSON.stringify({ label: formData.get('label'), config: nextConfig }),
       });
+      if (automation.type === 'ticketPanel') {
+        await api(`/api/bots/${bot.id}/automations/${automation.id}/run`, { method: 'POST' }).catch(() => {});
+      }
       await refresh();
       toast('Automatisation configurée.');
     },
@@ -2378,6 +2453,15 @@ onAction('run-automation', async (el) => {
   if (!bot || !automation) return;
   try {
     const result = await api(`/api/bots/${bot.id}/automations/${automation.id}/run`, { method: 'POST' });
+    if (automation.type === 'ticketPanel') {
+      toast(
+        result.count
+          ? 'Panneau de tickets envoyé dans le salon configuré.'
+          : 'Panneau non envoyé : vérifie le salon, la connexion du bot et que l’automatisation est active.',
+        result.count ? 'success' : 'error',
+      );
+      return;
+    }
     toast(
       result.count
         ? `${result.count} flux déclenché(s) par « ${automation.label} ».`

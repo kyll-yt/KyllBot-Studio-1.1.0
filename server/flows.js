@@ -702,6 +702,11 @@ function normalizeBlock(block) {
         action: ['open', 'claim', 'close'].includes(block?.action) ? block.action : 'open',
         category: str(block?.category, 60),
         reason: str(block?.reason, 200),
+        staffRole: str(block?.staffRole, 60),
+        logChannel: str(block?.logChannel, 60),
+        welcomeMessage: str(block?.welcomeMessage, 1000),
+        maxOpen: num(block?.maxOpen, 1, 10, 1),
+        namePrefix: str(block?.namePrefix, 20) || 'ticket',
       };
     case 'level':
       return { ...base, amount: num(block?.amount, -10000, 10000, 10), variable: str(block?.variable, 40).replace(/[^\w.-]/g, '') || 'xp' };
@@ -1041,17 +1046,18 @@ export function flowTemplate(template, botName = 'KyllBot') {
       name: 'Ouverture de ticket',
       trigger: { type: 'slash', command: 'ticket' },
       blocks: [
-        { type: 'message', text: 'Un membre du staff arrive, {{user.name}}.', ephemeral: true },
+        { type: 'message', text: 'Je crée ton ticket privé, {{user.name}}…', ephemeral: true },
         {
-          type: 'embed',
-          title: 'Ticket ouvert',
-          description: 'Décris ton problème en quelques lignes, on te répond vite.',
-          color: '#7c5cff',
-          footer: botName,
+          type: 'ticket',
+          action: 'open',
+          category: 'Support',
+          reason: 'Demande de support',
+          staffRole: 'Support',
+          logChannel: '#logs',
+          welcomeMessage: 'Ton ticket est ouvert. Décris ton problème, un membre du staff arrive.',
+          maxOpen: 1,
+          namePrefix: 'ticket',
         },
-        { type: 'button', label: 'Fermer le ticket', style: 'danger', target: '' },
-        { type: 'role', action: 'add', role: 'Support' },
-        { type: 'log', text: 'Ticket créé par {{user.name}}' },
       ],
     });
   }
@@ -2023,8 +2029,18 @@ export async function runFlow(flow, input = {}) {
         break;
       }
       case 'ticket': {
-        outputs.push({ kind: 'ticket', action: block.action, category: block.category, reason: interpolate(block.reason, ctx, vars) });
-        entry.detail = `ticket ${block.action}`;
+        outputs.push({
+          kind: 'ticket',
+          action: block.action,
+          category: block.category,
+          reason: interpolate(block.reason, ctx, vars),
+          staffRole: block.staffRole,
+          logChannel: block.logChannel,
+          welcomeMessage: interpolate(block.welcomeMessage, ctx, vars),
+          maxOpen: block.maxOpen,
+          namePrefix: block.namePrefix,
+        });
+        entry.detail = `ticket ${block.action}${block.category ? ` · ${block.category}` : ''}`;
         break;
       }
       case 'level': {

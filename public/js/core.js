@@ -10,8 +10,14 @@ const APP_CHANGELOG = [
   {
     version: '1.1.5',
     date: '2026-11-21',
-    title: 'IA polyvalente et mémoire de conversation',
+    title: 'IA polyvalente, tickets et AutoMod',
     items: [
+      'Tickets améliorés : rôle staff, salon de logs, message d’accueil, préfixe de salon et limite de tickets par membre.',
+      'Les tickets ont maintenant des boutons Réclamer et Fermer, avec contrôle du staff et suppression automatique.',
+      'Le panneau de tickets envoie un bouton « Ouvrir un ticket » et applique les mêmes options au ticket créé.',
+      'AutoMod : nouvelle liste de rôles exemptés, pour ne jamais filtrer le staff, les modérateurs ou les VIP.',
+      'Blocage des MP au bot : option claire, réponse personnalisable et une seule réponse par membre.',
+      'Création de flux : le modèle « Bienvenue » est sélectionné par défaut pour éviter le canvas vide, avec un message clair si aucun serveur n’est choisi.',
       'Le bloc « Réponse IA » utilise maintenant la vraie IA dans les flux : fini le texte simulé.',
       'L’IA répond à toutes les questions, même hors sujet Discord, avec des faits directs et sans formule vide.',
       'Mémoire de conversation par salon et par membre : elle retient un prénom et le réutilise dans les messages suivants.',

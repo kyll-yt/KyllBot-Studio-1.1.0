@@ -52,6 +52,8 @@ const pendingButtons = new Map();
 const musicSessions = new Map();
 const chronos = new Map();
 const pendingServicePenalties = new Map();
+const ticketMeta = new Map();
+const dmBlockNotified = new Set();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function getBotContext(botId) {
@@ -115,6 +117,7 @@ function ensureRuntime(botId) {
       snapshots: new Map(),
       deletions: new Map(),
       joins: new Map(),
+      ticketPanelsSent: new Set(),
       raidLockUntil: 0,
       lastRepairAt: null,
     };
@@ -411,6 +414,244 @@ function resolveRole(guild, ref) {
   if (/^\d{17,20}$/.test(raw)) return guild.roles.cache.get(raw) || null;
   const lower = raw.toLowerCase();
   return guild.roles.cache.find((role) => role.name?.toLowerCase() === lower && !role.managed) || null;
+}
+
+function memberHasAnyRole(member, refs) {
+  const list = Array.isArray(refs) ? refs : String(refs || '').split(',');
+  const wanted = new Set(
+    list
+      .map((role) => String(role || '').trim().replace(/^@/, '').toLowerCase())
+      .filter((role) => role && role !== 'everyone'),
+  );
+  if (!wanted.size) return false;
+  for (const role of member?.roles?.cache?.values?.() || []) {
+    if (wanted.has(role.id) || wanted.has(String(role.name || '').toLowerCase())) return true;
+  }
+  return false;
+}
+
+function ticketOwnerId(topic) {
+  return String(topic || '').match(/\((\d{17,20})\)/)?.[1] || '';
+}
+
+function ticketLogChannel(bot, meta = {}) {
+  return meta.logChannel || bot?.discord?.logChannel || 'logs';
+}
+
+async function createTicketChannel({ bot, guild, member, user, config = {}, source = 'flux' }) {
+  if (!guild) return { ok: false, error: 'Ticket uniquement disponible dans un serveur.' };
+  const owner = user || member?.user;
+  if (!owner?.id) return { ok: false, error: 'Membre introuvable pour ouvrir le ticket.' };
+
+  const limit = Math.min(10, Math.max(1, Number(config.maxOpen) || 1));
+  const openTickets = guild.channels.cache.filter(
+    (entry) => entry.type === ChannelType.GuildText && ticketOwnerId(entry.topic) === owner.id,
+  );
+  if (openTickets.size >= limit) {
+    const existing = openTickets.first();
+    return {
+      ok: false,
+      channel: existing,
+      error: limit === 1
+        ? `Tu as déjà un ticket ouvert : <#${existing.id}>.`
+        : `Tu as déjà ${openTickets.size} ticket(s) ouvert(s), la limite est de ${limit}.`,
+    };
+  }
+
+  const parent = resolveCategory(guild, config.category);
+  const staffRole = resolveRole(guild, config.staffRole);
+  const prefix = String(config.namePrefix || 'ticket')
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 20) || 'ticket';
+  const safeName = String(owner.username || 'membre')
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 40);
+  const reason = String(config.reason || 'Demande de support').slice(0, 300);
+
+  const overwrites = [
+    { id: guild.roles.everyone.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+    {
+      id: owner.id,
+      allow: [
+        PermissionsBitField.Flags.ViewChannel,
+        PermissionsBitField.Flags.SendMessages,
+        PermissionsBitField.Flags.ReadMessageHistory,
+        PermissionsBitField.Flags.AttachFiles,
+      ],
+    },
+    {
+      id: ensureRuntime(bot.id).client?.user?.id,
+      allow: [
+        PermissionsBitField.Flags.ViewChannel,
+        PermissionsBitField.Flags.SendMessages,
+        PermissionsBitField.Flags.ReadMessageHistory,
+        PermissionsBitField.Flags.ManageChannels,
+      ],
+    },
+  ];
+  if (staffRole) {
+    overwrites.push({
+      id: staffRole.id,
+      allow: [
+        PermissionsBitField.Flags.ViewChannel,
+        PermissionsBitField.Flags.SendMessages,
+        PermissionsBitField.Flags.ReadMessageHistory,
+        PermissionsBitField.Flags.AttachFiles,
+        PermissionsBitField.Flags.ManageMessages,
+        PermissionsBitField.Flags.ManageChannels,
+      ],
+    });
+  }
+
+  const ticketChannel = await guild.channels.create({
+    name: `${prefix}-${safeName || 'membre'}`.slice(0, 100),
+    type: ChannelType.GuildText,
+    parent: parent?.id || undefined,
+    topic: `Ticket de ${owner.tag || owner.username || 'membre'} (${owner.id}) — ${reason}`.slice(0, 1024),
+    permissionOverwrites: overwrites.filter((entry) => entry.id),
+  });
+
+  ticketMeta.set(ticketChannel.id, {
+    ownerId: owner.id,
+    staffRole: config.staffRole || '',
+    logChannel: config.logChannel || '',
+    automationId: config.automationId || '',
+    source,
+  });
+
+  const welcome = String(
+    config.welcomeMessage || 'Ton ticket est ouvert. Décris ton problème, un membre du staff arrive.',
+  ).slice(0, 1000);
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`kfticket:claim:${ticketChannel.id}`)
+      .setLabel('Réclamer')
+      .setEmoji('🙋')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(`kfticket:close:${ticketChannel.id}`)
+      .setLabel('Fermer')
+      .setEmoji('🔒')
+      .setStyle(ButtonStyle.Danger),
+  );
+  await ticketChannel.send({
+    content: `${owner ? `<@${owner.id}>` : ''} ${welcome}\nRaison : **${reason}**`,
+    components: [row],
+    allowedMentions: { users: [owner.id] },
+  }).catch(() => {});
+
+  await sendLog(
+    guild,
+    bot,
+    `🎫 Ticket ouvert par ${owner.tag || owner.username || owner.id} · <#${ticketChannel.id}> · ${reason}`,
+    config.logChannel || '',
+  );
+  return { ok: true, channel: ticketChannel };
+}
+
+async function sendTicketPanel(bot, guild, automation) {
+  if (!guild || !automation) return false;
+  const config = automation.config || {};
+  const channel = resolveChannel(guild, config.channel);
+  if (!channel?.send) return false;
+  const embed = new EmbedBuilder()
+    .setTitle(String(config.panelTitle || '🎫 Support').slice(0, 256))
+    .setDescription(String(config.panelMessage || 'Besoin d’aide ? Ouvre un ticket privé avec le staff.').slice(0, 4096))
+    .setColor(0x7c5cff)
+    .setFooter({ text: 'KyllBot Studio' });
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`kfticket:open:${automation.id}`.slice(0, 100))
+      .setLabel(String(config.buttonLabel || 'Ouvrir un ticket').slice(0, 80))
+      .setEmoji('🎫')
+      .setStyle(ButtonStyle.Primary),
+  );
+  const sent = await channel.send({ embeds: [embed], components: [row] }).catch(() => null);
+  return Boolean(sent);
+}
+
+async function handleTicketButton(bot, interaction, guild, member) {
+  const [, action, targetId] = String(interaction.customId || '').split(':');
+  if (!guild) {
+    await interaction.reply({ content: 'Les tickets ne sont disponibles que dans un serveur.', ephemeral: true }).catch(() => {});
+    return;
+  }
+
+  if (action === 'open') {
+    const automation = (bot.automations || []).find(
+      (entry) => entry.id === targetId && entry.enabled && entry.type === 'ticketPanel',
+    );
+    if (!automation) {
+      await interaction.reply({ content: 'Ce panneau de tickets n’est plus actif.', ephemeral: true }).catch(() => {});
+      return;
+    }
+    const result = await createTicketChannel({
+      bot,
+      guild,
+      member,
+      user: interaction.user,
+      config: { ...(automation.config || {}), automationId: automation.id },
+      source: 'panneau',
+    }).catch((error) => ({ ok: false, error: `Impossible de créer le ticket : ${error.message}` }));
+    await interaction.reply({
+      content: result.ok ? `Ton ticket est ouvert : <#${result.channel.id}>` : result.error,
+      ephemeral: true,
+    }).catch(() => {});
+    return;
+  }
+
+  const channel = guild.channels.cache.get(targetId);
+  if (!channel) {
+    await interaction.reply({ content: 'Ce ticket n’existe plus.', ephemeral: true }).catch(() => {});
+    return;
+  }
+  const meta = ticketMeta.get(channel.id) || {};
+  const ownerId = meta.ownerId || ticketOwnerId(channel.topic);
+  const isStaff =
+    Boolean(member?.permissions?.has?.(PermissionsBitField.Flags.ManageChannels)) ||
+    memberHasAnyRole(member, String(meta.staffRole || '').split(',')) ||
+    Boolean(member && channel.permissionsFor?.(member)?.has?.(PermissionsBitField.Flags.ManageChannels));
+
+  if (action === 'claim') {
+    if (!isStaff) {
+      await interaction.reply({ content: 'Seul le staff peut réclamer ce ticket.', ephemeral: true }).catch(() => {});
+      return;
+    }
+    if (channel.setTopic) {
+      await channel
+        .setTopic(`${channel.topic || ''} · Réclamé par ${interaction.user.tag || interaction.user.username}`.slice(0, 1024))
+        .catch(() => {});
+    }
+    await channel.send({ content: `✅ Ticket réclamé par <@${interaction.user.id}>.` }).catch(() => {});
+    await interaction.reply({ content: 'Ticket réclamé.', ephemeral: true }).catch(() => {});
+    return;
+  }
+
+  if (action === 'close') {
+    if (!isStaff && ownerId !== interaction.user.id) {
+      await interaction.reply({ content: 'Seul le staff ou l’auteur du ticket peut le fermer.', ephemeral: true }).catch(() => {});
+      return;
+    }
+    await interaction.reply({ content: 'Ticket fermé. Suppression dans 3 secondes…', ephemeral: true }).catch(() => {});
+    await channel.send({ content: `🔒 Ticket fermé par <@${interaction.user.id}>.` }).catch(() => {});
+    await sendLog(
+      guild,
+      bot,
+      `🔒 Ticket fermé par ${interaction.user.tag || interaction.user.username} · #${channel.name}`,
+      ticketLogChannel(bot, meta),
+    );
+    ticketMeta.delete(channel.id);
+    const closing = channel;
+    const timer = setTimeout(() => {
+      if (closing?.delete) closing.delete('Ticket fermé — KyllBot Studio').catch(() => {});
+    }, 3000);
+    timer.unref?.();
+  }
 }
 
 async function resolveMember(guild, ref) {
@@ -1755,52 +1996,47 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
         case 'ticket': {
           if (!guild) break;
           if (output.action === 'open') {
-            const parent = resolveCategory(guild, output.category);
-            const safeName = String(user?.username || 'membre')
-              .toLowerCase()
-              .replace(/[^a-z0-9-]/g, '-')
-              .replace(/-+/g, '-')
-              .slice(0, 40);
-            const ticketChannel = await guild.channels.create({
-              name: `ticket-${safeName || 'membre'}`.slice(0, 100),
-              type: ChannelType.GuildText,
-              parent: parent?.id || undefined,
-              topic: `Ticket de ${user?.tag || user?.username || 'membre'} — ${String(output.reason || 'Demande de support').slice(0, 200)}`,
-              permissionOverwrites: [
-                { id: guild.roles.everyone.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-                {
-                  id: user?.id,
-                  allow: [
-                    PermissionsBitField.Flags.ViewChannel,
-                    PermissionsBitField.Flags.SendMessages,
-                    PermissionsBitField.Flags.ReadMessageHistory,
-                    PermissionsBitField.Flags.AttachFiles,
-                  ],
-                },
-                {
-                  id: runtime.client?.user?.id,
-                  allow: [
-                    PermissionsBitField.Flags.ViewChannel,
-                    PermissionsBitField.Flags.SendMessages,
-                    PermissionsBitField.Flags.ReadMessageHistory,
-                    PermissionsBitField.Flags.ManageChannels,
-                  ],
-                },
-              ].filter((entry) => entry.id),
-            });
-            lastChannel = ticketChannel;
-            lastMessage = await ticketChannel.send({
-              content: `${user ? `<@${user.id}>` : ''} ton ticket est ouvert. Un membre du staff va te répondre.\nRaison : **${String(output.reason || 'Non précisée').slice(0, 300)}**`,
-              allowedMentions: { users: user ? [user.id] : [] },
-            });
-            sent = true;
+            const created = await createTicketChannel({
+              bot,
+              guild,
+              member,
+              user,
+              config: {
+                category: output.category,
+                reason: output.reason,
+                staffRole: output.staffRole,
+                logChannel: output.logChannel,
+                welcomeMessage: output.welcomeMessage,
+                maxOpen: output.maxOpen,
+                namePrefix: output.namePrefix,
+              },
+              source: 'flux',
+            }).catch((error) => ({ ok: false, error: `Impossible de créer le ticket : ${error.message}` }));
+            if (created.ok) {
+              lastChannel = created.channel;
+              lastMessage = null;
+              sent = true;
+            } else if (interaction && !interaction.replied && !interaction.deferred) {
+              await interaction.reply({ content: created.error, ephemeral: true }).catch(() => {});
+              interactionUsed = true;
+            } else {
+              await channel?.send?.({ content: created.error }).catch(() => {});
+            }
           } else if (output.action === 'claim') {
             if (channel?.setTopic) {
               await channel.setTopic(`Ticket réclamé par ${user?.tag || user?.username || 'staff'}`).catch(() => {});
             }
             await channel?.send?.({ content: `✅ Ticket réclamé par ${user ? `<@${user.id}>` : 'le staff'}.` }).catch(() => {});
           } else if (output.action === 'close') {
+            const meta = ticketMeta.get(channel?.id) || {};
             await channel?.send?.({ content: `🔒 Ticket fermé par ${user ? `<@${user.id}>` : 'le staff'}. Suppression dans 3 secondes…` }).catch(() => {});
+            await sendLog(
+              guild,
+              bot,
+              `🔒 Ticket fermé par ${user?.tag || user?.username || 'staff'} · #${channel?.name || 'ticket'}`,
+              ticketLogChannel(bot, meta),
+            );
+            if (channel?.id) ticketMeta.delete(channel.id);
             const closing = channel;
             const timer = setTimeout(() => {
               if (closing?.delete) closing.delete('Ticket fermé — KyllBot Studio').catch(() => {});
@@ -2113,6 +2349,10 @@ export async function runAutomationTrigger(botId, automationType, extraVars = {}
     runtime.client?.guilds?.cache?.get(server?.guildId || bot.discord?.guildId) ||
     runtime.client?.guilds?.cache?.first() ||
     null;
+  if (automationType === 'ticketPanel' && automation) {
+    const sent = await sendTicketPanel(bot, guild, automation);
+    return { count: sent ? 1 : 0 };
+  }
   const count = await runTriggeredFlows({
     bot,
     ws,
@@ -2141,6 +2381,11 @@ async function handleInteraction(botId, interaction) {
   const member = await memberFromInteraction(interaction);
   const channel = interaction.channel;
   const guild = interaction.guild;
+
+  if (interaction.isButton() && interaction.customId.startsWith('kfticket:')) {
+    await handleTicketButton(bot, interaction, guild, member);
+    return;
+  }
 
   if (interaction.isChatInputCommand()) {
     const commandName = normalizeCommandName(interaction.commandName);
@@ -3254,6 +3499,21 @@ async function handleMessage(botId, message) {
   }
 
   if (!guild) {
+    const dmGuard = (bot.automations || []).find(
+      (entry) => entry.enabled && entry.type === 'autoMod' && entry.config?.blockDm,
+    );
+    if (dmGuard) {
+      const notifyKey = `${bot.id}:${message.author.id}`;
+      if (!dmBlockNotified.has(notifyKey)) {
+        if (dmBlockNotified.size > 5000) dmBlockNotified.clear();
+        dmBlockNotified.add(notifyKey);
+        const reply = String(
+          dmGuard.config?.dmReply || 'Les messages privés sont désactivés pour ce bot. Utilise le serveur ou ouvre un ticket.',
+        ).slice(0, 500);
+        await message.reply({ content: reply, allowedMentions: { parse: [] } }).catch(() => {});
+      }
+      return;
+    }
     await runTriggeredFlows({ bot, ws, type: 'dm', guild: null, member: null, channel, message, interaction: null });
     return;
   }
@@ -3282,7 +3542,7 @@ async function handleMessage(botId, message) {
   }
 
   const autoMod = enabledAutomation(bot, 'autoMod', guild);
-  if (autoMod) {
+  if (autoMod && !memberHasAnyRole(member, autoMod.config?.exemptRoles)) {
     const reason = autoModViolation(autoMod.config || {}, message, bot.id);
     if (reason) {
       await applyAutoModAction({ bot, ws, guild, member, message, channel, config: autoMod.config || {}, reason });
@@ -3476,6 +3736,19 @@ function attachHandlers(client, botId) {
       log(runtime, 'warn', runtime.warning);
     }
     try {
+      for (const guild of client.guilds.cache.values()) {
+        for (const automation of context.bot.automations || []) {
+          if (!automation.enabled || automation.type !== 'ticketPanel') continue;
+          if (!itemMatchesGuild(context.bot, automation, guild.id)) continue;
+          const key = `${guild.id}:${automation.id}`;
+          if (runtime.ticketPanelsSent.has(key)) continue;
+          if (await sendTicketPanel(context.bot, guild, automation)) runtime.ticketPanelsSent.add(key);
+        }
+      }
+    } catch (error) {
+      log(runtime, 'warn', `Panneau de tickets impossible : ${error.message}`);
+    }
+    try {
       await captureBotSnapshots(botId, client, { messages: Boolean(enabledAutomation(context.bot, 'repair')) });
     } catch (error) {
       log(runtime, 'warn', `Sauvegarde anti-raid impossible : ${error.message}`);
@@ -3511,6 +3784,7 @@ function attachHandlers(client, botId) {
     log(runtime, 'error', error.message);
   });
   client.on(Events.Warn, (message) => log(runtime, 'warn', message));
+  client.on(Events.ChannelDelete, (channel) => ticketMeta.delete(channel.id));
   client.on(Events.InteractionCreate, safe((interaction) => handleInteraction(botId, interaction), 'Interaction'));
   client.on(Events.MessageCreate, safe((message) => handleMessage(botId, message), 'Message'));
   client.on(Events.GuildMemberAdd, safe((member) => handleMemberAdd(botId, member), 'Arrivée membre'));

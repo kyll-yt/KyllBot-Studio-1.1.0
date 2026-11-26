@@ -552,6 +552,17 @@ const AUTOMATION_CONFIG_KEYS = new Set([
   'message',
   'role',
   'roles',
+  'exemptRoles',
+  'staffRole',
+  'panelTitle',
+  'panelMessage',
+  'buttonLabel',
+  'welcomeMessage',
+  'maxOpen',
+  'namePrefix',
+  'reason',
+  'blockDm',
+  'dmReply',
   'cron',
   'threshold',
   'xpPerMessage',
@@ -600,11 +611,12 @@ function sanitizeAutomationConfig(input, previous = {}) {
     if (typeof value === 'boolean') next[key] = value;
     else if (typeof value === 'number' && Number.isFinite(value)) next[key] = Math.max(0, Math.min(1_000_000, value));
     else if (typeof value === 'string') {
-      next[key] = str(value, 200);
+      const maxLength = ['panelMessage', 'welcomeMessage'].includes(key) ? 1000 : key === 'dmReply' ? 500 : 200;
+      next[key] = str(value, maxLength);
       if (key === 'role') hasLegacyRole = true;
-    } else if (key === 'roles' && Array.isArray(value)) {
-      hasRoles = true;
-      next.roles = [...new Set(value.map((role) => str(role, 100)).filter(Boolean))].slice(0, 25);
+    } else if ((key === 'roles' || key === 'exemptRoles') && Array.isArray(value)) {
+      if (key === 'roles') hasRoles = true;
+      next[key] = [...new Set(value.map((role) => str(role, 100)).filter(Boolean))].slice(0, 25);
     }
   }
   if (hasRoles) delete next.role;

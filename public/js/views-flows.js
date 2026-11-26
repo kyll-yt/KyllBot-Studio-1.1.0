@@ -104,9 +104,9 @@ const FLOW_OPERATORS = {
 };
 
 const FLOW_TEMPLATES = [
-  { value: '', label: 'Flux vide', hint: 'Vous ajoutez les blocs vous-même.' },
-  { value: 'welcome', label: 'Bienvenue', hint: 'Saisie, message, condition, rôle et message privé.' },
-  { value: 'ticket', label: 'Ticket support', hint: 'Message éphémère, embed, bouton et rôle.' },
+  { value: '', label: 'Flux vide', hint: 'Vous ajoutez les blocs vous-même, avec l’aide affichée sur le canvas.' },
+  { value: 'welcome', label: 'Bienvenue', hint: 'Exemple prêt : message, condition, rôle et message privé.' },
+  { value: 'ticket', label: 'Ticket support', hint: 'Exemple prêt : ticket privé avec rôle staff, logs et boutons.' },
   { value: 'quiz', label: 'Quiz', hint: 'Variantes, attente, condition et score.' },
   { value: 'moderation', label: 'Filtre anti-spam', hint: 'Anti-spam, condition et sanction.' },
   { value: 'support', label: 'Relance support', hint: 'HTTP, message privé, attente et épinglage.' },
@@ -609,7 +609,17 @@ function flowNewBlock(type, x = 120, y = 120) {
     case 'note':
       return { ...base, title: 'Note', text: '' };
     case 'ticket':
-      return { ...base, action: 'open', category: '', reason: '' };
+      return {
+        ...base,
+        action: 'open',
+        category: '',
+        reason: 'Demande de support',
+        staffRole: 'Support',
+        logChannel: '#logs',
+        welcomeMessage: 'Ton ticket est ouvert. Décris ton problème, un membre du staff arrive.',
+        maxOpen: 1,
+        namePrefix: 'ticket',
+      };
     case 'level':
       return { ...base, amount: 10, variable: 'xp' };
     case 'randomNumber':
@@ -1270,7 +1280,18 @@ function flowBlockRows(block) {
     case 'note':
       return flowSummaryRows([['Titre', block.title || 'Note'], ['Texte', block.text]]);
     case 'ticket':
-      return flowSummaryRows([['Action', block.action || 'open'], ['Raison', block.reason]]);
+      return flowSummaryRows([
+        ['Action', block.action || 'open'],
+        ['Raison', block.reason],
+        ...((block.action || 'open') === 'open'
+          ? [
+              ['Catégorie', block.category],
+              ['Rôle staff', block.staffRole],
+              ['Logs', block.logChannel],
+              ['Tickets max', `${block.maxOpen || 1} par membre`],
+            ]
+          : []),
+      ]);
     case 'level':
       return flowSummaryRows([['XP', `${block.amount || 10}`], ['Variable', block.variable]]);
     case 'randomNumber':
@@ -1380,7 +1401,17 @@ function previewOutput(block) {
     case 'await':
       return { kind: 'await', interaction: block.kind || 'button', timeout: block.timeout || 60 };
     case 'ticket':
-      return { kind: 'ticket', action: block.action || 'open', reason: block.reason || '' };
+      return {
+        kind: 'ticket',
+        action: block.action || 'open',
+        reason: block.reason || '',
+        category: block.category || '',
+        staffRole: block.staffRole || '',
+        logChannel: block.logChannel || '',
+        welcomeMessage: block.welcomeMessage || '',
+        maxOpen: block.maxOpen || 1,
+        namePrefix: block.namePrefix || 'ticket',
+      };
     case 'captcha':
       return { kind: 'captcha', user: 'Membre', mode: block.kind || 'button', timeout: block.timeout || 120 };
     case 'thread':
@@ -2585,7 +2616,8 @@ function renderNodeFieldsB(block) {
         ${nodeField('Variable du lien', `<input class="input" ${bind('variable')} value="${esc(block.variable || '')}" placeholder="invite">`, 'shrink')}
         <p class="hint">« Voir le lien » réutilise une invitation existante. « Message privé » envoie le lien uniquement à la personne concernée.</p>`;
     }
-    case 'ticket':
+    case 'ticket': {
+      const isOpen = !block.action || block.action === 'open';
       return `<div class="fld-row">
           ${nodeField('Action', `<select class="select" ${bind('action')}>
             <option value="open" ${block.action === 'open' ? 'selected' : ''}>Ouvrir</option>
@@ -2594,7 +2626,20 @@ function renderNodeFieldsB(block) {
           </select>`, 'shrink')}
           ${nodeField('Raison', `<input class="input" ${bind('reason')} value="${esc(block.reason || '')}" placeholder="Demande de support">`, 'grow')}
         </div>
-        ${nodeField('Catégorie du ticket', flowCategorySelect(bind('category'), block.category))}`;
+        ${isOpen
+          ? `${nodeField('Catégorie du ticket', flowCategorySelect(bind('category'), block.category))}
+        <div class="fld-row">
+          ${nodeField('Rôle du staff', flowRoleSelect(bind('staffRole'), block.staffRole), 'grow')}
+          ${nodeField('Salon des logs', flowChannelSelect(bind('logChannel'), block.logChannel, { emptyLabel: 'Aucun journal' }), 'grow')}
+        </div>
+        ${nodeField('Message dans le ticket', `<textarea class="textarea" rows="2" ${bind('welcomeMessage')} placeholder="Ton ticket est ouvert, le staff arrive.">${esc(block.welcomeMessage || '')}</textarea>`)}
+        <div class="fld-row">
+          ${nodeField('Préfixe du salon', `<input class="input" ${bind('namePrefix')} value="${esc(block.namePrefix || 'ticket')}" placeholder="ticket" maxlength="20">`, 'grow')}
+          ${nodeField('Tickets max par membre', `<input class="input" type="number" min="1" max="10" ${bind('maxOpen')} value="${block.maxOpen || 1}">`, 'shrink')}
+        </div>
+        <p class="hint">Le salon est privé : le membre, le bot et le rôle staff peuvent le voir. Le salon de logs reçoit les ouvertures et fermetures.</p>`
+          : '<p class="hint">Cette action agit sur le ticket du salon actuel. Les boutons Réclamer et Fermer sont ajoutés automatiquement aux nouveaux tickets.</p>'}`;
+    }
     case 'level':
       return `<div class="fld-row">
           ${nodeField('XP', `<input class="input" type="number" min="-10000" max="10000" ${bind('amount')} value="${block.amount || 10}">`, 'shrink')}
@@ -3750,6 +3795,10 @@ onAction('new-flow', (el) => {
   const botId = el.dataset.id;
   const bot = state.ws.bots.find((entry) => entry.id === botId);
   const server = activeBotServer(bot);
+  if (!server) {
+    toast('Choisis d’abord un serveur Discord dans le sélecteur du bot, puis crée le flux.', 'error');
+    return;
+  }
   const serverName = server?.guildName || server?.name || 'Aucun serveur';
   openModal({
     title: 'Nouveau flux',
@@ -3760,12 +3809,13 @@ onAction('new-flow', (el) => {
       <div class="field"><label>Modèle</label>
         <div class="template-pick">
           ${FLOW_TEMPLATES.map(
-            (template, index) => `<label class="tp-item">
-              <input type="radio" name="template" value="${template.value}" ${index === 0 ? 'checked' : ''}>
+            (template) => `<label class="tp-item">
+              <input type="radio" name="template" value="${template.value}" ${template.value === 'welcome' ? 'checked' : ''}>
               <span><b>${template.label}</b><em>${template.hint}</em></span>
             </label>`,
           ).join('')}
         </div>
+        <div class="hint">« Bienvenue » est sélectionné pour te montrer un exemple complet. Choisis « Flux vide » si tu veux tout construire toi-même.</div>
       </div>`,
     onSubmit: async (formData) => {
       const { flow } = await api(`/api/bots/${botId}/flows`, {
