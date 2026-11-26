@@ -37,6 +37,7 @@ const FLOW_BLOCKS = {
   serviceStop: { label: 'Service : arrêter', icon: 'stop', tone: 'pink', group: 'service', hint: 'Ajoute le temps écoulé au total' },
   servicePenalty: { label: 'Service : pénalité', icon: 'alert', tone: 'amber', group: 'service', hint: 'Demande le membre et la durée de la pénalité' },
   serviceLeaderboard: { label: 'Service : classement', icon: 'award', tone: 'amber', group: 'service', hint: 'Classement service, pénalité et total' },
+  serviceOnline: { label: 'Service : chrono en ligne', icon: 'clock', tone: 'green', group: 'service', hint: 'Affiche les personnes en service, une par ligne, et actualise l’encadré' },
   serviceConfig: { label: 'Service : période', icon: 'gear', tone: 'grey', group: 'service', hint: 'Choisit la période et la remise à zéro' },
   serviceReset: { label: 'Service : réinitialiser', icon: 'trash', tone: 'pink', group: 'service', hint: 'Remet les compteurs à zéro' },
   cooldown: { label: 'Anti-spam', icon: 'shield', tone: 'amber', group: 'logique', hint: 'Limite la fréquence' },
@@ -108,6 +109,7 @@ const FLOW_TEMPLATES = [
   { value: 'welcome', label: 'Bienvenue', hint: 'Exemple prêt : message, condition, rôle et message privé.' },
   { value: 'ticket', label: 'Ticket support', hint: 'Exemple prêt : ticket privé avec rôle staff, logs et boutons.' },
   { value: 'servicechrono', label: 'Chrono service', hint: 'Commande /chrono qui affiche le temps de service en cours.' },
+  { value: 'serviceonline', label: 'Chrono en ligne', hint: 'Encadré actualisé avec chaque personne en service et son temps en ligne.' },
   { value: 'quiz', label: 'Quiz', hint: 'Variantes, attente, condition et score.' },
   { value: 'moderation', label: 'Filtre anti-spam', hint: 'Anti-spam, condition et sanction.' },
   { value: 'support', label: 'Relance support', hint: 'HTTP, message privé, attente et épinglage.' },
@@ -440,6 +442,15 @@ function flowNewBlock(type, x = 120, y = 120) {
         title: 'Classement du service',
         top: 10,
         ephemeral: false,
+      };
+    case 'serviceOnline':
+      return {
+        ...base,
+        channel: '',
+        title: '🟢 Chrono en ligne',
+        emptyText: 'Personne n’est en service pour le moment.',
+        interval: 60,
+        maxEntries: 25,
       };
     case 'serviceConfig':
       return {
@@ -1192,6 +1203,13 @@ function flowBlockRows(block) {
       return flowSummaryRows([['Action', 'ajouter une pénalité'], ['Saisie', 'membre + durée dans un formulaire']]);
     case 'serviceLeaderboard':
       return flowSummaryRows([['Action', 'classement du service'], ['Top', `${block.top || 10}`], ['Période', 'semaine / mois configuré']]);
+    case 'serviceOnline':
+      return flowSummaryRows([
+        ['Action', 'chrono en ligne'],
+        ['Actualisation', block.interval === 30 ? '30 secondes' : '60 secondes'],
+        ['Lignes max', `${block.maxEntries || 25}`],
+        ['Salon', block.channel || 'salon du déclencheur'],
+      ]);
     case 'serviceConfig':
       return flowSummaryRows([
         ['Période', block.period === 'month' ? '1 mois' : '1 semaine'],
@@ -1444,6 +1462,8 @@ function previewOutput(block) {
       return { kind: 'servicePenalty', title: block.title || 'Pénalité de service', text: 'Demande le membre et la durée de la pénalité.' };
     case 'serviceLeaderboard':
       return { kind: 'serviceLeaderboard', title: block.title || 'Classement du service', top: block.top || 10 };
+    case 'serviceOnline':
+      return { kind: 'serviceOnline', title: block.title || '🟢 Chrono en ligne', interval: block.interval === 30 ? 30 : 60, maxEntries: block.maxEntries || 25 };
     case 'serviceConfig':
       return { kind: 'serviceConfig', period: block.period || 'week', resetDay: block.resetDay || 1, resetHour: block.resetHour || 0, timezone: block.timezone || 'Europe/Paris' };
     case 'serviceReset':
@@ -2466,6 +2486,18 @@ function renderNodeFieldsB(block) {
         ${nodeField('Titre', `<input class="input" ${bind('title')} value="${esc(block.title || 'Classement du service')}" placeholder="Classement du service">`)}
         ${nodeField('Réponse éphémère', `<button class="switch ${block.ephemeral ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="ephemeral"></button>`, 'shrink')}
         <p class="hint">Affiche le nom, le temps de service, la pénalité et le total. Le classement est trié par total décroissant.</p>`;
+    case 'serviceOnline':
+      return `<div class="fld-row">
+          ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel, { emptyLabel: 'Salon du déclencheur' }), 'grow')}
+          ${nodeField('Actualisation', `<select class="select" ${bind('interval')}>
+            <option value="30" ${block.interval === 30 ? 'selected' : ''}>Toutes les 30 secondes</option>
+            <option value="60" ${block.interval !== 30 ? 'selected' : ''}>Toutes les minutes</option>
+          </select>`, 'grow')}
+          ${nodeField('Lignes max', `<input class="input" type="number" min="1" max="50" ${bind('maxEntries')} value="${block.maxEntries || 25}">`, 'shrink')}
+        </div>
+        ${nodeField('Titre de l’encadré', `<input class="input" ${bind('title')} value="${esc(block.title || '🟢 Chrono en ligne')}" placeholder="🟢 Chrono en ligne">`)}
+        ${nodeField('Message si personne n’est en service', `<textarea class="textarea" rows="2" ${bind('emptyText')} placeholder="Personne n’est en service pour le moment.">${esc(block.emptyText || '')}</textarea>`)}
+        <p class="hint">Encadré foncé avec une ligne par personne en service : nom + temps en ligne. Le même message est actualisé sans être renvoyé. L’intervalle met à jour l’affichage, il ne remet pas le temps de service à zéro.</p>`;
     case 'serviceConfig':
       return `<div class="fld-row">
           ${nodeField('Période', `<select class="select" ${bind('period')}>
@@ -2918,6 +2950,9 @@ function renderOutput(output) {
   }
   if (output.kind === 'serviceLeaderboard') {
     return `<div class="dc-effect">${icon('award')} Classement du service · top <b>${esc(output.top || 10)}</b></div>`;
+  }
+  if (output.kind === 'serviceOnline') {
+    return `<div class="dc-effect">${icon('clock')} Chrono en ligne · actualisé toutes les <b>${esc(output.interval === 30 ? '30 s' : '60 s')}</b></div>`;
   }
   if (output.kind === 'serviceConfig') {
     const days = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];

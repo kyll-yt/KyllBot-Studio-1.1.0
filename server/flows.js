@@ -41,6 +41,7 @@ export const BLOCKS = {
   serviceStop: { label: 'Service : arrêter', group: 'service' },
   servicePenalty: { label: 'Service : pénalité', group: 'service' },
   serviceLeaderboard: { label: 'Service : classement', group: 'service' },
+  serviceOnline: { label: 'Service : chrono en ligne', group: 'service' },
   serviceConfig: { label: 'Service : période', group: 'service' },
   serviceReset: { label: 'Service : réinitialiser', group: 'service' },
   cooldown: { label: 'Anti-spam', group: 'logique' },
@@ -471,6 +472,15 @@ function normalizeBlock(block) {
         top: num(block?.top, 1, 25, 10),
         ephemeral: Boolean(block?.ephemeral),
         dm: Boolean(block?.dm),
+      };
+    case 'serviceOnline':
+      return {
+        ...base,
+        channel: str(block?.channel, 60),
+        title: str(block?.title, 80) || '🟢 Chrono en ligne',
+        emptyText: str(block?.emptyText, 500) || 'Personne n’est en service pour le moment.',
+        interval: Number(block?.interval) === 30 ? 30 : 60,
+        maxEntries: num(block?.maxEntries, 1, 50, 25),
       };
     case 'serviceConfig':
       return {
@@ -1075,6 +1085,23 @@ export function flowTemplate(template, botName = 'KyllBot') {
           action: 'service',
           serviceText: '⏱️ {{member}} est en service depuis {{elapsed}}.',
           emptyServiceText: '⚠️ Aucun service en cours pour {{member}}.',
+        },
+      ],
+    });
+  }
+
+  if (template === 'serviceonline') {
+    return sanitizeFlow({
+      ...base,
+      name: 'Chrono en ligne',
+      trigger: { type: 'slash', command: 'chrono-en-ligne' },
+      blocks: [
+        {
+          type: 'serviceOnline',
+          title: '🟢 Chrono en ligne',
+          emptyText: 'Personne n’est en service pour le moment.',
+          interval: 60,
+          maxEntries: 25,
         },
       ],
     });
@@ -1716,6 +1743,19 @@ export async function runFlow(flow, input = {}) {
           dm: block.dm,
         });
         entry.detail = `classement · top ${block.top}`;
+        break;
+      }
+      case 'serviceOnline': {
+        outputs.push({
+          kind: 'serviceOnline',
+          channel: block.channel || ctx.channel,
+          blockId: block.id,
+          title: interpolate(block.title, ctx, vars),
+          emptyText: interpolate(block.emptyText, ctx, vars),
+          interval: block.interval,
+          maxEntries: block.maxEntries,
+        });
+        entry.detail = `chrono en ligne · actualisation ${block.interval} s`;
         break;
       }
       case 'serviceConfig': {

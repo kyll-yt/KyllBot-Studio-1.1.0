@@ -51,6 +51,7 @@ const pendingCaptchas = new Map();
 const pendingButtons = new Map();
 const musicSessions = new Map();
 const chronos = new Map();
+const servicePanels = new Map();
 const pendingServicePenalties = new Map();
 const ticketMeta = new Map();
 const dmBlockNotified = new Set();
@@ -693,6 +694,27 @@ function toEmbed(input = {}) {
     );
   }
   return embed;
+}
+
+function serviceOnlineEmbed({ state, title, emptyText, interval, maxEntries }) {
+  const now = Date.now();
+  const entries = Object.values(state?.members || {})
+    .filter((entry) => entry && entry.startedAt)
+    .map((entry) => ({
+      id: String(entry.id || ''),
+      name: String(entry.name || entry.id || 'Membre').replace(/@/g, '@\u200b'),
+      liveMs: Math.max(0, now - Number(entry.startedAt || now)),
+    }))
+    .sort((a, b) => b.liveMs - a.liveMs || a.name.localeCompare(b.name, 'fr'));
+  const max = Math.max(1, Math.min(50, Number(maxEntries) || 25));
+  const lines = entries.slice(0, max).map((entry, index) => `**${index + 1}.** ${entry.name} — ${formatDuration(entry.liveMs)}`);
+  if (entries.length > max) lines.push(`… et ${entries.length - max} autre(s)`);
+  const secondes = Number(interval) === 30 ? 30 : 60;
+  return new EmbedBuilder()
+    .setTitle(String(title || '🟢 Chrono en ligne').slice(0, 256))
+    .setDescription((lines.length ? lines.join('\n') : String(emptyText || 'Personne n’est en service pour le moment.')).slice(0, 4096))
+    .setColor(0x2b2d31)
+    .setFooter({ text: `Actualisé toutes les ${secondes} s` });
 }
 
 function renderTemplate(text, { guild, member, interaction, client }) {
@@ -1491,6 +1513,70 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
             }
             sent = delivered.sent;
           }
+          break;
+        }
+        case 'serviceOnline': {
+          const target = resolveChannel(guild, output.channel) || channel;
+          if (!target?.send) break;
+          const interval = Number(output.interval) === 30 ? 30 : 60;
+          const key = `${bot.id}:${guild?.id || 'dm'}:${target.id}:${flow.id}:${output.blockId}`;
+          const previous = servicePanels.get(key);
+          if (previous?.timer) clearInterval(previous.timer);
+          servicePanels.delete(key);
+          const state = ensureServiceState(bot, guild?.id || 'dm');
+          const embed = serviceOnlineEmbed({
+            state,
+            title: output.title,
+            emptyText: output.emptyText,
+            interval,
+            maxEntries: output.maxEntries,
+          });
+          let panelMessage = previous?.message
+            ? await previous.message.edit({ embeds: [embed] }).catch(() => null)
+            : null;
+          if (!panelMessage) {
+            const delivered = await deliverFlowPayload({
+              output,
+              target,
+              payload: { embeds: [embed] },
+              member,
+              interaction,
+              interactionUsed,
+            });
+            interactionUsed = delivered.interactionUsed;
+            panelMessage = delivered.message || null;
+            if (delivered.message) {
+              lastMessage = delivered.message;
+              lastChannel = delivered.channel;
+            }
+            sent = delivered.sent;
+          }
+          if (!panelMessage) break;
+          const panel = { message: panelMessage, channel: target, timer: null };
+          const refresh = async () => {
+            try {
+              const freshState = ensureServiceState(bot, guild?.id || 'dm');
+              await panel.message.edit({
+                embeds: [serviceOnlineEmbed({
+                  state: freshState,
+                  title: output.title,
+                  emptyText: output.emptyText,
+                  interval,
+                  maxEntries: output.maxEntries,
+                })],
+              });
+            } catch {
+              if (panel.timer) clearInterval(panel.timer);
+              panel.timer = null;
+              servicePanels.delete(key);
+            }
+          };
+          panel.timer = setInterval(() => { refresh().catch(() => {}); }, interval * 1000);
+          panel.timer.unref?.();
+          servicePanels.set(key, panel);
+          lastMessage = panelMessage;
+          lastChannel = target;
+          sent = true;
           break;
         }
         case 'serviceConfig': {
@@ -3856,6 +3942,11 @@ export async function stopBot(botId) {
   runtime.intents = [];
   runtime.startedAt = null;
   for (const key of chronos.keys()) if (key.startsWith(`${botId}:`)) chronos.delete(key);
+  for (const [key, panel] of servicePanels) {
+    if (!key.startsWith(`${botId}:`)) continue;
+    if (panel.timer) clearInterval(panel.timer);
+    servicePanels.delete(key);
+  }
   log(runtime, 'info', 'Bot déconnecté.');
 }
 

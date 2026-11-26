@@ -19,6 +19,7 @@ const APP_CHANGELOG = [
       'Blocage des MP au bot : option claire, réponse personnalisable et une seule réponse par membre.',
       'Création de flux : le modèle « Bienvenue » est sélectionné par défaut pour éviter le canvas vide, avec un message clair si aucun serveur n’est choisi.',
       'Chrono du service actuel : nouveau mode du bloc Chronomètre et modèle « Chrono service » avec la commande /chrono, pour afficher le temps de service en cours sans l’arrêter. {{chrono}} fonctionne aussi dans les messages et embeds.',
+      'Chrono en ligne : nouvel encadré foncé qui liste chaque personne en service, une par ligne, avec son temps en ligne. Il s’actualise toutes les 30 secondes ou toutes les minutes sans renvoyer un nouveau message.',
       'Le bloc « Réponse IA » utilise maintenant la vraie IA dans les flux : fini le texte simulé.',
       'L’IA répond à toutes les questions, même hors sujet Discord, avec des faits directs et sans formule vide.',
       'Mémoire de conversation par salon et par membre : elle retient un prénom et le réutilise dans les messages suivants.',
