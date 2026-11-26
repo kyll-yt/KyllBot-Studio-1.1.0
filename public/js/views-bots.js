@@ -1726,7 +1726,7 @@ function commandVariantRow(variant = {}) {
   return `<div class="command-variant-row" data-command-variant>
     <span class="variant-badge">V</span>
     <div class="variant-main">
-      <textarea class="textarea" rows="2" name="variantText" maxlength="1000" placeholder="Texte de la variante">${esc(variant.text || '')}</textarea>
+      <textarea class="textarea" rows="2" name="variantText" placeholder="Texte de la variante">${esc(variant.text || '')}</textarea>
       <div class="variant-meta">
         <label>Poids <input class="input" type="number" name="variantWeight" min="1" max="100" value="${esc(variant.weight || 1)}"></label>
       </div>
@@ -1799,14 +1799,14 @@ function commandModal(bot, command) {
         <div class="field"><label for="cCooldown">Cooldown (secondes)</label><input class="input" id="cCooldown" name="cooldown" type="number" min="0" max="600" value="${esc(value.cooldown)}"></div>
       </div>
       <div class="field"><label for="cDesc">Description</label><input class="input" id="cDesc" name="description" placeholder="Affiche le message d'accueil" value="${esc(value.description)}"></div>
-      <div class="field"><label for="cResp">Réponse texte</label><textarea class="textarea" id="cResp" name="response" placeholder="Bienvenue {user} sur {server} !">${esc(value.response)}</textarea><div class="hint">Variables disponibles : {user}, {server}, {level}, {xp}</div></div>
+      <div class="field"><label for="cResp">Réponse texte</label><textarea class="textarea" id="cResp" name="response" placeholder="Bienvenue {user} sur {server} !">${esc(value.response)}</textarea><div class="hint">Variables disponibles : {user}, {server}, {level}, {xp}. Au-delà de 2000 caractères, la réponse est envoyée en plusieurs messages.</div></div>
       <div class="field">
         <div class="variant-editor-head">
           <b>Variantes de réponse</b>
           <span class="pill gray" id="cmdVariantCount">0 variante</span>
         </div>
         <label class="check-row" style="margin:8px 0"><input type="checkbox" name="variantMode" ${value.variantMode ? 'checked' : ''}> <span>Choisir une variante au hasard à chaque utilisation</span></label>
-        <p class="hint">Ajoute plusieurs textes : le bot en tire un au hasard selon son poids. Si l'option est désactivée, la réponse texte ci-dessus est utilisée.</p>
+        <p class="hint">Ajoute plusieurs textes : le bot en tire un au hasard selon son poids. Si l'option est désactivée, la réponse texte ci-dessus est utilisée. Les textes longs sont découpés automatiquement en plusieurs messages.</p>
         <div class="variants" id="cmdVariants">${initialVariants.map((variant) => commandVariantRow(variant)).join('')}</div>
         <button type="button" class="link-btn" id="cmdAddVariant" style="margin-top:8px">${icon('plus')} Ajouter une variante</button>
       </div>

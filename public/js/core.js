@@ -24,6 +24,7 @@ const APP_CHANGELOG = [
       'Le studio garde la position de la page et du formulaire quand tu modifies un champ, au lieu de remonter tout en haut.',
       'Les blocs de flux sont plus grands : le titre et le texte du message sont plus lisibles, et le canevas s’ouvre à 90 % sur le bloc de départ.',
       'Le bloc « Réponse IA » utilise maintenant la vraie IA dans les flux : fini le texte simulé.',
+      'Messages longs : au-delà de 2000 caractères, le bot envoie automatiquement la suite dans plusieurs messages, sans couper le texte.',
       'L’IA répond à toutes les questions, même hors sujet Discord, avec des faits directs et sans formule vide.',
       'Mémoire de conversation par salon et par membre : elle retient un prénom et le réutilise dans les messages suivants.',
       'Faits vérifiés via Wikipédia et Wikidata, avec les réponses intégrées en secours si le réseau est indisponible.',

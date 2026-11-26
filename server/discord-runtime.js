@@ -57,6 +57,77 @@ const ticketMeta = new Map();
 const dmBlockNotified = new Set();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const DISCORD_CONTENT_LIMIT = 2000;
+
+function splitDiscordContent(value, limit = DISCORD_CONTENT_LIMIT) {
+  const text = String(value ?? '');
+  if (text.length <= limit) return [text];
+  const chunks = [];
+  let rest = text;
+  while (rest.length > limit) {
+    let cut = limit;
+    const window = rest.slice(0, limit);
+    const newline = window.lastIndexOf('\n');
+    const space = window.lastIndexOf(' ');
+    if (newline >= limit * 0.6) cut = newline + 1;
+    else if (space >= limit * 0.6) cut = space + 1;
+    if (cut < rest.length && /[\uD800-\uDBFF]/.test(rest[cut - 1])) cut -= 1;
+    chunks.push(rest.slice(0, cut));
+    rest = rest.slice(cut).replace(/^\s+/, '');
+  }
+  if (rest) chunks.push(rest);
+  return chunks;
+}
+
+function chunkPayload(payload, content, index) {
+  const next = { ...payload, content };
+  if (index > 0) {
+    for (const key of ['reply', 'tts', 'embeds', 'components', 'files', 'attachments', 'sticker', 'flags']) delete next[key];
+  }
+  return next;
+}
+
+async function sendInChunks(send, payload) {
+  if (!payload || payload.content == null) return send(payload);
+  const chunks = splitDiscordContent(payload.content);
+  let last = null;
+  for (let index = 0; index < chunks.length; index += 1) {
+    last = await send(chunkPayload(payload, chunks[index], index));
+  }
+  return last;
+}
+
+async function replyInteractionInChunks(interaction, payload, { ephemeral = false, mode = 'reply' } = {}) {
+  if (!payload) return null;
+  if (payload.content == null) {
+    if (ephemeral) payload = { ...payload, ephemeral: true };
+    if (mode === 'edit') return interaction.editReply(payload);
+    if (interaction.replied || interaction.deferred) return interaction.followUp(payload);
+    return interaction.reply(payload);
+  }
+  const chunks = splitDiscordContent(payload.content);
+  let last = null;
+  for (let index = 0; index < chunks.length; index += 1) {
+    const next = chunkPayload(payload, chunks[index], index);
+    if (ephemeral) next.ephemeral = true;
+    if (index === 0 && mode === 'edit') last = await interaction.editReply(next);
+    else if (index === 0 && mode === 'reply' && !interaction.replied && !interaction.deferred) last = await interaction.reply(next);
+    else last = await interaction.followUp(next);
+  }
+  return last;
+}
+
+async function replyMessageInChunks(message, payload) {
+  if (!payload || payload.content == null) return message.reply(payload);
+  const chunks = splitDiscordContent(payload.content);
+  let last = null;
+  for (let index = 0; index < chunks.length; index += 1) {
+    const next = chunkPayload(payload, chunks[index], index);
+    last = index === 0 ? await message.reply(next) : await message.channel.send(next);
+  }
+  return last;
+}
+
 function getBotContext(botId) {
   for (const ws of Object.values(db.workspaces || {})) {
     const bot = (ws.bots || []).find((entry) => entry.id === botId);
@@ -812,7 +883,7 @@ function commandPayload(command, context) {
   const embed = command.embed || {};
   const hasEmbed = Boolean(embed.title || embed.description || embed.footer);
   const payload = {};
-  if (content) payload.content = content.slice(0, 2000);
+  if (content) payload.content = content;
   if (hasEmbed) payload.embeds = [toEmbed(embed)];
   if (!payload.content && !payload.embeds) payload.content = 'Commande exécutée.';
   return payload;
@@ -1052,25 +1123,25 @@ async function deliverFlowPayload({ output, target, payload, member, interaction
     const dmPayload = { ...payload };
     delete dmPayload.ephemeral;
     delete dmPayload.reply;
-    const sentMessage = await member.send(dmPayload).catch(() => null);
+    const sentMessage = await sendInChunks((chunk) => member.send(chunk).catch(() => null), dmPayload);
     return { sent: Boolean(sentMessage), message: sentMessage, interactionUsed };
   }
   if (output.ephemeral && interaction) {
     const ephemeralPayload = { ...payload, ephemeral: true };
     delete ephemeralPayload.reply;
     if (interaction.deferred && !interactionUsed) {
-      await interaction.editReply(ephemeralPayload);
-      return { sent: true, interactionUsed: true };
+      const sentMessage = await replyInteractionInChunks(interaction, ephemeralPayload, { ephemeral: true, mode: 'edit' });
+      return { sent: true, message: sentMessage, interactionUsed: true };
     }
     if (interaction.replied || interactionUsed) {
-      await interaction.followUp(ephemeralPayload);
-      return { sent: true, interactionUsed: true };
+      const sentMessage = await replyInteractionInChunks(interaction, ephemeralPayload, { ephemeral: true, mode: 'followUp' });
+      return { sent: true, message: sentMessage, interactionUsed: true };
     }
-    await interaction.reply(ephemeralPayload);
-    return { sent: true, interactionUsed: true };
+    const sentMessage = await replyInteractionInChunks(interaction, ephemeralPayload, { ephemeral: true });
+    return { sent: true, message: sentMessage, interactionUsed: true };
   }
   if (!target?.send) return { sent: false, interactionUsed };
-  const sentMessage = await target.send(payload).catch(() => null);
+  const sentMessage = await sendInChunks((chunk) => target.send(chunk).catch(() => null), payload);
   return { sent: Boolean(sentMessage), message: sentMessage, channel: target, interactionUsed };
 }
 
@@ -1197,8 +1268,8 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
           if (dmTarget) {
             const payload = output.embed
               ? { embeds: [toEmbed(output.embed)] }
-              : { content: String(output.text || '').slice(0, 2000) };
-            await dmTarget.send(payload);
+              : { content: String(output.text || '') };
+            await sendInChunks((chunk) => dmTarget.send(chunk), payload);
             sent = true;
           }
           break;
@@ -1304,7 +1375,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
           const delivered = await deliverFlowPayload({
             output,
             target,
-            payload: { content: String(output.text || ' ').slice(0, 2000) },
+            payload: { content: String(output.text || ' ') },
             member,
             interaction,
             interactionUsed,
@@ -1317,7 +1388,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
           }
           sent = delivered.sent;
           const finish = async () => {
-            const text = String(output.endText || '⏰ Temps écoulé !').slice(0, 2000);
+            const text = String(output.endText || '⏰ Temps écoulé !');
             await deliverFlowPayload({
               output,
               target,
@@ -1352,7 +1423,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
             const delivered = await deliverFlowPayload({
               output,
               target,
-              payload: { content: applyServiceTokens(template, tokens).slice(0, 2000) },
+              payload: { content: applyServiceTokens(template, tokens) },
               member,
               interaction,
               interactionUsed,
@@ -1374,7 +1445,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
               const delivered = await deliverFlowPayload({
                 output,
                 target,
-                payload: { content: text.slice(0, 2000) },
+                payload: { content: text },
                 member,
                 interaction,
                 interactionUsed,
@@ -1408,7 +1479,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
             const delivered = await deliverFlowPayload({
               output,
               target,
-              payload: { content: text.slice(0, 2000) },
+              payload: { content: text },
               member,
               interaction,
               interactionUsed,
@@ -1450,7 +1521,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
             const delivered = await deliverFlowPayload({
               output,
               target,
-              payload: { content: text.slice(0, 2000) },
+              payload: { content: text },
               member,
               interaction,
               interactionUsed,
@@ -1502,7 +1573,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
             const delivered = await deliverFlowPayload({
               output,
               target,
-              payload: { content: text.slice(0, 2000) },
+              payload: { content: text },
               member,
               interaction,
               interactionUsed,
@@ -1681,7 +1752,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
             const delivered = await deliverFlowPayload({
               output,
               target,
-              payload: { content: text.slice(0, 2000) },
+              payload: { content: text },
               member,
               interaction,
               interactionUsed,
@@ -1711,7 +1782,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
             const delivered = await deliverFlowPayload({
               output,
               target,
-              payload: { content: text.slice(0, 2000) },
+              payload: { content: text },
               member,
               interaction,
               interactionUsed,
@@ -1744,7 +1815,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
         }
         case 'log': {
           const logChannel = resolveChannel(guild, bot.discord?.logChannel || 'logs');
-          if (logChannel) await logChannel.send({ content: String(output.text || '').slice(0, 2000) });
+          if (logChannel) await sendInChunks((chunk) => logChannel.send(chunk), { content: String(output.text || '') });
           break;
         }
         case 'thread': {
@@ -1818,11 +1889,11 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
           }
           if (output.action === 'close') {
             const reason = String(output.reason || 'Post fermé par le staff.').slice(0, 200);
-            await target.send({ content: String(output.content || '🔒 Post fermé.').slice(0, 2000) }).catch(() => {});
+            await sendInChunks((chunk) => target.send(chunk), { content: String(output.content || '🔒 Post fermé.') }).catch(() => {});
             if (target.setLocked) await target.setLocked(true, reason).catch(() => {});
             if (target.setArchived) await target.setArchived(true, reason).catch(() => {});
           } else {
-            lastMessage = await target.send({ content: String(output.content || ' ').slice(0, 2000) });
+            lastMessage = await sendInChunks((chunk) => target.send(chunk), { content: String(output.content || ' ') });
             lastChannel = target;
             sent = true;
           }
@@ -1859,7 +1930,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
           const target = resolveChannel(guild, output.channel) || channel;
           if (!target) break;
           const text = output.text || 'Je n’ai pas pu générer de réponse.';
-          lastMessage = await target.send({ content: String(text).slice(0, 2000), allowedMentions: { parse: [] } });
+          lastMessage = await sendInChunks((chunk) => target.send(chunk), { content: String(text), allowedMentions: { parse: [] } });
           lastChannel = target;
           sent = true;
           break;
@@ -1898,7 +1969,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
           if (output.mode === 'personal') {
             const content = `🎵 ${output.title ? `**${String(output.title).slice(0, 100)}** — ` : ''}${url}`;
             if (interaction && !interaction.replied && !interaction.deferred) {
-              await interaction.reply({ content, ephemeral: true }).catch(() => {});
+              await replyInteractionInChunks(interaction, { content }, { ephemeral: true }).catch(() => {});
               interactionUsed = true;
             } else if (user?.send) {
               await user.send({ content }).catch(() => {});
@@ -1991,7 +2062,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
             }
           }
           const text = `**${output.question || 'Sondage'}**\n${options.map((option, index) => `${index + 1}. ${option}`).join('\n')}`;
-          lastMessage = await target.send({ content: text.slice(0, 2000) });
+          lastMessage = await sendInChunks((chunk) => target.send(chunk), { content: text });
           for (let index = 0; index < Math.min(options.length, 9); index += 1) {
             await lastMessage.react(`${index + 1}\u20e3`).catch(() => {});
           }
@@ -2276,12 +2347,12 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
         case 'accountCheck': {
           if (!output.pass) {
             const target = resolveChannel(guild, output.channel) || channel;
-            const content = String(output.text || '🚫 Ton compte ne remplit pas les conditions.').slice(0, 2000);
+            const content = String(output.text || '🚫 Ton compte ne remplit pas les conditions.');
             if (interaction && !interaction.replied && !interaction.deferred) {
-              await interaction.reply({ content, ephemeral: true }).catch(() => {});
+              await replyInteractionInChunks(interaction, { content }, { ephemeral: true }).catch(() => {});
               interactionUsed = true;
             } else if (target?.send) {
-              await target.send({ content, allowedMentions: { users: user?.id ? [user.id] : [] } }).catch(() => {});
+              await sendInChunks((chunk) => target.send(chunk), { content, allowedMentions: { users: user?.id ? [user.id] : [] } }).catch(() => {});
             }
             if (output.stop) stopped = true;
           }
@@ -2390,7 +2461,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
               }
               case 'dm':
                 if (!targetMember) throw new Error('membre introuvable');
-                await targetMember.send({ content: String(output.notifyMessage || output.reason || 'Message du staff').slice(0, 2000) }).catch(() => {});
+                await sendInChunks((chunk) => targetMember.send(chunk), { content: String(output.notifyMessage || output.reason || 'Message du staff') }).catch(() => {});
                 detail = 'message privé envoyé';
                 break;
               case 'log':
@@ -2401,7 +2472,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
             }
             if (output.notify !== false && targetMember && ['warn', 'timeout', 'kick', 'ban', 'softban'].includes(action)) {
               const notify = String(output.notifyMessage || 'Tu as reçu une sanction : {{reason}}').replaceAll('{{reason}}', reason);
-              await targetMember.send({ content: notify.slice(0, 2000) }).catch(() => {});
+              await sendInChunks((chunk) => targetMember.send(chunk), { content: notify }).catch(() => {});
             }
             await sendLog(guild, bot, `🛡️ **${action}** · ${targetMember?.user?.tag || output.target || user?.tag || 'membre'} · ${detail}${reason ? ` · raison : ${reason}` : ''}`, output.logChannel);
             if (action !== 'log' && output.logChannel && targetChannel?.send) {
@@ -2460,10 +2531,10 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
           if (output.variable) result.variables[output.variable] = url;
           const message = String(output.message || 'Invitation : {{invite}}').replace(/\{\{invite\}\}/g, url);
           if (output.delivery === 'dm') {
-            if (member) await member.send({ content: message.slice(0, 2000) }).catch(() => {});
+            if (member) await sendInChunks((chunk) => member.send(chunk), { content: message }).catch(() => {});
           } else if (output.delivery !== 'none') {
             const sendTarget = resolveChannel(guild, output.channel) || channel;
-            if (sendTarget?.send) await sendTarget.send({ content: message.slice(0, 2000) });
+            if (sendTarget?.send) await sendInChunks((chunk) => sendTarget.send(chunk), { content: message });
           }
           sent = true;
           break;
@@ -2616,7 +2687,7 @@ async function handleInteraction(botId, interaction) {
         await interaction.reply({ content: `Patiente encore ${remaining}s avant de réutiliser /${command.name}.`, ephemeral: true });
         return;
       }
-      await interaction.reply(commandPayload(command, { guild, member, interaction, client: ensureRuntime(botId).client }));
+      await replyInteractionInChunks(interaction, commandPayload(command, { guild, member, interaction, client: ensureRuntime(botId).client }));
       bumpCommand(ws, bot, command, 'discord:slash', interaction.user);
     }
     let flowUsedInteraction = false;
@@ -2808,7 +2879,7 @@ async function handleInteraction(botId, interaction) {
         block.penaltyText || '✅ Pénalité de {{penalty_added}} ajoutée à {{member}}.',
         tokens,
       );
-      await interaction.reply({ content: text.slice(0, 2000), ephemeral: true }).catch(() => {});
+      await replyInteractionInChunks(interaction, { content: text }, { ephemeral: true }).catch(() => {});
       return;
     }
     const vars = {
@@ -2842,7 +2913,7 @@ async function handleInteraction(botId, interaction) {
         block.penaltyText || '✅ Pénalité de {{penalty_added}} ajoutée à {{member}}.',
         tokens,
       );
-      await interaction.reply({ content: text.slice(0, 2000), ephemeral: true }).catch(() => {});
+      await replyInteractionInChunks(interaction, { content: text }, { ephemeral: true }).catch(() => {});
     }
     return;
   }
@@ -2899,12 +2970,11 @@ async function handleInteraction(botId, interaction) {
       await interaction.reply({ content: 'Ce bouton n’est plus disponible.', ephemeral: true });
       return;
     }
-    await interaction
-      .reply({
-        content: String(button.response || 'Merci !').slice(0, 2000),
-        ephemeral: button.ephemeral !== false,
-      })
-      .catch(() => {});
+    await replyInteractionInChunks(
+      interaction,
+      { content: String(button.response || 'Merci !') },
+      { ephemeral: button.ephemeral !== false },
+    ).catch(() => {});
     recordEvent(ws, 'message.button', {
       botId: bot.id,
       messageId: saved.id,
@@ -3129,7 +3199,7 @@ async function handleInteraction(botId, interaction) {
 
 async function sendLog(guild, bot, text, channelName = '') {
   const channel = resolveChannel(guild, channelName || bot.discord?.logChannel || 'logs');
-  if (channel) await channel.send({ content: String(text).slice(0, 2000) }).catch(() => {});
+  if (channel) await sendInChunks((chunk) => channel.send(chunk), { content: String(text) }).catch(() => {});
 }
 
 
@@ -3783,9 +3853,10 @@ async function handleMessage(botId, message) {
         await message.reply({ content: `Patiente encore ${remaining}s avant de réutiliser ${prefix}${command.name}.` }).catch(() => {});
         return;
       }
-      await message
-        .reply(commandPayload(command, { guild, member, interaction: null, client: runtime.client }))
-        .catch((error) => log(runtime, 'error', `Réponse commande : ${error.message}`));
+      await replyMessageInChunks(
+        message,
+        commandPayload(command, { guild, member, interaction: null, client: runtime.client }),
+      ).catch((error) => log(runtime, 'error', `Réponse commande : ${error.message}`));
       bumpCommand(ws, bot, command, 'discord:prefix', message.author);
       return;
     }
@@ -3848,9 +3919,10 @@ async function handleMemberAdd(botId, member) {
         member,
         client: ensureRuntime(botId).client,
       });
-      await channel
-        .send({ content: text.slice(0, 2000), allowedMentions: { parse: ['users'] } })
-        .catch((error) => log(ensureRuntime(botId), 'error', `Message d’accueil : ${error.message}`));
+      await sendInChunks(
+        (chunk) => channel.send(chunk),
+        { content: text, allowedMentions: { parse: ['users'] } },
+      ).catch((error) => log(ensureRuntime(botId), 'error', `Message d’accueil : ${error.message}`));
       await runTriggeredFlows({ bot, ws, type: 'automation', guild, member, channel, message: null, interaction: null, match: 'welcome', vars: { automation: 'welcome' } });
     }
   }
@@ -4319,14 +4391,34 @@ async function resolveTargetChannel(bot, target, token) {
   return { id: channel.id, name: channel.name };
 }
 
+async function sendDiscordRestContent(token, channelId, body) {
+  const content = body?.content == null ? null : String(body.content);
+  if (content == null || content.length <= DISCORD_CONTENT_LIMIT) {
+    return discordRequest(token, `/channels/${channelId}/messages`, { method: 'POST', body });
+  }
+  const base = { ...body };
+  delete base.content;
+  const chunks = splitDiscordContent(content);
+  let last = null;
+  for (let index = 0; index < chunks.length; index += 1) {
+    const next = { ...base, content: chunks[index] };
+    if (index > 0) {
+      delete next.embeds;
+      delete next.components;
+    }
+    last = await discordRequest(token, `/channels/${channelId}/messages`, { method: 'POST', body: next });
+  }
+  return last;
+}
+
 async function sendScheduledMessage(bot, scheduled) {
   if (!bot.tokenEnc) throw new Error('Aucun token Discord enregistré.');
   if (!scheduled.content) throw new Error('Le message programmé est vide.');
   const token = decryptSecret(bot.tokenEnc);
   const channel = await resolveTargetChannel(bot, scheduled, token);
-  const message = await discordRequest(token, `/channels/${channel.id}/messages`, {
-    method: 'POST',
-    body: { content: scheduled.content, allowed_mentions: { parse: [] } },
+  const message = await sendDiscordRestContent(token, channel.id, {
+    content: scheduled.content,
+    allowed_mentions: { parse: [] },
   });
   return { channel, messageId: message?.id || null };
 }
@@ -4353,7 +4445,7 @@ export async function sendScheduledMessageNow(botId, scheduledId) {
 
 function savedMessagePayload(saved) {
   const payload = { allowed_mentions: { parse: [] } };
-  if (saved.content) payload.content = String(saved.content).slice(0, 2000);
+  if (saved.content) payload.content = String(saved.content);
   if (savedMessageHasEmbed(saved)) payload.embeds = [toEmbed(saved.embed).toJSON()];
   const buttons = (saved.buttons || []).slice(0, 5);
   if (buttons.length) {
@@ -4388,10 +4480,7 @@ async function sendSavedMessage(bot, saved) {
   if (!bot.tokenEnc) throw new Error('Aucun token Discord enregistré.');
   const token = decryptSecret(bot.tokenEnc);
   const channel = await resolveTargetChannel(bot, saved, token);
-  const message = await discordRequest(token, `/channels/${channel.id}/messages`, {
-    method: 'POST',
-    body: savedMessagePayload(saved),
-  });
+  const message = await sendDiscordRestContent(token, channel.id, savedMessagePayload(saved));
   return { channel, messageId: message?.id || null };
 }
 

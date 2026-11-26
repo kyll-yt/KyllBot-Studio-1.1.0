@@ -38,7 +38,7 @@ export function sanitizeScheduledMessage(input = {}, previous = null) {
   if (typeof input.serverId === 'string') next.serverId = input.serverId.trim().slice(0, 60);
   if (typeof input.channelId === 'string') next.channelId = input.channelId.trim().slice(0, 60);
   if (typeof input.channelName === 'string') next.channelName = input.channelName.trim().replace(/^#/, '').slice(0, 60);
-  if (typeof input.content === 'string') next.content = input.content.trim().slice(0, 2000);
+  if (typeof input.content === 'string') next.content = input.content.trim().slice(0, 50000);
   if (typeof input.time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(input.time)) next.time = input.time;
   if (input.days !== undefined) next.days = normalizeScheduledDays(input.days);
   if (typeof input.timezone === 'string') next.timezone = safeTimezone(input.timezone);

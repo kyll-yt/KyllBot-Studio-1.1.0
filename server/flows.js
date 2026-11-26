@@ -231,7 +231,7 @@ function normalizeRule(rule) {
 function normalizeVariant(variant) {
   return {
     id: str(variant?.id, 40) || newId(),
-    text: str(variant?.text, 1200),
+    text: str(variant?.text, 50000),
     weight: num(variant?.weight, 1, 100, 1),
     next: str(variant?.next, 40) || null,
   };
@@ -275,7 +275,7 @@ function normalizeBlock(block) {
       return {
         ...base,
         channel: str(block?.channel, 60),
-        text: str(block?.text, 2000),
+        text: str(block?.text, 50000),
         variantMode: Boolean(block?.variantMode),
         variants: Array.isArray(block?.variants)
           ? block.variants.map(normalizeVariant)
@@ -312,7 +312,7 @@ function normalizeBlock(block) {
     case 'dm':
       return {
         ...base,
-        text: str(block?.text, 1200),
+        text: str(block?.text, 50000),
         target: str(block?.target, 80),
         embed: Boolean(block?.embed),
         title: str(block?.title, 120),
@@ -527,7 +527,7 @@ function normalizeBlock(block) {
       return {
         ...base,
         channel: str(block?.channel, 60),
-        text: str(block?.text, 2000),
+        text: str(block?.text, 50000),
         ping: block?.ping === undefined ? true : Boolean(block.ping),
         ephemeral: Boolean(block?.ephemeral),
         dm: Boolean(block?.dm),
@@ -537,7 +537,7 @@ function normalizeBlock(block) {
       return {
         ...base,
         messageRef: str(block?.messageRef, 60) || 'dernier',
-        text: str(block?.text, 2000),
+        text: str(block?.text, 50000),
         embed: Boolean(block?.embed),
         title: str(block?.title, 120),
         description: str(block?.description, 1800),

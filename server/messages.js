@@ -59,7 +59,7 @@ export function sanitizeSavedMessage(input = {}, previous = null) {
   if (input.name !== undefined) base.name = text(input.name, 80);
   if (input.channelId !== undefined) base.channelId = text(input.channelId, 60);
   if (input.channelName !== undefined) base.channelName = text(input.channelName, 60).replace(/^#/, '');
-  if (input.content !== undefined) base.content = text(input.content, 2000);
+  if (input.content !== undefined) base.content = text(input.content, 50000);
   if (input.embed !== undefined) base.embed = sanitizeEmbed(input.embed, base.embed);
   if (input.buttons !== undefined) {
     base.buttons = (Array.isArray(input.buttons) ? input.buttons : [])

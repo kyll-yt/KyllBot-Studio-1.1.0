@@ -2037,7 +2037,7 @@ function renderNodeFields(block) {
           ${nodeField('Variantes aléatoires', `<button class="switch ${block.variantMode ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="variantMode"></button>`, 'shrink')}
           ${nodeField('Supprimer après', `<input class="input" type="number" min="0" max="300" ${bind('deleteAfter')} value="${Number(block.deleteAfter) || 0}" placeholder="0">`, 'shrink')}
         </div>
-        <p class="hint">Éphémère = seul le membre qui déclenche voit le message. Message privé = envoi en DM. Laisse les deux désactivés pour un message public.</p>
+        <p class="hint">Éphémère = seul le membre qui déclenche voit le message. Message privé = envoi en DM. Laisse les deux désactivés pour un message public. Au-delà de 2000 caractères, le bot envoie automatiquement la suite dans plusieurs messages.</p>
         ${block.variantMode
           ? `<p class="hint">Le texte est tiré au hasard parmi les variantes ci-dessous. Le poids règle la probabilité.</p>
             <div class="variant-editor-head">

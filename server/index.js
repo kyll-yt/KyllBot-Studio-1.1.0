@@ -448,7 +448,7 @@ function sanitizeCommandVariants(input) {
   const ids = new Set();
   return input
     .map((variant) => {
-      const text = str(variant?.text, 1000);
+      const text = str(variant?.text, 50000);
       if (!text) return null;
       let id = str(variant?.id, 80).replace(/[^\w-]/g, '') || newId();
       if (ids.has(id)) id = newId();
@@ -1372,7 +1372,7 @@ app.post(
       name,
       serverId,
       description: str(req.body?.description, 160),
-      response: str(req.body?.response, 1000),
+      response: str(req.body?.response, 50000),
       embed: {
         title: str(embed.title, 120),
         description: str(embed.description, 500),
@@ -1495,7 +1495,7 @@ app.patch(
     command.serverId = nextServerId;
     command.name = nextName;
     if (body.description !== undefined) command.description = str(body.description, 160);
-    if (body.response !== undefined) command.response = str(body.response, 1000);
+    if (body.response !== undefined) command.response = str(body.response, 50000);
     if (body.enabled !== undefined) command.enabled = Boolean(body.enabled);
     if (body.cooldown !== undefined) command.cooldown = Math.min(600, Math.max(0, Number(body.cooldown) || 0));
     if (body.variants !== undefined) command.variants = sanitizeCommandVariants(body.variants);
