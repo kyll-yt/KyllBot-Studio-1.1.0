@@ -1023,10 +1023,28 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
   let sent = false;
   let interactionUsed = false;
 
+  const serviceVarsNow = () => {
+    try {
+      const state = ensureServiceState(bot, guild?.id || 'dm');
+      const id = String(user?.id || 'inconnu');
+      const entry = state.members?.[id] || { id, name: serviceDisplayName(member, user), serviceMs: 0, penaltyMs: 0, startedAt: null };
+      const now = Date.now();
+      return serviceTokens(state, entry, { now, sinceMs: entry.startedAt ? Math.max(0, now - entry.startedAt) : 0 });
+    } catch {
+      return {};
+    }
+  };
+
   for (const rawOutput of result.outputs) {
+    const liveService = serviceVarsNow();
+    const outputVars = { ...liveService, ...result.variables };
+    if (liveService.chrono !== undefined) {
+      outputVars.chrono = liveService.chrono;
+      outputVars.current_service = liveService.current_service;
+    }
     const output = String(rawOutput.kind || '').startsWith('service')
       ? rawOutput
-      : applyServiceTokensDeep(rawOutput, result.variables);
+      : applyServiceTokensDeep(rawOutput, outputVars);
     try {
       switch (output.kind) {
         case 'message':
@@ -1221,7 +1239,8 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
           const target = resolveChannel(guild, output.channel) || channel;
           if (output.action === 'service') {
             const state = ensureServiceState(bot, guild?.id || 'dm');
-            const entry = serviceEntry(state, user?.id, serviceDisplayName(member, user));
+            const id = String(user?.id || 'inconnu');
+            const entry = state.members?.[id] || { id, name: serviceDisplayName(member, user), serviceMs: 0, penaltyMs: 0, startedAt: null };
             const now = Date.now();
             const sinceMs = entry.startedAt ? Math.max(0, now - entry.startedAt) : 0;
             const tokens = { ...serviceTokens(state, entry, { now, sinceMs }), elapsed: formatDuration(sinceMs) };
