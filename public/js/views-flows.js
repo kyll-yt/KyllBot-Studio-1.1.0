@@ -1027,6 +1027,8 @@ function flowOptions(value) {
     .filter(Boolean);
 }
 
+const MAX_MODAL_FIELDS = 15;
+
 const MODAL_FIELD_TYPES = {
   short: { label: 'Champ court', shortLabel: 'court', hint: 'Une ligne de texte' },
   paragraph: { label: 'Paragraphe', shortLabel: 'paragraphe', hint: 'Plusieurs lignes de texte' },
@@ -1073,7 +1075,7 @@ function normalizeModalFields(block) {
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter(Boolean)
-      .slice(0, 5)
+      .slice(0, MAX_MODAL_FIELDS)
       .map((line) => {
         const [rawLabel, rawStyle, rawRequired, rawPlaceholder] = line.split('|').map((part) => part.trim());
         const style = String(rawStyle || '').toLowerCase();
@@ -1099,14 +1101,14 @@ function normalizeModalFields(block) {
       });
   }
   if (!list.length) list = [{ label: 'Champ', type: 'short', required: true }];
-  return list.slice(0, 5).map((entry, index) => {
+  return list.slice(0, MAX_MODAL_FIELDS).map((entry, index) => {
     const type = modalFieldType(entry?.type);
     const options = Array.isArray(entry?.options)
       ? entry.options.join('\n')
       : String(entry?.options || '');
     return {
       id: entry?.id || flowUid(),
-      label: String(entry?.label || `Champ ${index + 1}`).slice(0, 45),
+      label: String(entry?.label || `Champ ${index + 1}`).slice(0, 100),
       type,
       required: type === 'info' ? false : entry?.required !== false,
       placeholder: String(entry?.placeholder || '').slice(0, 100),
@@ -1946,7 +1948,7 @@ function renderModalField(block, field, index) {
   return `<div class="form-field-card${field.required ? ' is-required' : ''}">
     <div class="form-field-top">
       <span class="form-field-index">${index + 1}</span>
-      <input class="input form-field-label" ${bind('label')} value="${esc(field.label)}" placeholder="Libellé du champ" maxlength="45">
+      <input class="input form-field-label" ${bind('label')} value="${esc(field.label)}" placeholder="Libellé du champ" maxlength="100">
       <select class="select form-field-type" ${bind('type')}>
         ${Object.entries(MODAL_FIELD_TYPES).map(([key, meta]) => `<option value="${key}" ${field.type === key ? 'selected' : ''}>${meta.label}</option>`).join('')}
       </select>
@@ -1968,9 +1970,9 @@ function renderModalField(block, field, index) {
 function renderModalFields(block) {
   const fields = normalizeModalFields(block);
   return `<div class="form-field-editor">
-    <div class="form-field-editor-head"><b>Champs du formulaire</b><span>${fields.length}/5 · type et choix par champ</span></div>
+    <div class="form-field-editor-head"><b>Champs du formulaire</b><span>${fields.length}/${MAX_MODAL_FIELDS} · type et choix par champ</span></div>
     ${fields.map((field, index) => renderModalField(block, field, index)).join('')}
-    <button type="button" class="link-btn" data-action="flow-add-form-field" data-id="${block.id}" ${fields.length >= 5 ? 'disabled' : ''}>${icon('plus')} Ajouter un champ</button>
+    <button type="button" class="link-btn" data-action="flow-add-form-field" data-id="${block.id}" ${fields.length >= MAX_MODAL_FIELDS ? 'disabled' : ''}>${icon('plus')} Ajouter un champ</button>
   </div>`;
 }
 
@@ -2317,7 +2319,7 @@ function renderNodeFields(block) {
         ${nodeField('Titre', `<input class="input" ${bind('title')} value="${esc(block.title || '')}" placeholder="Formulaire">`)}
         ${renderModalFields(block)}
         ${nodeField('Bouton', `<input class="input" ${bind('submitLabel')} value="${esc(block.submitLabel || '')}" placeholder="Envoyer">`)}
-        <p class="hint">Chaque champ garde son propre type et ses propres choix. Discord affiche les listes et cases directement dans la fenêtre. Après validation, le flux continue avec <b>{{nom_du_champ}}</b> et <b>{{form.nom_du_champ}}</b>.</p>`;
+        <p class="hint">Jusqu’à ${MAX_MODAL_FIELDS} champs. Discord affiche 5 champs par fenêtre : le formulaire passe automatiquement à la suite avec un bouton « Continuer ». Les titres peuvent aller jusqu’à 100 caractères ; Discord en affiche 45 en titre et le reste en description. Après validation, le flux continue avec <b>{{nom_du_champ}}</b> et <b>{{form.nom_du_champ}}</b>.</p>`;
     case 'giveaway':
       return `<div class="fld-row">
           ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel), 'grow')}
@@ -3674,7 +3676,7 @@ onAction('flow-add-form-field', (el) => {
   const block = flowNode(el.dataset.id);
   if (!block) return;
   const fields = normalizeModalFields(block);
-  if (fields.length >= 5) return toast('5 champs maximum par formulaire.', 'error');
+  if (fields.length >= MAX_MODAL_FIELDS) return toast(`${MAX_MODAL_FIELDS} champs maximum par formulaire.`, 'error');
   fields.push({ id: flowUid(), label: `Champ ${fields.length + 1}`, type: 'short', required: false, placeholder: '', options: '', value: '' });
   block.fields = fields;
   flowEditor.dirty = true;

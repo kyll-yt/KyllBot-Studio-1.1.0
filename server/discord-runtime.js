@@ -871,14 +871,31 @@ function parseModalFields(block) {
   }));
 }
 
-function buildModal(flow, block) {
-  const fields = parseModalFields(block);
+const MODAL_PAGE_SIZE = 5;
+
+function modalPage(block, page = 0) {
+  const all = parseModalFields(block);
+  const pages = Math.max(1, Math.ceil(all.length / MODAL_PAGE_SIZE));
+  const current = Math.min(Math.max(0, Number(page) || 0), pages - 1);
+  return {
+    all,
+    fields: all.slice(current * MODAL_PAGE_SIZE, current * MODAL_PAGE_SIZE + MODAL_PAGE_SIZE),
+    page: current,
+    pages,
+  };
+}
+
+function buildModal(flow, block, page = 0) {
+  const { fields, page: current, pages } = modalPage(block, page);
+  const suffix = pages > 1 ? ` (${current + 1}/${pages})` : '';
   const modal = new ModalBuilder()
-    .setCustomId(`kfmodalsubmit:${flow.id}:${block.id}`)
-    .setTitle(String(block?.title || 'Formulaire').slice(0, 45));
+    .setCustomId(`kfmodalsubmit:${flow.id}:${block.id}:${current}`)
+    .setTitle(`${String(block?.title || 'Formulaire').slice(0, 45 - suffix.length)}${suffix}`);
   for (const field of fields) {
-    const label = new LabelBuilder().setLabel(field.label);
-    if (field.placeholder) label.setDescription(field.placeholder);
+    const rawLabel = String(field.label || 'Champ').trim();
+    const label = new LabelBuilder().setLabel(rawLabel.slice(0, 45));
+    const extra = [rawLabel.slice(45), field.placeholder].filter(Boolean).join(' · ');
+    if (extra) label.setDescription(extra.slice(0, 100));
     if (field.type === 'role') {
       const select = new RoleSelectMenuBuilder()
         .setCustomId(field.customId)
@@ -938,7 +955,7 @@ function buildModal(flow, block) {
     }
     modal.addLabelComponents(label);
   }
-  return { modal, fields };
+  return { modal, fields, page: current, pages };
 }
 
 function buildCaptchaModal(flow, block) {
@@ -2025,7 +2042,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
             title: output.title || sourceBlock.title,
             fields: sourceBlock.fields || output.fields || [],
           };
-          const { modal } = buildModal(flow, modalBlock);
+          const { modal } = buildModal(flow, modalBlock, 0);
           rememberPending(
             pendingModals,
             pendingKey(flow.id, output.blockId, user?.id),
@@ -2034,6 +2051,8 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
               blockId: output.blockId,
               next: output.next,
               vars: result.variables,
+              values: {},
+              page: 0,
               botId: bot.id,
               userId: user?.id,
               channelId: channel?.id,
@@ -2653,7 +2672,7 @@ async function handleInteraction(botId, interaction) {
   }
 
   if (interaction.isModalSubmit() && interaction.customId.startsWith('kfmodalsubmit:')) {
-    const [, flowId, blockId] = interaction.customId.split(':');
+    const [, flowId, blockId, rawPage] = interaction.customId.split(':');
     const flow = (bot.flows || []).find((entry) => entry.id === flowId);
     const block = flow?.blocks?.find((entry) => entry.id === blockId);
     if (!flow || !block) {
@@ -2661,8 +2680,13 @@ async function handleInteraction(botId, interaction) {
       return;
     }
     const pending = takePending(pendingModals, pendingKey(flowId, blockId, interaction.user.id));
-    const vars = { ...(pending?.vars || {}), interaction: 'form', form_title: block.title || 'Formulaire' };
-    for (const field of parseModalFields(block)) {
+    if (!pending) {
+      await interaction.reply({ content: 'Ce formulaire a expiré. Relance le flux pour recommencer.', ephemeral: true });
+      return;
+    }
+    const { fields, page, pages } = modalPage(block, rawPage);
+    const values = { ...(pending.values || {}) };
+    for (const field of fields) {
       let value = '';
       let idValue = '';
       let nameValue = '';
@@ -2687,16 +2711,48 @@ async function handleInteraction(botId, interaction) {
       } else {
         value = interaction.fields.getTextInputValue(field.customId) || '';
       }
-      vars[field.key] = value;
-      vars[`form.${field.key}`] = value;
+      values[field.key] = value;
+      values[`form.${field.key}`] = value;
       if (field.type === 'role' || field.type === 'user') {
-        vars[`${field.key}_id`] = idValue;
-        vars[`${field.key}_name`] = nameValue;
-        vars[`form.${field.key}_id`] = idValue;
-        vars[`form.${field.key}_name`] = nameValue;
+        values[`${field.key}_id`] = idValue;
+        values[`${field.key}_name`] = nameValue;
+        values[`form.${field.key}_id`] = idValue;
+        values[`form.${field.key}_name`] = nameValue;
       }
     }
-    const nextBlock = pending?.next || block.next;
+    if (page + 1 < pages) {
+      const nextPage = page + 1;
+      rememberPending(
+        pendingModals,
+        pendingKey(flowId, blockId, interaction.user.id),
+        {
+          ...pending,
+          values,
+          page: nextPage,
+          botId: bot.id,
+          userId: interaction.user.id,
+          channelId: interaction.channelId,
+        },
+        900,
+      );
+      const button = new ButtonBuilder()
+        .setCustomId(`kfmodalnext:${flowId}:${blockId}:${nextPage}`)
+        .setLabel(`Continuer (${nextPage + 1}/${pages})`)
+        .setStyle(ButtonStyle.Primary);
+      await interaction.reply({
+        content: `Formulaire ${nextPage + 1}/${pages} : clique pour compléter la suite.`,
+        components: [new ActionRowBuilder().addComponents(button)],
+        ephemeral: true,
+      }).catch(() => {});
+      return;
+    }
+    const vars = {
+      ...(pending.vars || {}),
+      ...values,
+      interaction: 'form',
+      form_title: block.title || 'Formulaire',
+    };
+    const nextBlock = pending.next || block.next;
     if (!nextBlock) {
       await interaction.reply({ content: 'Formulaire reçu ✅', ephemeral: true }).catch(() => {});
       return;
@@ -2867,28 +2923,37 @@ async function handleInteraction(botId, interaction) {
       return;
     }
 
-    if (prefix === 'kfmodal') {
+    if (prefix === 'kfmodal' || prefix === 'kfmodalnext') {
       const block = (flow.blocks || []).find((entry) => entry.id === blockId);
       if (!block) {
         await interaction.reply({ content: 'Ce formulaire n’est plus disponible.', ephemeral: true });
         return;
       }
       const pending = takePending(pendingModals, pendingKey(flowId, blockId, interaction.user.id));
+      if (!pending && prefix === 'kfmodalnext') {
+        await interaction.reply({ content: 'Ce formulaire a expiré. Relance le flux pour recommencer.', ephemeral: true });
+        return;
+      }
+      const state = pending || { next: block.next, vars: {}, values: {}, page: 0 };
+      const page = prefix === 'kfmodalnext' ? Number(rawIndex) || 0 : Number(state.page) || 0;
       rememberPending(
         pendingModals,
         pendingKey(flowId, blockId, interaction.user.id),
         {
+          ...state,
           flowId,
           blockId,
-          next: pending?.next || block.next,
-          vars: pending?.vars || {},
+          next: state.next || block.next,
+          vars: state.vars || {},
+          values: state.values || {},
+          page,
           botId: bot.id,
           userId: interaction.user.id,
           channelId: interaction.channelId,
         },
         900,
       );
-      const { modal } = buildModal(flow, block);
+      const { modal } = buildModal(flow, block, page);
       await interaction.showModal(modal);
       return;
     }

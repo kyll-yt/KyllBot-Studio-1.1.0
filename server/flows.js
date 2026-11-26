@@ -157,6 +157,7 @@ const num = (value, min, max, fallback) => {
 };
 
 const MODAL_FIELD_TYPES = new Set(['short', 'paragraph', 'select', 'checkbox', 'multi', 'role', 'user', 'info']);
+const MAX_MODAL_FIELDS = 15;
 
 function modalFieldTypeFromStyle(style) {
   const value = String(style || '').toLowerCase();
@@ -197,15 +198,15 @@ export function normalizeModalFields(raw) {
         .split(/\r?\n/)
         .map((line) => line.trim())
         .filter(Boolean)
-        .slice(0, 5)
+        .slice(0, MAX_MODAL_FIELDS)
         .map(parseLegacyModalField);
   if (!source.length) source.push({ label: 'Champ', type: 'short', required: true });
-  return source.slice(0, 5).map((entry, index) => {
+  return source.slice(0, MAX_MODAL_FIELDS).map((entry, index) => {
     const field = typeof entry === 'string' ? parseLegacyModalField(entry, index) : entry || {};
     const type = MODAL_FIELD_TYPES.has(field.type) ? field.type : 'short';
     return {
       id: str(field.id, 60) || `field_${index + 1}`,
-      label: str(field.label, 45) || `Champ ${index + 1}`,
+      label: str(field.label, 100) || `Champ ${index + 1}`,
       type,
       required: type === 'info' ? false : field.required !== false,
       placeholder: str(field.placeholder, 100),
