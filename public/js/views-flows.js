@@ -1027,7 +1027,7 @@ function flowOptions(value) {
     .filter(Boolean);
 }
 
-const MAX_MODAL_FIELDS = 15;
+const MAX_MODAL_FIELDS = 35;
 
 const MODAL_FIELD_TYPES = {
   short: { label: 'Champ court', shortLabel: 'court', hint: 'Une ligne de texte' },

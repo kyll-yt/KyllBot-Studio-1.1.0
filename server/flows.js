@@ -157,7 +157,7 @@ const num = (value, min, max, fallback) => {
 };
 
 const MODAL_FIELD_TYPES = new Set(['short', 'paragraph', 'select', 'checkbox', 'multi', 'role', 'user', 'info']);
-const MAX_MODAL_FIELDS = 15;
+const MAX_MODAL_FIELDS = 35;
 
 function modalFieldTypeFromStyle(style) {
   const value = String(style || '').toLowerCase();

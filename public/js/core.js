@@ -20,7 +20,7 @@ const APP_CHANGELOG = [
       'Création de flux : le modèle « Bienvenue » est sélectionné par défaut pour éviter le canvas vide, avec un message clair si aucun serveur n’est choisi.',
       'Chrono du service actuel : nouveau mode du bloc Chronomètre et modèle « Chrono service » avec la commande /chrono, pour afficher le temps de service en cours sans l’arrêter. {{chrono}} fonctionne aussi dans les messages et embeds.',
       'Chrono en ligne : nouvel encadré foncé qui liste chaque personne en service, une par ligne, avec son temps en ligne. Il s’actualise toutes les 30 secondes ou toutes les minutes, se met à jour dès un démarrage/arrêt et se restaure après un redémarrage du bot.',
-      'Formulaires : jusqu’à 15 champs, répartis automatiquement en plusieurs fenêtres Discord de 5 champs, et titres de champs jusqu’à 100 caractères (45 en titre, le reste en description).',
+      'Formulaires : jusqu’à 35 champs, répartis automatiquement en plusieurs fenêtres Discord de 5 champs, et titres de champs jusqu’à 100 caractères (45 en titre, le reste en description).',
       'Le bloc « Réponse IA » utilise maintenant la vraie IA dans les flux : fini le texte simulé.',
       'L’IA répond à toutes les questions, même hors sujet Discord, avec des faits directs et sans formule vide.',
       'Mémoire de conversation par salon et par membre : elle retient un prénom et le réutilise dans les messages suivants.',
