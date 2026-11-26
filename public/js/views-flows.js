@@ -1125,7 +1125,7 @@ function flowSummaryRows(rows) {
 function renderBlockSummary(block) {
   return flowBlockRows(block)
     .slice(0, 2)
-    .map(([label, value]) => `<span class="node-chip"><span>${esc(label)}</span><b>${esc(flowText(value, '—', 34))}</b></span>`)
+    .map(([label, value]) => `<span class="node-chip"><span>${esc(label)}</span><b>${esc(flowText(value, '—', 52))}</b></span>`)
     .join('');
 }
 
@@ -3119,8 +3119,8 @@ function fitFlowView() {
   }
   const minX = Math.min(...blocks.map((block) => block.x));
   const minY = Math.min(...blocks.map((block) => block.y));
-  const maxX = Math.max(...blocks.map((block) => block.x)) + 320;
-  const maxY = Math.max(...blocks.map((block) => block.y)) + 300;
+  const maxX = Math.max(...blocks.map((block) => block.x)) + 370;
+  const maxY = Math.max(...blocks.map((block) => block.y)) + 340;
   const width = Math.max(1, maxX - minX);
   const height = Math.max(1, maxY - minY);
   const zoom = Math.min(1, Math.max(0.18, Math.min((viewport.clientWidth - 60) / width, (viewport.clientHeight - 60) / height)));
@@ -3128,6 +3128,26 @@ function fitFlowView() {
     zoom,
     x: (viewport.clientWidth - width * zoom) / 2 - minX * zoom,
     y: (viewport.clientHeight - height * zoom) / 2 - minY * zoom,
+  };
+  applyFlowView();
+}
+
+function focusFlowView(zoom = 0.9) {
+  const viewport = document.getElementById('flowViewport');
+  const blocks = flowEditor.flow?.blocks || [];
+  if (!viewport) return;
+  if (!blocks.length) {
+    flowEditor.view = { x: 40, y: 40, zoom: 1 };
+    applyFlowView();
+    return;
+  }
+  const start = blocks.find((block) => block.id === flowEditor.flow.start) || blocks[0];
+  const width = 350;
+  const height = 170;
+  flowEditor.view = {
+    zoom,
+    x: viewport.clientWidth / 2 - (start.x + width / 2) * zoom,
+    y: viewport.clientHeight / 2 - (start.y + height / 2) * zoom,
   };
   applyFlowView();
 }
@@ -3204,7 +3224,7 @@ function initFlowCanvas() {
   const world = document.getElementById('flowWorld');
   if (!viewport || !world) return;
 
-  if (!flowEditor.view) fitFlowView();
+  if (!flowEditor.view) focusFlowView();
   applyFlowView();
   drawFlowEdges();
 

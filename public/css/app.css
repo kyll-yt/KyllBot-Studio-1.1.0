@@ -2184,7 +2184,7 @@ body.pwa-standalone .sidebar-install { display: none; }
 .node {
   --tone: #a78bfa;
   --tone-soft: rgba(124, 92, 255, 0.16);
-  width: 300px;
+  width: 350px;
   border: 1px solid #3f4147;
   border-radius: 10px;
   background: #2b2d31;
@@ -2244,7 +2244,7 @@ body.pwa-standalone .sidebar-install { display: none; }
 .node-heading { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .node-title-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .node-title {
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 650;
   color: #f2f3f5;
   white-space: nowrap;
@@ -2253,8 +2253,8 @@ body.pwa-standalone .sidebar-install { display: none; }
 }
 .node-desc {
   margin: 0;
-  font-size: 10px;
-  line-height: 1.3;
+  font-size: 12px;
+  line-height: 1.35;
   color: #b5bac1;
   white-space: nowrap;
   overflow: hidden;
@@ -2286,23 +2286,23 @@ body.pwa-standalone .sidebar-install { display: none; }
 .node-tools .node-edit-tool { opacity: 0.65; }
 .node:hover .node-tools .node-edit-tool { opacity: 1; }
 .node-tools svg { width: 12px; height: 12px; }
-.node-body { padding: 0 10px 9px 50px; display: flex; flex-direction: column; gap: 8px; }
-.node-meta { display: flex; flex-wrap: wrap; gap: 4px; }
+.node-body { padding: 0 12px 12px 50px; display: flex; flex-direction: column; gap: 10px; }
+.node-meta { display: flex; flex-wrap: wrap; gap: 5px; }
 .node-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   max-width: 100%;
-  padding: 2px 6px;
+  padding: 4px 8px;
   border: 1px solid #3f4147;
-  border-radius: 5px;
+  border-radius: 6px;
   background: rgba(30, 31, 34, 0.7);
   color: #dbdee1;
-  font-size: 9.5px;
+  font-size: 12px;
 }
 .node-chip span {
   flex: none;
-  font-size: 8px;
+  font-size: 9.5px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;

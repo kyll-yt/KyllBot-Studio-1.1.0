@@ -22,6 +22,7 @@ const APP_CHANGELOG = [
       'Chrono en ligne : nouvel encadré foncé qui liste chaque personne en service, une par ligne, avec son temps en ligne. Il s’actualise toutes les 30 secondes ou toutes les minutes, se met à jour dès un démarrage/arrêt et se restaure après un redémarrage du bot.',
       'Formulaires : jusqu’à 35 champs, répartis automatiquement en plusieurs fenêtres Discord de 5 champs, et titres de champs jusqu’à 100 caractères (45 en titre, le reste en description).',
       'Le studio garde la position de la page et du formulaire quand tu modifies un champ, au lieu de remonter tout en haut.',
+      'Les blocs de flux sont plus grands : le titre et le texte du message sont plus lisibles, et le canevas s’ouvre à 90 % sur le bloc de départ.',
       'Le bloc « Réponse IA » utilise maintenant la vraie IA dans les flux : fini le texte simulé.',
       'L’IA répond à toutes les questions, même hors sujet Discord, avec des faits directs et sans formule vide.',
       'Mémoire de conversation par salon et par membre : elle retient un prénom et le réutilise dans les messages suivants.',
