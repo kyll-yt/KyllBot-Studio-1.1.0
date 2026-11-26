@@ -717,6 +717,69 @@ function serviceOnlineEmbed({ state, title, emptyText, interval, maxEntries }) {
     .setFooter({ text: `Actualisé toutes les ${secondes} s` });
 }
 
+function startServicePanel({ bot, guildId, channel, message, config, key }) {
+  const panel = { message, channel, config, key, timer: null, refresh: null };
+  panel.refresh = async () => {
+    try {
+      const state = ensureServiceState(bot, guildId);
+      await message.edit({ embeds: [serviceOnlineEmbed({ state, ...config })] });
+    } catch {
+      if (panel.timer) clearInterval(panel.timer);
+      panel.timer = null;
+      servicePanels.delete(key);
+    }
+  };
+  const previous = servicePanels.get(key);
+  if (previous?.timer) clearInterval(previous.timer);
+  const seconds = Number(config.interval) === 30 ? 30 : 60;
+  panel.timer = setInterval(() => { panel.refresh().catch(() => {}); }, seconds * 1000);
+  panel.timer.unref?.();
+  servicePanels.set(key, panel);
+  return panel;
+}
+
+function rememberServicePanel(bot, meta) {
+  if (!Array.isArray(bot.servicePanels)) bot.servicePanels = [];
+  const index = bot.servicePanels.findIndex((entry) => entry?.key === meta.key);
+  if (index >= 0) bot.servicePanels[index] = meta;
+  else bot.servicePanels.push(meta);
+  if (bot.servicePanels.length > 50) bot.servicePanels.splice(0, bot.servicePanels.length - 50);
+  persist();
+}
+
+function refreshServicePanels(bot, guildId) {
+  const prefix = `${bot.id}:${String(guildId || 'dm')}:`;
+  for (const [key, panel] of servicePanels) {
+    if (!key.startsWith(prefix)) continue;
+    panel.refresh?.().catch(() => {});
+  }
+}
+
+async function restoreServicePanels(botId, client) {
+  const context = getBotContext(botId);
+  const bot = context?.bot;
+  if (!bot || !Array.isArray(bot.servicePanels) || !bot.servicePanels.length) return;
+  const kept = [];
+  for (const meta of bot.servicePanels) {
+    if (!meta?.key || !meta.channelId || !meta.messageId) continue;
+    const guild = client.guilds?.cache?.get(String(meta.guildId || ''));
+    const channel =
+      guild?.channels?.cache?.get(String(meta.channelId)) ||
+      client.channels?.cache?.get(String(meta.channelId));
+    if (!channel?.messages?.fetch) continue;
+    try {
+      const message = await channel.messages.fetch(String(meta.messageId));
+      const panel = startServicePanel({ bot, guildId: meta.guildId, channel, message, config: meta, key: meta.key });
+      panel.refresh().catch(() => {});
+      kept.push(meta);
+    } catch {
+      // Le message a été supprimé ou le salon n’est plus accessible.
+    }
+  }
+  bot.servicePanels = kept;
+  persist();
+}
+
 function renderTemplate(text, { guild, member, interaction, client }) {
   const user = member?.user || interaction?.user;
   const display = member?.displayName || user?.globalName || user?.username || 'membre';
@@ -1350,6 +1413,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
           let text;
           if (entry.startedAt) {
             Object.assign(result.variables, serviceTokens(state, entry, { now, sinceMs: now - entry.startedAt }));
+            refreshServicePanels(bot, guild?.id || 'dm');
             text = applyServiceTokens(
               output.alreadyText || '⚠️ Service déjà en cours depuis {{since}}.',
               serviceTokens(state, entry, { now, sinceMs: now - entry.startedAt }),
@@ -1359,6 +1423,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
             entry.name = serviceDisplayName(member, user);
             Object.assign(result.variables, serviceTokens(state, entry, { now }));
             persist();
+            refreshServicePanels(bot, guild?.id || 'dm');
             text = applyServiceTokens(
               output.text || '▶️ Service démarré pour {{member}}.',
               serviceTokens(state, entry, { now }),
@@ -1404,6 +1469,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
             entry.name = serviceDisplayName(member, user);
             Object.assign(result.variables, serviceTokens(state, entry, { now, durationMs }));
             persist();
+            refreshServicePanels(bot, guild?.id || 'dm');
             text = applyServiceTokens(
               output.text || '⏹️ Service terminé : {{duration}} ajoutées.',
               serviceTokens(state, entry, { now, durationMs }),
@@ -1518,19 +1584,18 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
         case 'serviceOnline': {
           const target = resolveChannel(guild, output.channel) || channel;
           if (!target?.send) break;
+          const guildId = guild?.id || 'dm';
           const interval = Number(output.interval) === 30 ? 30 : 60;
-          const key = `${bot.id}:${guild?.id || 'dm'}:${target.id}:${flow.id}:${output.blockId}`;
+          const key = `${bot.id}:${guildId}:${target.id}:${flow.id}:${output.blockId}`;
           const previous = servicePanels.get(key);
-          if (previous?.timer) clearInterval(previous.timer);
-          servicePanels.delete(key);
-          const state = ensureServiceState(bot, guild?.id || 'dm');
-          const embed = serviceOnlineEmbed({
-            state,
+          const config = {
             title: output.title,
             emptyText: output.emptyText,
             interval,
             maxEntries: output.maxEntries,
-          });
+          };
+          const state = ensureServiceState(bot, guildId);
+          const embed = serviceOnlineEmbed({ state, ...config });
           let panelMessage = previous?.message
             ? await previous.message.edit({ embeds: [embed] }).catch(() => null)
             : null;
@@ -1552,28 +1617,16 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
             sent = delivered.sent;
           }
           if (!panelMessage) break;
-          const panel = { message: panelMessage, channel: target, timer: null };
-          const refresh = async () => {
-            try {
-              const freshState = ensureServiceState(bot, guild?.id || 'dm');
-              await panel.message.edit({
-                embeds: [serviceOnlineEmbed({
-                  state: freshState,
-                  title: output.title,
-                  emptyText: output.emptyText,
-                  interval,
-                  maxEntries: output.maxEntries,
-                })],
-              });
-            } catch {
-              if (panel.timer) clearInterval(panel.timer);
-              panel.timer = null;
-              servicePanels.delete(key);
-            }
-          };
-          panel.timer = setInterval(() => { refresh().catch(() => {}); }, interval * 1000);
-          panel.timer.unref?.();
-          servicePanels.set(key, panel);
+          startServicePanel({ bot, guildId, channel: target, message: panelMessage, config, key });
+          rememberServicePanel(bot, {
+            key,
+            guildId,
+            channelId: target.id,
+            messageId: panelMessage.id,
+            flowId: flow.id,
+            blockId: output.blockId,
+            ...config,
+          });
           lastMessage = panelMessage;
           lastChannel = target;
           sent = true;
@@ -1596,6 +1649,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
           }
           ensureServiceState(bot, guild?.id || 'dm');
           persist();
+          refreshServicePanels(bot, guild?.id || 'dm');
           const tokens = {
             ...result.variables,
             period: servicePeriodLabel(state),
@@ -1629,6 +1683,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
           const state = ensureServiceState(bot, guild?.id || 'dm');
           state.members = {};
           persist();
+          refreshServicePanels(bot, guild?.id || 'dm');
           const tokens = { ...result.variables, period: servicePeriodLabel(state), reset: serviceResetLabel(state.config) };
           Object.assign(result.variables, tokens);
           const text = applyServiceTokens(
@@ -3877,6 +3932,11 @@ function attachHandlers(client, botId) {
       }
     } catch (error) {
       log(runtime, 'warn', `Panneau de tickets impossible : ${error.message}`);
+    }
+    try {
+      await restoreServicePanels(botId, client);
+    } catch (error) {
+      log(runtime, 'warn', `Chrono en ligne non restauré : ${error.message}`);
     }
     try {
       await captureBotSnapshots(botId, client, { messages: Boolean(enabledAutomation(context.bot, 'repair')) });

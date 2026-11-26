@@ -1206,7 +1206,7 @@ function flowBlockRows(block) {
     case 'serviceOnline':
       return flowSummaryRows([
         ['Action', 'chrono en ligne'],
-        ['Actualisation', block.interval === 30 ? '30 secondes' : '60 secondes'],
+        ['Actualisation', Number(block.interval) === 30 ? '30 secondes' : '60 secondes'],
         ['Lignes max', `${block.maxEntries || 25}`],
         ['Salon', block.channel || 'salon du déclencheur'],
       ]);
@@ -1463,7 +1463,7 @@ function previewOutput(block) {
     case 'serviceLeaderboard':
       return { kind: 'serviceLeaderboard', title: block.title || 'Classement du service', top: block.top || 10 };
     case 'serviceOnline':
-      return { kind: 'serviceOnline', title: block.title || '🟢 Chrono en ligne', interval: block.interval === 30 ? 30 : 60, maxEntries: block.maxEntries || 25 };
+      return { kind: 'serviceOnline', title: block.title || '🟢 Chrono en ligne', interval: Number(block.interval) === 30 ? 30 : 60, maxEntries: block.maxEntries || 25 };
     case 'serviceConfig':
       return { kind: 'serviceConfig', period: block.period || 'week', resetDay: block.resetDay || 1, resetHour: block.resetHour || 0, timezone: block.timezone || 'Europe/Paris' };
     case 'serviceReset':
@@ -2490,8 +2490,8 @@ function renderNodeFieldsB(block) {
       return `<div class="fld-row">
           ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel, { emptyLabel: 'Salon du déclencheur' }), 'grow')}
           ${nodeField('Actualisation', `<select class="select" ${bind('interval')}>
-            <option value="30" ${block.interval === 30 ? 'selected' : ''}>Toutes les 30 secondes</option>
-            <option value="60" ${block.interval !== 30 ? 'selected' : ''}>Toutes les minutes</option>
+            <option value="30" ${Number(block.interval) === 30 ? 'selected' : ''}>Toutes les 30 secondes</option>
+            <option value="60" ${Number(block.interval) !== 30 ? 'selected' : ''}>Toutes les minutes</option>
           </select>`, 'grow')}
           ${nodeField('Lignes max', `<input class="input" type="number" min="1" max="50" ${bind('maxEntries')} value="${block.maxEntries || 25}">`, 'shrink')}
         </div>
@@ -2952,7 +2952,7 @@ function renderOutput(output) {
     return `<div class="dc-effect">${icon('award')} Classement du service · top <b>${esc(output.top || 10)}</b></div>`;
   }
   if (output.kind === 'serviceOnline') {
-    return `<div class="dc-effect">${icon('clock')} Chrono en ligne · actualisé toutes les <b>${esc(output.interval === 30 ? '30 s' : '60 s')}</b></div>`;
+    return `<div class="dc-effect">${icon('clock')} Chrono en ligne · actualisé toutes les <b>${esc(Number(output.interval) === 30 ? '30 s' : '60 s')}</b></div>`;
   }
   if (output.kind === 'serviceConfig') {
     const days = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
