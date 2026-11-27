@@ -1258,6 +1258,30 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
               (output.suppressEmbeds ? MessageFlags.SuppressEmbeds : 0);
           }
           if (output.reply && message?.id) payload.reply = { messageReference: message.id, failIfNotExists: false };
+          const messageButtons = Array.isArray(output.buttons) ? output.buttons.slice(0, 5) : [];
+          if (messageButtons.length) {
+            const row = new ActionRowBuilder();
+            messageButtons.forEach((entry, index) => {
+              const button = new ButtonBuilder().setLabel(String(entry.label || 'Bouton').slice(0, 80));
+              if (entry.emoji) button.setEmoji(entry.emoji);
+              if (entry.disabled) button.setDisabled(true);
+              if (entry.url) {
+                button.setStyle(ButtonStyle.Link).setURL(entry.url);
+              } else {
+                const style =
+                  entry.style === 'success'
+                    ? ButtonStyle.Success
+                    : entry.style === 'danger'
+                      ? ButtonStyle.Danger
+                      : entry.style === 'secondary'
+                        ? ButtonStyle.Secondary
+                        : ButtonStyle.Primary;
+                button.setStyle(style).setCustomId(`kf:${flow.id}:${output.blockId}:${index}`.slice(0, 100));
+              }
+              row.addComponents(button);
+            });
+            payload.components = [row];
+          }
           const delivered = await deliverFlowPayload({ output, target, payload, member, interaction, interactionUsed });
           interactionUsed = delivered.interactionUsed;
           if (delivered.message) {
@@ -1265,6 +1289,9 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
             lastChannel = delivered.channel;
           }
           sent = delivered.sent;
+          if (messageButtons.some((entry) => !entry.url) && output.blockId) {
+            rememberPending(pendingButtons, pendingKey(flow.id, output.blockId, user?.id), { vars: result.variables }, 3600);
+          }
           if (output.deleteAfter > 0 && delivered.message) {
             setTimeout(() => delivered.message.delete().catch(() => {}), Math.min(Number(output.deleteAfter) * 1000, 300000)).unref?.();
           }

@@ -281,6 +281,7 @@ function normalizeBlock(block) {
         variants: Array.isArray(block?.variants)
           ? block.variants.map(normalizeVariant)
           : [],
+        buttons: Array.isArray(block?.buttons) ? block.buttons.slice(0, MAX_BUTTONS).map(normalizeButton) : [],
         ephemeral: Boolean(block?.ephemeral),
         dm: Boolean(block?.dm),
         reply: Boolean(block?.reply),
@@ -1409,10 +1410,19 @@ export async function runFlow(flow, input = {}) {
       case 'message': {
         const variant = block.variantMode && block.variants?.length ? pickVariant(block.variants) : null;
         const text = interpolate(variant?.text || block.text, ctx, vars);
+        const buttons = (Array.isArray(block.buttons) ? block.buttons : []).slice(0, MAX_BUTTONS).map((button) => ({
+          ...button,
+          label: interpolate(button.label, ctx, vars),
+          value: interpolate(button.value, ctx, vars),
+          url: interpolate(button.url, ctx, vars),
+          target: interpolate(button.target, ctx, vars),
+        }));
         outputs.push({
           kind: 'message',
           channel: block.channel || ctx.channel,
           text,
+          buttons,
+          blockId: block.id,
           ephemeral: block.ephemeral,
           dm: block.dm,
           reply: block.reply,
@@ -1422,7 +1432,8 @@ export async function runFlow(flow, input = {}) {
           deleteAfter: block.deleteAfter,
           variant: variant?.id,
         });
-        entry.detail = `${block.channel || ctx.channel} · ${text.slice(0, 90)}`;
+        if (buttons.some((button) => !button.url)) next = null;
+        entry.detail = `${block.channel || ctx.channel} · ${text.slice(0, 90)}${buttons.length ? ` · ${buttons.length} bouton(s)` : ''}`;
         break;
       }
       case 'embed': {

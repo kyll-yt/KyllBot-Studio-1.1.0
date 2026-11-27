@@ -17,7 +17,7 @@ const FLOW_TRIGGERS = {
 };
 
 const FLOW_BLOCKS = {
-  message: { label: 'Message', icon: 'message', tone: 'violet', group: 'message', hint: 'Texte, vocal et options de réponse' },
+  message: { label: 'Message', icon: 'message', tone: 'violet', group: 'message', hint: 'Texte, boutons et options de réponse' },
   embed: { label: 'Embed', icon: 'layers', tone: 'cyan', group: 'message', hint: 'Carte enrichie avec champs et images' },
   dm: { label: 'Message privé', icon: 'mail', tone: 'cyan', group: 'message', hint: 'Envoie un message privé au membre' },
   button: { label: 'Boutons', icon: 'cursor', tone: 'violet', group: 'message', hint: 'Jusqu’à 5 boutons cliquables' },
@@ -270,21 +270,10 @@ const flowEditor = {
   botId: null,
   flow: null,
   dirty: false,
-  result: null,
-  running: false,
   view: null,
   sideOpen: true,
-  testOpen: false,
   editBlockId: null,
-  composerBlockId: null,
   autoEdit: false,
-  ctx: {
-    message: 'salut, je découvre le serveur',
-    user: 'Membre test',
-    roles: 'Invité',
-    server: 'Mon serveur',
-    channel: '#général',
-  },
 };
 
 let flowLastField = null;
@@ -330,7 +319,7 @@ function flowOutputPairs(block) {
       { branch: 'else', target: block.elseId || null, tone: 'alt', label: 'faux' },
     ];
   }
-  if (block.type === 'button' || (block.type === 'ticket' && (!block.action || block.action === 'open'))) {
+  if (block.type === 'button' || (block.type === 'message' && Array.isArray(block.buttons) && block.buttons.length) || (block.type === 'ticket' && (!block.action || block.action === 'open'))) {
     const buttons = block.type === 'ticket'
       ? (Array.isArray(block.buttons) ? block.buttons : [])
       : blockButtons(block);
@@ -519,6 +508,7 @@ function flowNewBlock(type, x = 120, y = 120) {
         text: '',
         variantMode: false,
         variants: [],
+        buttons: [],
         ephemeral: false,
         dm: false,
         deleteAfter: 0,
@@ -792,7 +782,6 @@ function flowEnsureLoaded(botId, flowId) {
     if (block.type === 'timer' && ['start', 'stop'].includes(block.action)) block.type = 'chrono';
   }
   flowEditor.dirty = false;
-  flowEditor.result = null;
   flowEditor.view = null;
   flowEditor.autoEdit = true;
   flowEditor.sideOpen = typeof window === 'undefined' ? true : window.innerWidth > 1100;
@@ -844,13 +833,12 @@ function viewFlowEditor(botId, flowId) {
       </div>
     </div>
     <div class="fh-actions">
-      <button class="btn btn-ghost btn-sm" data-action="flow-run">${icon('play')} Tester</button>
       <button class="btn btn-primary btn-sm" data-action="flow-save">${icon('save')} Enregistrer et quitter</button>
     </div>
   </div>
   </div>
   <div class="flow-body">
-  <div class="flow-layout${flowEditor.sideOpen ? ' side-open' : ''}${flowEditor.testOpen ? ' test-open' : ''}" id="flowLayout">
+  <div class="flow-layout${flowEditor.sideOpen ? ' side-open' : ''}" id="flowLayout">
     <section class="flow-canvas2d">
       <div class="canvas-toolbar">
         <button class="tool-btn" data-action="flow-toggle-side" title="Afficher ou masquer la palette, le déclencheur et les variables">${icon('layers')} Blocs</button>
@@ -868,7 +856,6 @@ function viewFlowEditor(botId, flowId) {
           <option value="plain" ${flow.canvasStyle === 'plain' ? 'selected' : ''}>Fond : uni</option>
         </select>
         <span class="toolbar-spacer"></span>
-        <button class="tool-btn" data-action="flow-toggle-test">${icon('play')} Test</button>
         <button class="tool-btn" data-action="flow-add-menu">${icon('plus')} Ajouter un bloc</button>
       </div>
       <div class="canvas-viewport" id="flowViewport" data-canvas="${esc(flow.canvasStyle || 'dots')}">
@@ -898,10 +885,6 @@ function viewFlowEditor(botId, flowId) {
       ${renderPalette()}
       ${renderTriggerCard(flow)}
       ${renderVariablesCard(flow)}
-    </aside>
-    <aside class="flow-test" id="flowTest">
-      <button class="btn btn-ghost btn-sm flow-drawer-close" data-action="flow-toggle-test">${icon('x')} Fermer</button>
-      ${renderTestPanel()}
     </aside>
   </div>
   </div>
@@ -1165,6 +1148,7 @@ function flowBlockRows(block) {
         ['Salon', block.channel || '#général'],
         ['Message', block.text],
         ['Mode', block.dm ? 'message privé' : block.ephemeral ? 'éphémère' : 'normal'],
+        ['Boutons', `${Array.isArray(block.buttons) ? block.buttons.length : 0}`],
         ['Options', [block.reply ? 'réponse' : '', block.tts ? 'vocal' : '', block.silent ? 'silencieux' : '', block.suppressEmbeds ? 'sans embeds' : '', block.deleteAfter ? `supprimé après ${block.deleteAfter} s` : ''].filter(Boolean).join(' · ') || 'standard'],
       ]);
     case 'embed':
@@ -1367,7 +1351,7 @@ function previewOutput(block) {
   const channel = block.channel || '#général';
   switch (block.type) {
     case 'message':
-      return { kind: 'message', channel, text: block.text || 'Votre message…', ephemeral: block.ephemeral, reply: block.reply, tts: block.tts, silent: block.silent, suppressEmbeds: block.suppressEmbeds };
+      return { kind: 'message', channel, text: block.text || 'Votre message…', buttons: Array.isArray(block.buttons) ? block.buttons : [], ephemeral: block.ephemeral, reply: block.reply, tts: block.tts, silent: block.silent, suppressEmbeds: block.suppressEmbeds };
     case 'dm':
       return { kind: 'dm', to: block.target || 'membre déclencheur', text: block.text || 'Votre message privé…', embed: block.embed };
     case 'invite':
@@ -1515,12 +1499,14 @@ function previewOutput(block) {
   }
 }
 
-function renderBlockPreview(block) {
+const FLOW_PREVIEW_KINDS = new Set([
+  'message', 'embed', 'dm', 'invite', 'poll', 'select', 'giveaway', 'modal',
+  'ticket', 'captcha', 'thread', 'forum', 'ai', 'image', 'music', 'buttons',
+]);
+
+function blockHasDiscordPreview(block) {
   const output = previewOutput(block);
-  if (!output) {
-    return `<div class="be-no-preview">${icon('layers')}<p>Aperçu disponible pour les blocs de message, embed, bouton, variantes, sondage, menu, formulaire, attente, giveaway, ticket, vérification, fil, forum, IA, image et salon.</p></div>`;
-  }
-  return `<div class="be-preview">${renderOutput(output)}</div>`;
+  return Boolean(output && FLOW_PREVIEW_KINDS.has(output.kind));
 }
 
 function renderDiscordPreview(block) {
@@ -1808,9 +1794,9 @@ function pickRoleMention(index) {
 }
 
 function decorateFlowVarFields() {
-  const root = document.querySelector('#modalRoot .block-editor, #modalRoot .be-composer');
+  const root = document.querySelector('#modalRoot .block-editor');
   if (!root) return;
-  const controls = root.querySelectorAll('.be-fields input.input, .be-fields textarea.textarea, .be-composer-fields input.input, .be-composer-fields textarea.textarea');
+  const controls = root.querySelectorAll('.be-fields input.input, .be-fields textarea.textarea');
   controls.forEach((control) => {
     if (control.dataset.varDecorated) return;
     if (['number', 'color', 'range', 'file', 'checkbox', 'radio', 'hidden', 'button'].includes(control.type)) return;
@@ -1897,8 +1883,8 @@ function openBlockEditor(blockId, { autoFocus = true } = {}) {
   if (!block) return;
   closeRoleMention();
   closeFlowVarPicker();
-  flowEditor.composerBlockId = null;
   const meta = FLOW_BLOCKS[block.type] || FLOW_BLOCKS.message;
+  const hasPreview = blockHasDiscordPreview(block);
   flowEditor.editBlockId = blockId;
   openModal({
     title: `Modifier · ${meta.label}`,
@@ -1917,49 +1903,13 @@ function openBlockEditor(blockId, { autoFocus = true } = {}) {
           <button type="button" class="btn btn-primary btn-sm" data-action="flow-node-edit-done">${icon('check')} Enregistrer et fermer</button>
         </div>
       </div>
-      <div class="be-layout">
+      <div class="be-layout${hasPreview ? '' : ' no-preview'}">
         <div class="be-fields">${renderFlowVariables(block)}${renderNodeFields(block)}</div>
-        <aside class="be-preview-col">
+        ${hasPreview ? `<aside class="be-preview-col">
           <div class="be-preview-head"><b>Aperçu Discord</b><span>temps réel</span></div>
           <div id="bePreview">${renderDiscordPreview(block)}</div>
           <div class="be-tip">${icon('spark')} Les variables comme <code>{{user.name}}</code> sont remplacées à l’exécution.</div>
-        </aside>
-      </div>
-    </div>`,
-  });
-  requestAnimationFrame(decorateFlowVarFields);
-}
-
-function openContentComposer(blockId, { autoFocus = true } = {}) {
-  const block = flowNode(blockId);
-  if (!block) return;
-  closeRoleMention();
-  closeFlowVarPicker();
-  const meta = FLOW_BLOCKS[block.type] || FLOW_BLOCKS.message;
-  flowEditor.editBlockId = blockId;
-  flowEditor.composerBlockId = blockId;
-  openModal({
-    title: `Contenu · ${meta.label}`,
-    subtitle: 'Ajoute, modifie ou enlève les options, puis ferme avec la croix.',
-    fullscreen: true,
-    hideFooter: true,
-    autoFocus,
-    body: `<div class="be-composer" data-edit-block="${block.id}">
-      <div class="be-composer-bar">
-        <div class="be-composer-title">
-          <b>${meta.label}</b>
-          <p>Les changements sont visibles dans l’aperçu Discord à droite.</p>
-        </div>
-        <input class="input be-composer-name" data-node="${block.id}" data-field="customName" value="${esc(block.customName || '')}" placeholder="Nom du bloc (optionnel)">
-        <button type="button" class="btn btn-primary btn-sm" data-action="flow-composer-close" data-id="${block.id}">${icon('check')} Enregistrer</button>
-        <button type="button" class="icon-btn" data-action="flow-composer-close" data-id="${block.id}" title="Enregistrer et fermer" aria-label="Enregistrer et fermer">${icon('x')}</button>
-      </div>
-      <div class="be-composer-grid">
-        <div class="be-composer-fields">${renderFlowVariables(block)}${renderNodeFieldsDirect(block)}</div>
-        <aside class="be-composer-preview">
-          <div id="bePreview">${renderDiscordPreview(block)}</div>
-          <div class="be-tip">${icon('spark')} Aperçu très proche de Discord : message, embed, boutons, ticket et formulaire.</div>
-        </aside>
+        </aside>` : ''}
       </div>
     </div>`,
   });
@@ -1967,10 +1917,6 @@ function openContentComposer(blockId, { autoFocus = true } = {}) {
 }
 
 function refreshBlockEditor(blockId) {
-  if (flowEditor.composerBlockId === blockId) {
-    openContentComposer(blockId, { autoFocus: false });
-    return;
-  }
   const body = document.querySelector('#modalRoot .modal-body');
   const backdrop = document.querySelector('#modalRoot .modal-backdrop');
   const scrollTop = body?.scrollTop || 0;
@@ -2133,27 +2079,46 @@ function renderTicketButtons(block) {
     <p class="hint">Les boutons Réclamer et Fermer restent toujours disponibles. Chaque bouton ajouté ici devient une sortie du bloc, à relier à la suite du flux.</p>`;
 }
 
-const FLOW_COMPOSER_BLOCKS = new Set([
-  'message', 'embed', 'dm', 'button', 'random', 'modal', 'ticket', 'poll', 'select',
-  'reply', 'edit', 'forum', 'forumAction', 'ai', 'image', 'giveaway',
-]);
-
-function renderContentOptionRow(block) {
-  const rows = flowBlockRows(block).slice(0, 3)
-    .map(([label, value]) => `${label} : ${flowText(value, '—', 90)}`)
-    .join(' · ');
-  return `<div class="be-option-row">
-    <div class="be-option-main">
-      <span class="be-option-label">Contenu</span>
-      <span class="be-option-summary">${esc(rows || 'Aucun contenu pour le moment')}</span>
+function renderMessageButtons(block) {
+  const buttons = Array.isArray(block.buttons) ? block.buttons : [];
+  const bindButton = (index, field) => `data-node="${block.id}" data-button="${index}" data-button-field="${field}"`;
+  return `<div class="message-buttons-editor">
+    <div class="button-editor-head">
+      <b>Boutons du message (${buttons.length}/5)</b>
+      <span>Le message et ses boutons partent ensemble, comme sur BotGhost</span>
     </div>
-    <button type="button" class="btn btn-ghost btn-sm" data-action="flow-open-composer" data-id="${block.id}">${icon('edit')} Modifier</button>
-  </div>
-  <p class="hint">Le contenu s’édite dans un écran plein format, avec un aperçu Discord en direct.</p>`;
+    ${buttons.map((button, index) => `<div class="button-editor-row">
+      <div class="be-row-head">
+        <span class="variant-badge">B${index + 1}</span>
+        <b>Bouton ${index + 1}</b>
+        <button class="mini-btn danger" data-action="flow-del-button" data-id="${block.id}" data-index="${index}" title="Supprimer">${icon('x')}</button>
+      </div>
+      <div class="fld-row">
+        ${nodeField('Libellé', `<input class="input" ${bindButton(index, 'label')} value="${esc(button.label || '')}" placeholder="Cliquez ici">`, 'grow')}
+        ${nodeField('Emoji', `<input class="input" ${bindButton(index, 'emoji')} value="${esc(button.emoji || '')}" placeholder="✅">`, 'shrink')}
+        ${nodeField('Style', `<select class="select" ${bindButton(index, 'style')}>
+          <option value="primary" ${button.style === 'primary' ? 'selected' : ''}>Primaire</option>
+          <option value="secondary" ${button.style === 'secondary' ? 'selected' : ''}>Secondaire</option>
+          <option value="success" ${button.style === 'success' ? 'selected' : ''}>Succès</option>
+          <option value="danger" ${button.style === 'danger' ? 'selected' : ''}>Danger</option>
+          <option value="link" ${button.style === 'link' ? 'selected' : ''}>Lien</option>
+        </select>`, 'shrink')}
+      </div>
+      <div class="fld-row">
+        ${nodeField('URL (bouton lien)', `<input class="input" ${bindButton(index, 'url')} value="${esc(button.url || '')}" placeholder="https://… (vide pour un bouton interactif)">`, 'grow')}
+        ${nodeField('Valeur', `<input class="input" ${bindButton(index, 'value')} value="${esc(button.value || '')}" placeholder="option_1">`, 'grow')}
+      </div>
+      <div class="fld-row">
+        ${nodeField('Flux déclenché', `<input class="input" ${bindButton(index, 'target')} value="${esc(button.target || '')}" placeholder="nom du flux (optionnel)">`, 'grow')}
+        ${nodeField('Sortie du bouton', flowTargetSelect(bindButton(index, 'next'), block.id, button.next), 'grow')}
+      </div>
+    </div>`).join('')}
+    <button class="link-btn" data-action="flow-add-button" data-id="${block.id}" ${buttons.length >= 5 ? 'disabled' : ''}>${icon('plus')} Ajouter un bouton</button>
+    <p class="hint">Un bouton sans URL attend un clic et reprend le flux à sa sortie. Un bouton avec URL ouvre simplement le lien.</p>
+  </div>`;
 }
 
 function renderNodeFields(block) {
-  if (FLOW_COMPOSER_BLOCKS.has(block.type)) return renderContentOptionRow(block);
   return renderNodeFieldsDirect(block);
 }
 
@@ -2166,6 +2131,8 @@ function renderNodeFieldsDirect(block) {
       const total = variants.reduce((sum, variant) => sum + (Number(variant.weight) || 1), 0);
       return `<div class="fld-row">
           ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel), 'grow')}
+        </div>
+        <div class="fld-row">
           ${nodeField('Éphémère', `<button class="switch ${block.ephemeral ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="ephemeral"></button>`, 'shrink')}
           ${nodeField('Message privé', `<button class="switch ${block.dm ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="dm"></button>`, 'shrink')}
           ${nodeField('Variantes aléatoires', `<button class="switch ${block.variantMode ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="variantMode"></button>`, 'shrink')}
@@ -2205,7 +2172,8 @@ function renderNodeFieldsDirect(block) {
           ${nodeField('Vocal', `<button class="switch ${block.tts ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="tts"></button>`, 'shrink')}
           ${nodeField('Silencieux', `<button class="switch ${block.silent ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="silent"></button>`, 'shrink')}
           ${nodeField('Masquer les embeds', `<button class="switch ${block.suppressEmbeds ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="suppressEmbeds"></button>`, 'shrink')}
-        </div>`;
+        </div>
+        ${renderMessageButtons(block)}`;
     }
     case 'embed':
       return `<div class="fld-row">
@@ -2961,62 +2929,10 @@ function renderConditionFields(block) {
     </div>`;
 }
 
-/* ------------------------------------------------------------------ */
-/* panneau de test                                                     */
-/* ------------------------------------------------------------------ */
-
-function renderTestPanel() {
-  const result = flowEditor.result;
-  const ctx = flowEditor.ctx;
-  return `<div class="panel flow-panel test-panel">
-    <div class="panel-head"><h3>${icon('play')} Test</h3>
-      <div class="ph-actions"><button class="btn btn-primary btn-sm" data-action="flow-run" ${flowEditor.running ? 'disabled' : ''}>${flowEditor.running ? 'Exécution…' : 'Lancer'}</button></div>
-    </div>
-    <div class="panel-body">
-      <div class="field"><label>Message reçu</label><input class="input" data-ctx="message" value="${esc(ctx.message)}"></div>
-      <div class="fld-row">
-        ${nodeField('Membre', `<input class="input" data-ctx="user" value="${esc(ctx.user)}">`, 'grow')}
-        ${nodeField('Salon', `<input class="input" data-ctx="channel" value="${esc(ctx.channel)}">`, 'grow')}
-      </div>
-      <div class="fld-row">
-        ${nodeField('Rôles (virgules)', `<input class="input" data-ctx="roles" value="${esc(ctx.roles)}">`, 'grow')}
-        ${nodeField('Serveur', `<input class="input" data-ctx="server" value="${esc(ctx.server)}">`, 'grow')}
-      </div>
-      ${result ? renderTestResult(result) : '<p class="hint">Lancez le flux pour voir les messages produits et le détail de chaque bloc.</p>'}
-    </div>
-  </div>`;
-}
-
-function renderTestResult(result) {
-  return `<div class="test-result">
-    <div class="tr-meta">${result.outputs.length} sortie(s) · ${result.steps} bloc(s) · ${result.durationMs} ms</div>
-    <div class="tr-outputs">
-      ${
-        result.outputs.length
-          ? result.outputs.map(renderOutput).join('')
-          : '<p class="hint">Aucune sortie : le flux s’est arrêté sans message.</p>'
-      }
-    </div>
-    <div class="tr-trace">
-      ${result.trace
-        .map(
-          (entry) => `<div class="trace-row ${entry.status}">
-            <span class="trace-dot"></span>
-            <div class="trace-main">
-              <b>${esc(entry.title)}</b>
-              <span>${esc(entry.detail || '')}</span>
-            </div>
-          </div>`,
-        )
-        .join('')}
-    </div>
-    ${
-      Object.keys(result.variables || {}).length
-        ? `<div class="tr-vars">${Object.entries(result.variables)
-            .map(([key, value]) => `<span class="var-chip">${esc(key)} = ${esc(value)}</span>`)
-            .join('')}</div>`
-        : ''
-    }
+function renderDiscordButtons(buttons) {
+  if (!Array.isArray(buttons) || !buttons.length) return '';
+  return `<div class="dc-btn-row">
+    ${buttons.slice(0, 5).map((button) => `<span class="dc-btn ${esc(button.style || 'primary')}${button.disabled ? ' disabled' : ''}">${button.emoji ? `${esc(button.emoji)} ` : ''}${esc(button.label || 'Bouton')}</span>`).join('')}
   </div>`;
 }
 
@@ -3027,6 +2943,7 @@ function renderOutput(output) {
       <div class="dc-body">
         <div class="dc-head"><b>KyllBot</b><span class="dc-bot">BOT</span><span class="dc-time">${esc(output.channel)}</span>${output.reply ? '<span class="dc-tag">réponse</span>' : ''}${output.ping ? '<span class="dc-tag">mention</span>' : ''}${output.ephemeral ? '<span class="dc-tag">éphémère</span>' : ''}${output.tts ? '<span class="dc-tag">vocal</span>' : ''}${output.silent ? '<span class="dc-tag">silencieux</span>' : ''}${output.suppressEmbeds ? '<span class="dc-tag">sans embeds</span>' : ''}</div>
         <p>${flowFormatDiscord(output.text)}</p>
+        ${renderDiscordButtons(output.buttons)}
       </div>
     </div>`;
   }
@@ -3588,34 +3505,7 @@ async function flowSave({ exit = false } = {}) {
   }
 }
 
-async function flowRun() {
-  flowEditor.testOpen = true;
-  flowEditor.running = true;
-  render();
-  try {
-    flowEditor.result = await api(`/api/bots/${flowEditor.botId}/flows/${flowEditor.flow.id}/run`, {
-      method: 'POST',
-      body: JSON.stringify({
-        live: true,
-        message: flowEditor.ctx.message,
-        channel: flowEditor.ctx.channel,
-        server: flowEditor.ctx.server,
-        user: {
-          name: flowEditor.ctx.user,
-          roles: flowEditor.ctx.roles.split(',').map((role) => role.trim()).filter(Boolean),
-        },
-      }),
-    });
-  } catch (error) {
-    toast(error.message, 'error');
-  } finally {
-    flowEditor.running = false;
-    render();
-  }
-}
-
 onAction('flow-save', () => flowSave({ exit: true }));
-onAction('flow-run', () => flowRun());
 
 onAction('flow-add-node', (el) => {
   const fromPicker = Boolean(el.closest('#modalRoot'));
@@ -3713,20 +3603,13 @@ onAction('flow-node-start', (el) => {
 });
 
 onAction('flow-node-edit', (el) => openBlockEditor(el.dataset.id));
-onAction('flow-open-composer', (el) => openContentComposer(el.dataset.id));
-onAction('flow-composer-close', (el) => {
-  const blockId = el.dataset.id || flowEditor.composerBlockId;
-  flowEditor.composerBlockId = null;
-  if (blockId) openBlockEditor(blockId, { autoFocus: false });
-  toast('Contenu mis à jour.', 'success');
-});
 
 onAction('flow-insert-var', (el) => {
   const token = el.dataset.token || '';
   const usable = (field) => field && field.isConnected && !field.disabled && (field.tagName === 'TEXTAREA' || ['text', 'search', 'url', 'email', 'tel'].includes(field.type));
   const field = usable(flowLastField)
     ? flowLastField
-    : [...document.querySelectorAll('.block-editor textarea, .be-composer textarea, .be-composer input.input')].find(usable);
+    : [...document.querySelectorAll('.block-editor textarea, .block-editor input.input')].find(usable);
   if (!field) {
     toast('Clique d’abord dans un champ texte, puis choisis une variable.', 'error');
     return;
@@ -3750,7 +3633,6 @@ onAction('flow-node-edit-close', () => {
   closeRoleMention();
   closeFlowVarPicker();
   flowEditor.editBlockId = null;
-  flowEditor.composerBlockId = null;
   closeModal();
   render();
 });
@@ -3759,7 +3641,6 @@ onAction('flow-node-edit-done', () => {
   closeRoleMention();
   closeFlowVarPicker();
   flowEditor.editBlockId = null;
-  flowEditor.composerBlockId = null;
   closeModal();
   render();
   toast('Bloc mis à jour.', 'success');
@@ -3924,7 +3805,7 @@ onAction('flow-form-required', (el) => {
 onAction('flow-add-button', (el) => {
   const block = flowNode(el.dataset.id);
   if (!block) return;
-  if (block.type === 'ticket') {
+  if (block.type === 'ticket' || block.type === 'message') {
     if (!Array.isArray(block.buttons)) block.buttons = [];
   } else if (!Array.isArray(block.buttons) || !block.buttons.length) {
     block.buttons = blockButtons(block);
@@ -3942,7 +3823,7 @@ onAction('flow-add-button', (el) => {
 onAction('flow-del-button', (el) => {
   const block = flowNode(el.dataset.id);
   if (!block) return;
-  if (block.type === 'ticket') {
+  if (block.type === 'ticket' || block.type === 'message') {
     if (!Array.isArray(block.buttons) || !block.buttons.length) return;
   } else {
     if (!Array.isArray(block.buttons) || !block.buttons.length) block.buttons = blockButtons(block);
@@ -4161,7 +4042,7 @@ document.addEventListener('dblclick', (event) => {
 
 document.addEventListener('focusin', (event) => {
   const field = event.target;
-  if (!field.closest('.block-editor, .be-composer') || !field.matches('input, textarea')) return;
+  if (!field.closest('.block-editor') || !field.matches('input, textarea')) return;
   if (['number', 'color', 'range', 'file', 'button', 'checkbox', 'radio', 'hidden'].includes(field.type)) return;
   flowLastField = field;
 });
@@ -4202,15 +4083,11 @@ document.addEventListener('keydown', (event) => {
 
 document.addEventListener('input', (event) => {
   const el = event.target;
-  if (!el.matches('[data-flow-name], [data-ctx], [data-trigger], [data-var], [data-node]')) return;
+  if (!el.matches('[data-flow-name], [data-trigger], [data-var], [data-node]')) return;
 
   if (el.matches('[data-flow-name]')) {
     flowEditor.flow.name = el.value;
     flowEditor.dirty = true;
-    return;
-  }
-  if (el.matches('[data-ctx]')) {
-    flowEditor.ctx[el.dataset.ctx] = el.value;
     return;
   }
   if (el.matches('[data-trigger]')) {
@@ -4325,7 +4202,4 @@ onAction('flow-toggle-side', () => {
   render();
 });
 
-onAction('flow-toggle-test', () => {
-  flowEditor.testOpen = !flowEditor.testOpen;
-  render();
-});
+
