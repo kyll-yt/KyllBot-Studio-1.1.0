@@ -433,8 +433,17 @@ function getWorkspace(userId) {
     db.workspaces[userId] = seedWorkspace(user, { includeBots: user?.provider === 'demo' });
     persist();
   }
-  if (migrateWorkspace(db.workspaces[userId])) persist();
-  return db.workspaces[userId];
+  const ws = db.workspaces[userId];
+  if (migrateWorkspace(ws)) persist();
+  if (Array.isArray(ws.deletedBots)) {
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const kept = ws.deletedBots.filter((entry) => !entry.deletedAt || Date.parse(entry.deletedAt) >= cutoff);
+    if (kept.length !== ws.deletedBots.length) {
+      ws.deletedBots = kept;
+      persist();
+    }
+  }
+  return ws;
 }
 
 function findOr404(list, id, label = 'Élément') {
