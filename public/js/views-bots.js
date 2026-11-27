@@ -966,6 +966,7 @@ function viewBotDetail(id) {
       <div class="panel-head"><h3>Automatisations · ${esc(serverName)}</h3><div class="ph-actions"><span class="pill violet">${automations.filter((a) => a.enabled).length} active(s)</span><button class="btn btn-primary btn-sm" data-action="new-automation" data-id="${esc(bot.id)}">${icon('plus')} Ajouter</button></div></div>
       <div class="panel-body">
         ${automationPresetGrid(bot)}
+        <p class="hint">Aucun flux n’est obligatoire : chaque automatisation fonctionne avec sa configuration. Le bouton « Déclencher » n’apparaît que si un flux est lié.</p>
         <div class="auto-list">
         ${
           automations.length
