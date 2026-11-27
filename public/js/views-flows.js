@@ -305,11 +305,20 @@ function blockButtons(block) {
   }];
 }
 
+function ensureFlowButtons(block) {
+  if (!Array.isArray(block.buttons) || !block.buttons.length) return [];
+  block.buttons.forEach((button) => {
+    if (!button.id) button.id = flowUid();
+    if (button.next === undefined) button.next = null;
+  });
+  return block.buttons;
+}
+
 function ensureBlockButtons(block) {
   if (!Array.isArray(block.buttons) || !block.buttons.length) {
     block.buttons = blockButtons(block).map((button) => ({ ...button, next: button.next || null }));
   }
-  return block.buttons;
+  return ensureFlowButtons(block);
 }
 
 function flowOutputPairs(block) {
@@ -320,9 +329,10 @@ function flowOutputPairs(block) {
     ];
   }
   if (block.type === 'button' || (block.type === 'message' && Array.isArray(block.buttons) && block.buttons.length) || (block.type === 'ticket' && (!block.action || block.action === 'open'))) {
-    const buttons = block.type === 'ticket'
-      ? (Array.isArray(block.buttons) ? block.buttons : [])
-      : blockButtons(block);
+    if (block.type !== 'ticket' && (!Array.isArray(block.buttons) || !block.buttons.length)) {
+      block.buttons = blockButtons(block);
+    }
+    const buttons = ensureFlowButtons(block);
     if (buttons.length) {
       return buttons.map((button, index) => ({
         branch: `button:${button.id}`,
@@ -340,6 +350,14 @@ function flowOutputPairs(block) {
       tone: 'ok',
       label: `V${index + 1} · ${Math.round(((Number(variant.weight) || 1) / total) * 100)} %`,
     }));
+  }
+  if (block.type === 'ticket') {
+    return [{
+      branch: 'next',
+      target: block.next || null,
+      tone: 'ok',
+      label: (block.action || 'open') === 'open' ? 'après ouverture' : 'après l’action',
+    }];
   }
   return [{ branch: 'next', target: block.next || null, tone: 'ok', label: '' }];
 }
@@ -1324,7 +1342,8 @@ function flowBlockRows(block) {
       ].filter(Boolean));
     case 'note':
       return flowSummaryRows([['Titre', block.title || 'Note'], ['Texte', block.text]]);
-    case 'ticket':
+    case 'ticket': {
+      const buttons = ensureFlowButtons(block);
       return flowSummaryRows([
         ['Action', block.action || 'open'],
         ['Raison', block.reason],
@@ -1334,11 +1353,13 @@ function flowBlockRows(block) {
               ['Rôle staff', block.staffRole],
               ['Logs', block.logChannel],
               ['Tickets max', `${block.maxOpen || 1} par membre`],
+              ['Boutons / sorties', buttons.length ? `${buttons.length} bouton(s) · ${buttons.length} sortie(s)` : 'aucun bouton · 1 sortie automatique'],
               ['Fermeture', `${block.closeMode || 'delete'}${Number(block.closeDelay) ? ` · ${block.closeDelay} s` : ''}`],
               ['Options', [block.pingStaff !== false ? 'ping staff' : '', block.transcript ? 'transcript' : '', block.claimButton !== false ? 'réclamer' : '', block.closeButton !== false ? 'fermer' : ''].filter(Boolean).join(' · ') || 'standard'],
             ]
           : []),
       ]);
+    }
     case 'level':
       return flowSummaryRows([['XP', `${block.amount || 10}`], ['Variable', block.variable]]);
     case 'randomNumber':
@@ -1938,11 +1959,12 @@ function renderEmbedFields(block) {
 }
 
 function renderTicketButtons(block) {
-  const buttons = Array.isArray(block.buttons) ? block.buttons : [];
+  const buttons = ensureFlowButtons(block);
+  const outputs = buttons.length || 1;
   const bindButton = (index, field) => `data-node="${block.id}" data-button="${index}" data-button-field="${field}"`;
   return `<div class="button-editor-head">
-      <b>${buttons.length} bouton(s) · ${buttons.length} sortie(s)</b>
-      <span>Chaque bouton crée une sortie du bloc</span>
+      <b>${buttons.length} bouton(s) · ${outputs} sortie(s)</b>
+      <span>${buttons.length ? 'Chaque bouton crée une sortie du bloc' : 'Sans bouton : une sortie « après ouverture »'}</span>
     </div>
     <div class="button-editor ticket-buttons">
       ${buttons.map((button, index) => `<div class="button-editor-row ticket-btn-row">
@@ -1959,8 +1981,8 @@ function renderTicketButtons(block) {
         <button class="mini-btn danger" data-action="flow-del-button" data-id="${block.id}" data-index="${index}" title="Supprimer">${icon('x')}</button>
       </div>`).join('')}
     </div>
-    <button class="link-btn" data-action="flow-add-button" data-id="${block.id}">${icon('plus')} Ajouter un bouton</button>
-    <p class="hint">Les boutons Réclamer et Fermer restent toujours disponibles. Chaque bouton ajouté ici devient une sortie du bloc, à relier à la suite du flux.</p>`;
+    <button class="link-btn" data-action="flow-add-button" data-id="${block.id}" ${buttons.length >= 5 ? 'disabled' : ''}>${icon('plus')} Ajouter un bouton / une sortie</button>
+    <p class="hint">Les boutons Réclamer et Fermer restent toujours disponibles. Chaque bouton ajouté ici devient une sortie du bloc : relie-la à la suite du flux.</p>`;
 }
 
 function renderMessageButtons(block) {
@@ -2724,7 +2746,8 @@ function renderNodeFieldsB(block) {
           ${nodeField('Raison / sujet', `<input class="input" ${bind('reason')} value="${esc(block.reason || '')}" placeholder="Demande de support">`, 'grow')}
         </div>
         ${isOpen
-          ? `${nodeField('Catégorie du ticket', flowCategorySelect(bind('category'), block.category))}
+          ? `${renderTicketButtons(block)}
+        ${nodeField('Catégorie du ticket', flowCategorySelect(bind('category'), block.category))}
         <div class="fld-row">
           ${nodeField('Rôle du staff', flowRoleSelect(bind('staffRole'), block.staffRole), 'grow')}
           ${nodeField('Salon des logs', flowChannelSelect(bind('logChannel'), block.logChannel, { emptyLabel: 'Aucun journal' }), 'grow')}
@@ -2751,7 +2774,6 @@ function renderNodeFieldsB(block) {
           ${nodeField('Bouton Réclamer', `<button class="switch ${block.claimButton !== false ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="claimButton"></button>`, 'shrink')}
           ${nodeField('Bouton Fermer', `<button class="switch ${block.closeButton !== false ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="closeButton"></button>`, 'shrink')}
         </div>
-        ${renderTicketButtons(block)}
         <p class="hint">Le salon est privé : le membre, le bot et le rôle staff peuvent le voir. Le salon de logs reçoit les ouvertures, fermetures et transcripts.</p>`
           : '<p class="hint">Cette action agit sur le ticket du salon actuel. La fermeture utilise le mode et le délai configurés à l’ouverture du ticket.</p>'}`;
     }
