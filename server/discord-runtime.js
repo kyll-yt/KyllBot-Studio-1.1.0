@@ -1299,7 +1299,14 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
         case 'message':
         case 'reply': {
           const target = resolveChannel(guild, output.channel) || channel;
-          const payload = { content: output.text || ' ', allowedMentions: { parse: output.ping === false ? [] : ['users', 'roles'] } };
+          const content = String(output.text || '').trim();
+          const messageButtons = Array.isArray(output.buttons) ? output.buttons.slice(0, 5) : [];
+          if (!content && !messageButtons.length) {
+            log(runtime, 'warn', `Message vide ignoré (bloc ${output.blockId}).`);
+            break;
+          }
+          const payload = { allowedMentions: { parse: output.ping === false ? [] : ['users', 'roles'] } };
+          if (content) payload.content = content;
           if (output.tts) payload.tts = true;
           if (output.silent || output.suppressEmbeds) {
             payload.flags =
@@ -1307,7 +1314,6 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
               (output.suppressEmbeds ? MessageFlags.SuppressEmbeds : 0);
           }
           if (output.reply && message?.id) payload.reply = { messageReference: message.id, failIfNotExists: false };
-          const messageButtons = Array.isArray(output.buttons) ? output.buttons.slice(0, 5) : [];
           if (messageButtons.length) {
             const row = new ActionRowBuilder();
             messageButtons.forEach((entry, index) => {
@@ -1348,7 +1354,12 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
         }
         case 'embed': {
           const target = resolveChannel(guild, output.channel) || channel;
-          const payload = { embeds: [toEmbed(output.embed)] };
+          const embed = toEmbed(output.embed);
+          if (!embed.data.title && !embed.data.description && !embed.data.fields?.length && !embed.data.image && !embed.data.thumbnail && !embed.data.author) {
+            log(runtime, 'warn', `Embed vide ignoré (bloc ${output.blockId}).`);
+            break;
+          }
+          const payload = { embeds: [embed] };
           if (output.silent || output.suppressEmbeds) {
             payload.flags =
               (output.silent ? MessageFlags.SuppressNotifications : 0) |
@@ -2805,15 +2816,26 @@ async function handleInteraction(botId, interaction) {
       }
       await replyInteractionInChunks(interaction, commandPayload(command, { guild, member, interaction, client: ensureRuntime(botId).client }));
       bumpCommand(ws, bot, command, 'discord:slash', interaction.user);
+    } else if (slashFlows.length) {
+      // Acknowledge immediately so a flow that only sends channel messages does not leave the slash command hanging.
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
     }
     let flowUsedInteraction = false;
+    let flowSent = false;
     for (const flow of slashFlows) {
       const result = await executeFlow({ bot, ws, flow, guild, member, channel, message: null, interaction });
       if (result?.interactionUsed) flowUsedInteraction = true;
+      if (result?.sent) flowSent = true;
       bumpFlow(ws, bot, flow, 'discord:slash', interaction.user);
     }
-    if (!command && slashFlows.length && !flowUsedInteraction && !interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: 'Flux exécuté.', ephemeral: true }).catch(() => {});
+    if (!command && slashFlows.length && !flowUsedInteraction) {
+      if (flowSent) {
+        if (interaction.deferred) await interaction.deleteReply().catch(() => {});
+      } else if (interaction.deferred) {
+        await interaction.editReply({ content: 'Flux exécuté.' }).catch(() => {});
+      } else if (!interaction.replied) {
+        await interaction.reply({ content: 'Flux exécuté.', ephemeral: true }).catch(() => {});
+      }
     }
     return;
   }

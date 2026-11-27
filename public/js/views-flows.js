@@ -2142,7 +2142,12 @@ function renderNodeFieldsDirect(block) {
           ${nodeField('Variantes aléatoires', `<button class="switch ${block.variantMode ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="variantMode"></button>`, 'shrink')}
           ${nodeField('Supprimer après', `<input class="input" type="number" min="0" max="300" ${bind('deleteAfter')} value="${Number(block.deleteAfter) || 0}" placeholder="0">`, 'shrink')}
         </div>
-        <p class="hint">Éphémère = seul le membre qui déclenche voit le message. Message privé = envoi en DM. Laisse les deux désactivés pour un message public.</p>
+        <p class="hint">Éphémère = seul le membre qui déclenche voit le message, dans le salon où il lance la commande : le salon choisi est ignoré. Cela fonctionne avec un déclencheur slash, bouton ou formulaire ; avec un mot-clé ou une arrivée, le message part en public. Message privé = envoi en DM. Laisse les deux désactivés pour un message public.</p>
+        ${
+          !String(block.text || '').trim() && !(block.buttons || []).length
+            ? '<p class="hint" style="color:var(--danger)">Ce message est vide : il ne sera pas envoyé. Ajoute un texte ou un bouton.</p>'
+            : ''
+        }
         <div class="be-content-card">
           <div class="be-content-main">
             <span class="be-content-kicker">Contenu envoyé</span>
