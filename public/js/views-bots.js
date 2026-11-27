@@ -568,6 +568,15 @@ function roleList(value) {
   return [...new Set(entries.map((entry) => String(entry || '').trim().replace(/^@/, '')).filter(Boolean))];
 }
 
+function automationFlowCount(bot, automation) {
+  return (bot.flows || []).filter(
+    (flow) =>
+      flow.enabled !== false &&
+      flow.trigger?.type === 'automation' &&
+      (!flow.trigger.automationType || flow.trigger.automationType === automation.type),
+  ).length;
+}
+
 function automationSummary(automation) {
   const config = automation.config || {};
   const pills = [];
@@ -961,20 +970,23 @@ function viewBotDetail(id) {
         ${
           automations.length
             ? automations
-                .map(
-                  (automation) => `<div class="auto-card">
+                .map((automation) => {
+                  const flowCount = automationFlowCount(bot, automation);
+                  const canRun = automation.enabled && (automation.type === 'ticketPanel' || flowCount > 0);
+                  return `<div class="auto-card">
                     <span class="a-ic">${icon(automationIcon(automation.type))}</span>
                     <div class="a-main">
                       <h4>${esc(automation.label)}</h4>
                       <p>${esc(AUTOMATION_DESCRIPTIONS[automation.type] || 'Automatisation personnalisée.')}</p>
                       ${automationSummary(automation)}
+                      ${flowCount ? `<span class="auto-detail">${flowCount} flux lié(s)</span>` : ''}
                     </div>
                     <button class="btn btn-ghost btn-sm" data-action="config-automation" data-id="${esc(bot.id)}" data-auto="${esc(automation.id)}">${icon('gear')} Configurer</button>
-                    ${automation.enabled ? `<button class="btn btn-ghost btn-sm" data-action="run-automation" data-id="${esc(bot.id)}" data-auto="${esc(automation.id)}" title="Déclencher les flux liés à cette automatisation">${icon('play')} Déclencher</button>` : ''}
+                    ${canRun ? `<button class="btn btn-ghost btn-sm" data-action="run-automation" data-id="${esc(bot.id)}" data-auto="${esc(automation.id)}" title="Déclencher les flux liés à cette automatisation">${icon('play')} Déclencher</button>` : ''}
                     <button class="mini-btn danger" data-action="delete-automation" data-id="${esc(bot.id)}" data-auto="${esc(automation.id)}" title="Supprimer">${icon('trash')}</button>
                     <button class="switch ${automation.enabled ? 'on' : ''}" data-action="toggle-automation" data-id="${esc(bot.id)}" data-auto="${esc(automation.id)}" aria-label="Activer ${esc(automation.label)}"></button>
-                  </div>`,
-                )
+                  </div>`;
+                })
                 .join('')
             : `<div class="empty" style="padding:38px 20px">
                 <div class="ic">${icon('zap')}</div>
@@ -2382,6 +2394,7 @@ function openAutomationModal(bot, preset = null) {
       <div id="autoFields"></div>
       ${datalists}
       <p class="hint">Le salon et la catégorie sont utilisés dès que le bot est connecté avec son token.</p>
+      <p class="hint">Un flux n’est pas obligatoire : l’automatisation fonctionne avec sa configuration. Ajoute un flux seulement si tu veux une réaction personnalisée.</p>
     `,
     onSubmit: async (formData) => {
       const type = String(formData.get('type') || initialType);
@@ -2484,6 +2497,7 @@ onAction('config-automation', (el) => {
       <datalist id="categorySuggestions">${(bot.discord?.categories?.length ? bot.discord.categories : CATEGORY_SUGGESTIONS).map((item) => `<option value="${esc(item)}"></option>`).join('')}</datalist>
       <datalist id="roleSuggestions">${(bot.discord?.roles || FLOW_ROLES_FALLBACK.map((name) => ({ name }))).map((role) => `<option value="${esc(role.name)}"></option>`).join('')}</datalist>
       <p class="hint">Le salon et la catégorie sont utilisés dès que le bot est connecté avec son token.</p>
+      <p class="hint">Un flux n’est pas obligatoire : l’automatisation fonctionne avec sa configuration. Ajoute un flux seulement si tu veux une réaction personnalisée.</p>
     `,
     onSubmit: async (formData) => {
       const nextConfig = {};

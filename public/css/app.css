@@ -873,6 +873,9 @@
 .button-editor-row .fld > span { font-size: 10.5px; }
 .button-editor-row .fld.shrink { width: 128px; }
 .button-editor-row .fld-row { gap: 8px; }
+.select-option-row { flex-direction: row; align-items: center; flex-wrap: wrap; }
+.select-option-row .input { flex: 1 1 150px; min-width: 0; }
+.select-option-row .select { flex: 0 1 190px; min-width: 0; }
 .be-row-head { display: flex; align-items: center; gap: 7px; }
 .be-row-head b { font-size: 11px; }
 .be-row-head .mini-btn { margin-left: auto; }

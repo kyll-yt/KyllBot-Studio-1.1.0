@@ -328,6 +328,19 @@ function flowOutputPairs(block) {
       { branch: 'else', target: block.elseId || null, tone: 'alt', label: 'faux' },
     ];
   }
+  if (block.type === 'select') {
+    const options = flowOptions(block.options);
+    const targets = Array.isArray(block.optionTargets) ? block.optionTargets : [];
+    if (options.length) {
+      return options.map((option, index) => ({
+        branch: `option:${index}`,
+        target: targets[index] || block.next || null,
+        tone: 'ok',
+        label: option,
+      }));
+    }
+    return [{ branch: 'next', target: block.next || null, tone: 'ok', label: 'après le menu' }];
+  }
   if (block.type === 'ticket') {
     const base = {
       branch: 'next',
@@ -567,7 +580,7 @@ function flowNewBlock(type, x = 120, y = 120) {
     case 'poll':
       return { ...base, channel: '', question: 'Votre avis ?', options: 'Oui\nNon\nPeut-être', duration: 24, multiple: false };
     case 'select':
-      return { ...base, channel: '', placeholder: 'Choisissez…', options: 'Option 1\nOption 2', min: 1, max: 1 };
+      return { ...base, channel: '', placeholder: 'Choisissez…', options: 'Option 1\nOption 2', optionTargets: [], min: 1, max: 1 };
     case 'modal':
       return {
         ...base,
@@ -696,6 +709,7 @@ function flowCloneBlock(block, offset = 48) {
   if (Array.isArray(copy.rules)) copy.rules.forEach((rule) => (rule.id = flowUid()));
   if (Array.isArray(copy.variants)) copy.variants.forEach((variant) => { variant.id = flowUid(); variant.next = null; });
   if (Array.isArray(copy.buttons)) copy.buttons.forEach((button) => { button.id = flowUid(); button.next = null; });
+  if (block.type === 'select') copy.optionTargets = [];
   if (Array.isArray(copy.fields)) copy.fields.forEach((field) => (field.id = flowUid()));
   return copy;
 }
@@ -1300,8 +1314,10 @@ function flowBlockRows(block) {
       return flowSummaryRows([['Action', block.action === 'stop' ? 'arrêter' : 'jouer'], ['Mode', block.mode === 'personal' ? 'privé' : 'vocal'], ['Source', block.url]]);
     case 'poll':
       return flowSummaryRows([['Question', block.question], ['Options', `${flowOptions(block.options).length}`], ['Durée', `${block.duration || 24} h`]]);
-    case 'select':
-      return flowSummaryRows([['Placeholder', block.placeholder], ['Options', `${flowOptions(block.options).length}`], ['Choix', `${block.min || 1}–${block.max || 1}`]]);
+    case 'select': {
+      const count = flowOptions(block.options).length;
+      return flowSummaryRows([['Placeholder', block.placeholder], ['Options / sorties', `${count} option(s) · ${count || 1} sortie(s)`], ['Choix', `${block.min || 1}–${block.max || 1}`]]);
+    }
     case 'modal': {
       const fields = normalizeModalFields(block);
       return flowSummaryRows([
@@ -1902,7 +1918,7 @@ function renderNode(block, flow) {
         <div class="node-title-row">
           <span class="node-title">${esc(block.customName || meta.label)}</span>
           ${isStart ? '<span class="node-badge">départ</span>' : ''}
-          ${block.type === 'ticket' ? `<span class="node-badge">${pairs.length} sortie${pairs.length > 1 ? 's' : ''}</span>` : ''}
+          ${['ticket', 'select'].includes(block.type) ? `<span class="node-badge">${pairs.length} sortie${pairs.length > 1 ? 's' : ''}</span>` : ''}
         </div>
         <p class="node-desc">${esc(meta.hint)}</p>
       </div>
@@ -1978,6 +1994,24 @@ function renderEmbedFields(block) {
     </div>`).join('')}
     <button class="link-btn" data-action="flow-add-embed-field" data-id="${block.id}">${icon('plus')} Ajouter un champ</button>
   </div>`;
+}
+
+function renderSelectOptions(block) {
+  const options = flowOptions(block.options);
+  const targets = Array.isArray(block.optionTargets) ? block.optionTargets : [];
+  const outputs = options.length || 1;
+  return `<div class="button-editor-head">
+      <b>${options.length} option(s) · ${outputs} sortie(s)</b>
+      <span>${options.length ? 'Chaque option crée une sortie du bloc' : 'Ajoute des options pour créer les sorties'}</span>
+    </div>
+    <div class="button-editor">
+      ${options.map((option, index) => `<div class="button-editor-row select-option-row">
+        <span class="variant-badge">${index + 1}</span>
+        <input class="input" value="${esc(option)}" disabled>
+        ${flowTargetSelect(`data-node="${block.id}" data-option="${index}" data-option-field="next"`, block.id, targets[index] || null)}
+      </div>`).join('')}
+    </div>
+    <p class="hint">Chaque option a sa propre sortie. Si une sortie est vide, le flux continue avec la sortie de secours du bloc. Si plusieurs choix sont autorisés, la première option choisie décide de la sortie.</p>`;
 }
 
 function renderTicketButtons(block) {
@@ -2389,6 +2423,7 @@ function renderNodeFieldsDirect(block) {
         </div>
         ${nodeField('Placeholder', `<input class="input" ${bind('placeholder')} value="${esc(block.placeholder || '')}" placeholder="Choisissez…">`)}
         ${nodeField('Options (une par ligne)', `<textarea class="textarea" rows="3" ${bind('options')} placeholder="Option 1\nOption 2">${esc(block.options || '')}</textarea>`)}
+        ${renderSelectOptions(block)}
         <div class="fld-row">
           ${nodeField('Min', `<input class="input" type="number" min="1" max="25" ${bind('min')} value="${block.min || 1}">`, 'shrink')}
           ${nodeField('Max', `<input class="input" type="number" min="1" max="25" ${bind('max')} value="${block.max || 1}">`, 'shrink')}
@@ -3183,6 +3218,10 @@ function setFlowLink(block, branch, targetId) {
   } else if (branch.startsWith('variant:')) {
     const variant = block.variants?.find((entry) => entry.id === branch.slice(8));
     if (variant) variant.next = targetId;
+  } else if (branch.startsWith('option:')) {
+    const index = Number(branch.slice(7));
+    if (!Array.isArray(block.optionTargets)) block.optionTargets = [];
+    block.optionTargets[index] = targetId;
   } else block.next = targetId;
 }
 
@@ -3312,6 +3351,7 @@ onAction('flow-node-del', (el) => {
     if (block.elseId === id) block.elseId = null;
     for (const button of block.buttons || []) if (button.next === id) button.next = null;
     for (const variant of block.variants || []) if (variant.next === id) variant.next = null;
+    for (const [index, target] of (block.optionTargets || []).entries()) if (target === id) block.optionTargets[index] = null;
   }
   if (flow.start === id) flow.start = flow.blocks[0]?.id || null;
   flowEditor.dirty = true;
@@ -3864,7 +3904,7 @@ document.addEventListener('input', (event) => {
       el.dataset.field === 'seconds' || el.dataset.field === 'count' ? Number(el.value) || 1 : el.value;
   }
   flowEditor.dirty = true;
-  if (el.dataset.buttonField === 'next' || el.dataset.variantField === 'next') requestAnimationFrame(drawFlowEdges);
+  if (el.dataset.buttonField === 'next' || el.dataset.variantField === 'next' || el.dataset.optionField === 'next') requestAnimationFrame(drawFlowEdges);
   updateRoleMention(el);
 });
 
@@ -3918,15 +3958,23 @@ document.addEventListener('change', (event) => {
     const button = block.buttons[Number(el.dataset.button)];
     if (button) button[el.dataset.buttonField] = el.value;
   } else if (el.dataset.rule !== undefined) block.rules[Number(el.dataset.rule)][el.dataset.ruleField] = el.value;
+  else if (el.dataset.option !== undefined) {
+    if (!Array.isArray(block.optionTargets)) block.optionTargets = [];
+    block.optionTargets[Number(el.dataset.option)] = el.value || null;
+  }
   else if (el.dataset.field === 'unpin') block.unpin = el.value === 'true';
   else if (el.dataset.field === 'seconds' || el.dataset.field === 'count') block[el.dataset.field] = Number(el.value) || 1;
   else if (el.dataset.field) block[el.dataset.field] = el.value;
   flowEditor.dirty = true;
+  if (block.type === 'select' && el.dataset.field === 'options') {
+    refreshBlockEditor(block.id);
+    return;
+  }
   if (['action', 'mode', 'delivery', 'closeMode'].includes(el.dataset.field)) {
     refreshBlockEditor(block.id);
     return;
   }
-  if (el.dataset.buttonField === 'next' || el.dataset.variantField === 'next') requestAnimationFrame(drawFlowEdges);
+  if (el.dataset.buttonField === 'next' || el.dataset.variantField === 'next' || el.dataset.optionField === 'next') requestAnimationFrame(drawFlowEdges);
 });
 
 onAction('flow-toggle-side', () => {

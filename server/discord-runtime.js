@@ -2196,6 +2196,8 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
               flowId: flow.id,
               blockId: output.blockId,
               next: output.next,
+              options,
+              optionTargets: output.optionTargets || [],
               vars: result.variables,
               botId: bot.id,
               userId: user?.id,
@@ -2832,7 +2834,22 @@ async function handleInteraction(botId, interaction) {
       select: values[0] || '',
       interaction: 'select',
     };
-    const nextBlock = pending?.next || block?.next;
+    const fallbackOptions = String(block?.options || '')
+      .split(/\r?\n/)
+      .map((option) => option.trim())
+      .filter(Boolean)
+      .slice(0, 25);
+    const pendingOptions =
+      Array.isArray(pending?.options) && pending.options.length ? pending.options : fallbackOptions;
+    const pendingTargets =
+      Array.isArray(pending?.optionTargets) && pending.optionTargets.length
+        ? pending.optionTargets
+        : Array.isArray(block?.optionTargets)
+          ? block.optionTargets
+          : [];
+    const selectedIndex = pendingOptions.indexOf(values[0]);
+    const optionTarget = selectedIndex >= 0 ? pendingTargets[selectedIndex] : null;
+    const nextBlock = optionTarget || pending?.next || block?.next;
     if (!nextBlock) {
       await interaction.reply({ content: `Choix enregistré : **${values.join(', ')}**`, ephemeral: true }).catch(() => {});
       return;

@@ -614,6 +614,9 @@ function normalizeBlock(block) {
         channel: str(block?.channel, 60),
         placeholder: str(block?.placeholder, 80) || 'Choisissez…',
         options: str(block?.options, 800),
+        optionTargets: Array.isArray(block?.optionTargets)
+          ? block.optionTargets.slice(0, 25).map((target) => str(target, 40) || null)
+          : [],
         min: num(block?.min, 1, 25, 1),
         max: num(block?.max, 1, 25, 1),
       };
@@ -921,6 +924,11 @@ function normalizeGraph(rawBlocks, rawStart) {
     }
     for (const variant of block.variants || []) {
       variant.next = ids.has(variant.next) && variant.next !== block.id ? variant.next : null;
+    }
+    if (Array.isArray(block.optionTargets)) {
+      block.optionTargets = block.optionTargets.map((target) =>
+        ids.has(target) && target !== block.id ? target : null,
+      );
     }
   }
 
@@ -1973,6 +1981,7 @@ export async function runFlow(flow, input = {}) {
           channel: block.channel || ctx.channel,
           placeholder: block.placeholder,
           options,
+          optionTargets: (block.optionTargets || []).slice(0, options.length),
           min: block.min,
           max: block.max,
           blockId: block.id,
