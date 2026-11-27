@@ -174,6 +174,29 @@ function viewBots() {
     })
     .join('');
 
+  const trash = state.ws.deletedBots || [];
+  const trashPanel = trash.length
+    ? `<div class="panel" style="margin-top:18px">
+        <div class="panel-head">
+          <div><h3>Corbeille</h3><p class="sub">Un bot supprimé reste récupérable pendant 30 jours.</p></div>
+        </div>
+        <div class="panel-body" style="display:flex;flex-direction:column;gap:8px">
+          ${trash
+            .map(
+              (bot) => `<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px">
+                <span class="bot-avatar" style="width:32px;height:32px;font-size:11px;background:linear-gradient(140deg,${esc(bot.color || '#7c5cff')},${esc(bot.color || '#7c5cff')}99)">${esc(initials(bot.name))}</span>
+                <div style="flex:1;min-width:0">
+                  <b>${esc(bot.name)}</b>
+                  <div style="font-size:12px;color:var(--muted)">Supprimé le ${esc(new Date(bot.deletedAt).toLocaleDateString('fr-FR'))}</div>
+                </div>
+                <button class="btn btn-ghost btn-sm" data-action="restore-bot" data-id="${esc(bot.id)}">Restaurer</button>
+              </div>`,
+            )
+            .join('')}
+        </div>
+      </div>`
+    : '';
+
   return `<div class="page-head">
       <div>
         <h1>Mes bots</h1>
@@ -187,7 +210,8 @@ function viewBots() {
       bots.length
         ? `<div class="bot-grid">${cards}</div>`
         : emptyState('Aucun bot pour l’instant', 'Créez votre premier bot ou partez d’un modèle prêt à l’emploi.', 'Créer un bot', 'new-bot')
-    }`;
+    }
+    ${trashPanel}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1174,7 +1198,7 @@ function viewBotDetail(id) {
     <div class="panel" style="margin-top:14px;border-color:rgba(251,113,133,.25)">
       <div class="panel-head"><h3 style="color:#fda4af">Zone sensible</h3></div>
       <div class="panel-body" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-        <p style="flex:1;min-width:200px;font-size:12.5px;color:var(--muted)">Supprimer définitivement ce bot et toutes ses commandes.</p>
+        <p style="flex:1;min-width:200px;font-size:12.5px;color:var(--muted)">Supprimer ce bot. Il reste récupérable dans la corbeille pendant 30 jours.</p>
         <button class="btn btn-danger btn-sm" data-action="delete-bot" data-id="${esc(bot.id)}">Supprimer le bot</button>
       </div>
     </div>`;
@@ -2069,7 +2093,7 @@ onAction('delete-bot', (el) => {
   if (!bot) return;
   confirmDialog({
     title: `Supprimer « ${bot.name} » ?`,
-    message: 'Cette action est définitive. Toutes les commandes et automatisations du bot seront supprimées.',
+    message: 'Le bot part dans la corbeille. Tu pourras le restaurer pendant 30 jours depuis la page Mes bots.',
     confirmLabel: 'Supprimer',
     onConfirm: async () => {
       await api(`/api/bots/${bot.id}`, { method: 'DELETE' });
@@ -2078,6 +2102,16 @@ onAction('delete-bot', (el) => {
       toast('Bot supprimé.', 'info');
     },
   });
+});
+
+onAction('restore-bot', async (el) => {
+  try {
+    await api(`/api/bots/${el.dataset.id}/restore`, { method: 'POST' });
+    await refresh();
+    toast('Bot restauré.', 'success');
+  } catch (error) {
+    toast(error.message, 'error');
+  }
 });
 
 onAction('toggle-bot-status', async (el) => {

@@ -1,3 +1,7 @@
+import { gzipSync, gunzipSync } from 'node:zlib';
+
+const PACK_FORMAT = 'gzip-base64-v1';
+
 function firstEnv(...names) {
   for (const name of names) {
     const value = String(process.env[name] || '').trim();
@@ -84,24 +88,21 @@ async function errorMessage(response) {
   return `Supabase ${response.status}${text ? ` : ${text.slice(0, 300)}` : ''}`;
 }
 
-export async function loadRemoteState() {
-  if (!remoteStoreEnabled) {
-    if (configError) throw new Error(configError);
-    return null;
+function packState(data) {
+  return {
+    __format: PACK_FORMAT,
+    payload: gzipSync(Buffer.from(JSON.stringify(data), 'utf8'), { level: 9 }).toString('base64'),
+  };
+}
+
+function unpackState(data) {
+  if (data && data.__format === PACK_FORMAT && typeof data.payload === 'string') {
+    try {
+      return JSON.parse(gunzipSync(Buffer.from(data.payload, 'base64')).toString('utf8'));
+    } catch {
+      throw new Error('La sauvegarde Supabase compressée est illisible.');
+    }
   }
-  assertServiceKey();
-
-  const response = await fetch(
-    `${SUPABASE_URL}/rest/v1/${TABLE}?id=eq.${encodeURIComponent(STATE_ID)}&select=data`,
-    {
-      headers: headers(),
-      signal: AbortSignal.timeout(15000),
-    },
-  );
-
-  if (!response.ok) throw new Error(await errorMessage(response));
-  const rows = await response.json();
-  const data = rows[0]?.data ?? null;
   if (typeof data === 'string') {
     try {
       return JSON.parse(data);
@@ -112,19 +113,79 @@ export async function loadRemoteState() {
   return data;
 }
 
-export async function saveRemoteState(data) {
-  if (!remoteStoreEnabled) return;
+export async function loadRemoteRecord() {
+  if (!remoteStoreEnabled) {
+    if (configError) throw new Error(configError);
+    return { state: null, updatedAt: null, exists: false };
+  }
   assertServiceKey();
 
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?on_conflict=id`, {
-    method: 'POST',
-    headers: headers({
-      'Content-Type': 'application/json',
-      Prefer: 'resolution=merge-duplicates,return=minimal',
-    }),
-    body: JSON.stringify([{ id: STATE_ID, data, updated_at: new Date().toISOString() }]),
-    signal: AbortSignal.timeout(15000),
-  });
+  const response = await fetch(
+    `${SUPABASE_URL}/rest/v1/${TABLE}?id=eq.${encodeURIComponent(STATE_ID)}&select=data,updated_at`,
+    {
+      headers: headers(),
+      signal: AbortSignal.timeout(15000),
+    },
+  );
 
   if (!response.ok) throw new Error(await errorMessage(response));
+  const rows = await response.json();
+  const row = Array.isArray(rows) ? rows[0] : null;
+  return {
+    state: row ? unpackState(row.data) : null,
+    updatedAt: row?.updated_at || null,
+    exists: Boolean(row),
+  };
+}
+
+export async function loadRemoteState() {
+  return (await loadRemoteRecord()).state;
+}
+
+function conflictError() {
+  const error = new Error('Une autre instance a modifié la sauvegarde Supabase. Fusion en cours…');
+  error.code = 'REMOTE_CONFLICT';
+  return error;
+}
+
+export async function saveRemoteState(data, expectedUpdatedAt = null, expectExists = false) {
+  if (!remoteStoreEnabled) return null;
+  assertServiceKey();
+
+  const packed = packState(data);
+  const updatedAt = new Date().toISOString();
+  let response;
+
+  if (expectedUpdatedAt || expectExists) {
+    const filter = expectedUpdatedAt
+      ? `updated_at=eq.${encodeURIComponent(expectedUpdatedAt)}`
+      : 'updated_at=is.null';
+    response = await fetch(
+      `${SUPABASE_URL}/rest/v1/${TABLE}?id=eq.${encodeURIComponent(STATE_ID)}&${filter}`,
+      {
+        method: 'PATCH',
+        headers: headers({
+          'Content-Type': 'application/json',
+          Prefer: 'return=representation',
+        }),
+        body: JSON.stringify({ data: packed, updated_at: updatedAt }),
+        signal: AbortSignal.timeout(15000),
+      },
+    );
+  } else {
+    response = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?on_conflict=id`, {
+      method: 'POST',
+      headers: headers({
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=ignore-duplicates,return=representation',
+      }),
+      body: JSON.stringify([{ id: STATE_ID, data: packed, updated_at: updatedAt }]),
+      signal: AbortSignal.timeout(15000),
+    });
+  }
+
+  if (!response.ok) throw new Error(await errorMessage(response));
+  const rows = await response.json().catch(() => []);
+  if (!Array.isArray(rows) || !rows.length) throw conflictError();
+  return rows[0]?.updated_at || updatedAt;
 }

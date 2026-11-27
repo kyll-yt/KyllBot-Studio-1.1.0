@@ -746,6 +746,14 @@ function workspacePayload(user, req) {
   for (const bot of ws.bots) ensureBotFlows(bot);
   const { events, ...workspace } = ws;
   workspace.bots = ws.bots.map(publicBot);
+  workspace.deletedBots = (ws.deletedBots || []).map((bot) => ({
+    id: bot.id,
+    name: bot.name,
+    description: bot.description || '',
+    color: bot.color || '#7c5cff',
+    tags: Array.isArray(bot.tags) ? bot.tags : [],
+    deletedAt: bot.deletedAt || null,
+  }));
   workspace.team = ws.team.map((member) => ({
     ...member,
     hasAccount: Boolean(findUserByEmail(member.email)),
@@ -781,6 +789,7 @@ function workspacePayload(user, req) {
       googleRedirectUri: req ? googleRedirectUri(req) : '',
       discordOAuthRedirectUri: req ? discordOAuthRedirectUri(req) : '',
     },
+    storage: storageStatus(),
   };
 }
 
@@ -1345,10 +1354,35 @@ app.delete(
     const ws = getWorkspace(req.user.id);
     const bot = findOr404(ws.bots, req.params.id, 'Bot');
     await stopBot(bot.id);
+    if (!Array.isArray(ws.deletedBots)) ws.deletedBots = [];
+    const now = Date.now();
+    ws.deletedBots = [
+      { ...bot, deletedAt: new Date(now).toISOString(), deletedBy: req.user.id },
+      ...ws.deletedBots.filter((entry) => entry.id !== bot.id),
+    ]
+      .filter((entry) => now - (Date.parse(entry.deletedAt) || now) < 30 * 24 * 60 * 60 * 1000)
+      .slice(0, 20);
     ws.bots = ws.bots.filter((b) => b.id !== bot.id);
     pushActivity(ws, 'bot', `Le bot « ${bot.name} » a été supprimé`);
     persist();
-    res.json({ ok: true });
+    res.json({ ok: true, restorable: true });
+  }),
+);
+
+app.post(
+  '/api/bots/:id/restore',
+  requireAuth,
+  wrap(async (req, res) => {
+    const ws = getWorkspace(req.user.id);
+    const entry = (ws.deletedBots || []).find((item) => item.id === req.params.id);
+    if (!entry) throw Object.assign(new Error('Bot introuvable dans la corbeille.'), { status: 404 });
+    assertLimit(ws, 'bots', ws.bots.length, req.user);
+    const { deletedAt, deletedBy, ...bot } = entry;
+    ws.deletedBots = ws.deletedBots.filter((item) => item.id !== entry.id);
+    ws.bots.unshift(bot);
+    pushActivity(ws, 'bot', `Le bot « ${bot.name} » a été restauré`);
+    persist();
+    res.json({ bot: publicBot(bot) });
   }),
 );
 

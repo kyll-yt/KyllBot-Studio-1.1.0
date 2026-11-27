@@ -170,6 +170,7 @@ const state = {
   ws: null,
   stats: null,
   billing: null,
+  storage: null,
   config: {},
   route: { name: 'dashboard', id: null },
   botTab: 'commands',
@@ -375,6 +376,7 @@ async function refresh() {
   state.ws = data.workspace;
   state.stats = data.stats;
   state.billing = data.billing;
+  state.storage = data.storage || null;
   applyAppearance();
   updateChrome();
   render();
@@ -558,6 +560,16 @@ function updateChrome() {
   const creditHint = document.getElementById('creditHint');
   if (creditHint) creditHint.textContent = `${fmt(ws.credits || 0)} crédit${(ws.credits || 0) > 1 ? 's' : ''}`;
   document.getElementById('userMenuHead').textContent = user.email;
+
+  const storageBanner = document.getElementById('storageBanner');
+  if (storageBanner) {
+    const storage = state.storage || {};
+    const problem = storage.error || (storage.remote && storage.mode !== 'supabase');
+    storageBanner.hidden = !problem;
+    if (problem) {
+      storageBanner.innerHTML = `<b>⚠️ Sauvegarde Supabase indisponible.</b> Tes dernières modifications risquent de disparaître après un redéploiement. Vérifie les variables <code>SUPABASE_URL</code> et <code>SUPABASE_SERVICE_ROLE_KEY</code> sur Render.${storage.error ? `<br><span style="opacity:.8">${esc(storage.error)}</span>` : ''}`;
+    }
+  }
 
   const navName = ['bot', 'flow'].includes(state.route.name) ? 'bots' : state.route.name === 'course' ? 'courses' : state.route.name;
   document.querySelectorAll('.nav-link').forEach((link) => {
