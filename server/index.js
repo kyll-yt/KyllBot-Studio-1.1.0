@@ -235,7 +235,7 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 const str = (value, max = 200) => String(value ?? '').trim().slice(0, max);
 const describeFlowTrigger = (trigger) => describeTrigger(trigger);
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const FAKE_EMAIL = /@example\.com$/i;
 const FAKE_NAME = /Emma Petit|Lucas Moreau|Sarah Benali|Hugo Lefèvre|Inès Garnier|Nathan Roy|Léa Martin|Noah Bernard/;
 const TEST_ACTIVITY =
@@ -244,7 +244,8 @@ const ACTIVITY_EVENTS = new Set(['command.run', 'flow.run', 'learner.active', 'l
 
 function migrateWorkspace(ws) {
   let changed = false;
-  if ((ws.schemaVersion || 1) < SCHEMA_VERSION) {
+  const previousSchema = ws.schemaVersion || 1;
+  if (previousSchema < SCHEMA_VERSION) {
     for (const bot of ws.bots || []) {
       for (const command of bot.commands || []) {
         command.uses = 0;
@@ -337,26 +338,28 @@ function migrateWorkspace(ws) {
       }
     }
   }
-  const learners = (ws.learners || []).filter((learner) => !FAKE_EMAIL.test(learner.email) && !FAKE_NAME.test(learner.name || ''));
-  if (learners.length !== (ws.learners || []).length) {
-    ws.learners = learners;
-    changed = true;
-  }
-  const team = (ws.team || []).filter((member) => !FAKE_EMAIL.test(member.email) && !FAKE_NAME.test(member.name || ''));
-  if (team.length !== (ws.team || []).length) {
-    ws.team = team;
-    changed = true;
-  }
-  const teamNames = new Set((ws.team || []).map((member) => String(member.name || '').toLowerCase()));
-  const activity = (ws.activity || []).filter((entry) => {
-    const message = String(entry.message || '');
-    if (FAKE_NAME.test(message) || TEST_ACTIVITY.test(message)) return false;
-    const added = message.match(/([\p{L}][\p{L}-]+) a été ajouté à l.équipe/iu);
-    return !added || teamNames.has(added[1].toLowerCase());
-  });
-  if (activity.length !== (ws.activity || []).length) {
-    ws.activity = activity;
-    changed = true;
+  if (previousSchema < 3) {
+    const learners = (ws.learners || []).filter((learner) => !FAKE_EMAIL.test(learner.email) && !FAKE_NAME.test(learner.name || ''));
+    if (learners.length !== (ws.learners || []).length) {
+      ws.learners = learners;
+      changed = true;
+    }
+    const team = (ws.team || []).filter((member) => !FAKE_EMAIL.test(member.email) && !FAKE_NAME.test(member.name || ''));
+    if (team.length !== (ws.team || []).length) {
+      ws.team = team;
+      changed = true;
+    }
+    const teamNames = new Set((ws.team || []).map((member) => String(member.name || '').toLowerCase()));
+    const activity = (ws.activity || []).filter((entry) => {
+      const message = String(entry.message || '');
+      if (FAKE_NAME.test(message) || TEST_ACTIVITY.test(message)) return false;
+      const added = message.match(/([\p{L}][\p{L}-]+) a été ajouté à l.équipe/iu);
+      return !added || teamNames.has(added[1].toLowerCase());
+    });
+    if (activity.length !== (ws.activity || []).length) {
+      ws.activity = activity;
+      changed = true;
+    }
   }
   if (!Array.isArray(ws.events)) {
     ws.events = [];
