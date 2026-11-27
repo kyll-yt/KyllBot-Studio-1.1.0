@@ -448,11 +448,11 @@ function closeModal() {
   document.body.style.overflow = '';
 }
 
-function openModal({ title, subtitle = '', body, submitLabel = 'Enregistrer', wide = false, danger = false, onSubmit, hideFooter = false, autoFocus = true }) {
+function openModal({ title, subtitle = '', body, submitLabel = 'Enregistrer', wide = false, fullscreen = false, danger = false, onSubmit, hideFooter = false, autoFocus = true }) {
   const root = document.getElementById('modalRoot');
   root.innerHTML = `
-    <div class="modal-backdrop">
-      <div class="modal ${wide ? 'wide' : ''}" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-backdrop${fullscreen ? ' fullscreen' : ''}">
+      <div class="modal ${wide ? 'wide' : ''}${fullscreen ? ' fullscreen' : ''}" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
         <form id="modalForm" novalidate>
           <div class="modal-head">
             <div>

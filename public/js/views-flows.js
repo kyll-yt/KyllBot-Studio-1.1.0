@@ -276,6 +276,8 @@ const flowEditor = {
   sideOpen: true,
   testOpen: false,
   editBlockId: null,
+  composerBlockId: null,
+  autoEdit: false,
   ctx: {
     message: 'salut, je découvre le serveur',
     user: 'Membre test',
@@ -328,8 +330,10 @@ function flowOutputPairs(block) {
       { branch: 'else', target: block.elseId || null, tone: 'alt', label: 'faux' },
     ];
   }
-  if (block.type === 'button') {
-    const buttons = blockButtons(block);
+  if (block.type === 'button' || (block.type === 'ticket' && (!block.action || block.action === 'open'))) {
+    const buttons = block.type === 'ticket'
+      ? (Array.isArray(block.buttons) ? block.buttons : [])
+      : blockButtons(block);
     if (buttons.length) {
       return buttons.map((button, index) => ({
         branch: `button:${button.id}`,
@@ -633,6 +637,7 @@ function flowNewBlock(type, x = 120, y = 120) {
         welcomeMessage: 'Ton ticket est ouvert. Décris ton problème, un membre du staff arrive.',
         maxOpen: 1,
         namePrefix: 'ticket',
+        buttons: [],
       };
     case 'level':
       return { ...base, amount: 10, variable: 'xp' };
@@ -789,7 +794,16 @@ function flowEnsureLoaded(botId, flowId) {
   flowEditor.dirty = false;
   flowEditor.result = null;
   flowEditor.view = null;
+  flowEditor.autoEdit = true;
   flowEditor.sideOpen = typeof window === 'undefined' ? true : window.innerWidth > 1100;
+  if (!flowEditor.flow.blocks.length) {
+    const start = flowNewBlock('message', 220, 160);
+    start.text = 'Bienvenue {{user.mention}} !';
+    start.channel = '#général';
+    flowEditor.flow.blocks.push(start);
+    flowEditor.flow.start = start.id;
+    flowEditor.dirty = true;
+  }
   return true;
 }
 
@@ -809,9 +823,18 @@ function viewFlowEditor(botId, flowId) {
   const trigger = FLOW_TRIGGERS[flow.trigger?.type] || FLOW_TRIGGERS.slash;
   const view = flowEditor.view || { x: 40, y: 40, zoom: 1 };
 
-  requestAnimationFrame(() => initFlowCanvas());
+  requestAnimationFrame(() => {
+    initFlowCanvas();
+    if (flowEditor.autoEdit) {
+      flowEditor.autoEdit = false;
+      const startId = flow.start;
+      if (startId) setTimeout(() => openBlockEditor(startId), 90);
+    }
+  });
 
-  return `<a class="back-link" href="#/bots/${esc(bot.id)}">${icon('arrowLeft')} Retour à ${esc(bot.name)}</a>
+  return `<div class="flow-shell">
+  <div class="flow-topbar">
+  <a class="back-link" href="#/bots/${esc(bot.id)}">${icon('arrowLeft')} Retour</a>
   <div class="flow-head">
     <div class="fh-id">
       <span class="fl-ic lg">${icon(trigger.icon)}</span>
@@ -822,9 +845,11 @@ function viewFlowEditor(botId, flowId) {
     </div>
     <div class="fh-actions">
       <button class="btn btn-ghost btn-sm" data-action="flow-run">${icon('play')} Tester</button>
-      <button class="btn btn-primary btn-sm" data-action="flow-save">${icon('save')} Enregistrer</button>
+      <button class="btn btn-primary btn-sm" data-action="flow-save">${icon('save')} Enregistrer et quitter</button>
     </div>
   </div>
+  </div>
+  <div class="flow-body">
   <div class="flow-layout${flowEditor.sideOpen ? ' side-open' : ''}${flowEditor.testOpen ? ' test-open' : ''}" id="flowLayout">
     <section class="flow-canvas2d">
       <div class="canvas-toolbar">
@@ -878,6 +903,8 @@ function viewFlowEditor(botId, flowId) {
       <button class="btn btn-ghost btn-sm flow-drawer-close" data-action="flow-toggle-test">${icon('x')} Fermer</button>
       ${renderTestPanel()}
     </aside>
+  </div>
+  </div>
   </div>`;
 }
 
@@ -1434,6 +1461,7 @@ function previewOutput(block) {
         welcomeMessage: block.welcomeMessage || '',
         maxOpen: block.maxOpen || 1,
         namePrefix: block.namePrefix || 'ticket',
+        buttons: Array.isArray(block.buttons) ? block.buttons : [],
       };
     case 'captcha':
       return { kind: 'captcha', user: 'Membre', mode: block.kind || 'button', timeout: block.timeout || 120 };
@@ -1495,9 +1523,22 @@ function renderBlockPreview(block) {
   return `<div class="be-preview">${renderOutput(output)}</div>`;
 }
 
+function renderDiscordPreview(block) {
+  const output = previewOutput(block);
+  const channel = block.channel || (block.type === 'ticket' ? 'ticket' : 'général');
+  const content = output
+    ? renderOutput(output)
+    : `<div class="dc-effect">${icon('layers')} Ce bloc n’envoie pas de message Discord.</div>`;
+  return `<div class="dc-preview-window">
+    <div class="dc-preview-top"><span class="dc-hash">#</span>${esc(String(channel).replace(/^#/, ''))}<span class="dc-preview-spacer"></span><span class="dc-preview-icons">⌕ ⋯</span></div>
+    <div class="dc-preview-chat">${content}</div>
+    <div class="dc-preview-composer">Message dans #${esc(String(channel).replace(/^#/, ''))}</div>
+  </div>`;
+}
+
 function updateBlockPreview(block) {
   const target = document.getElementById('bePreview');
-  if (target) target.innerHTML = renderBlockPreview(block);
+  if (target) target.innerHTML = renderDiscordPreview(block);
 }
 
 function flowVariableGroups(block) {
@@ -1767,9 +1808,9 @@ function pickRoleMention(index) {
 }
 
 function decorateFlowVarFields() {
-  const root = document.querySelector('#modalRoot .block-editor');
+  const root = document.querySelector('#modalRoot .block-editor, #modalRoot .be-composer');
   if (!root) return;
-  const controls = root.querySelectorAll('.be-fields input.input, .be-fields textarea.textarea');
+  const controls = root.querySelectorAll('.be-fields input.input, .be-fields textarea.textarea, .be-composer-fields input.input, .be-composer-fields textarea.textarea');
   controls.forEach((control) => {
     if (control.dataset.varDecorated) return;
     if (['number', 'color', 'range', 'file', 'checkbox', 'radio', 'hidden', 'button'].includes(control.type)) return;
@@ -1856,30 +1897,69 @@ function openBlockEditor(blockId, { autoFocus = true } = {}) {
   if (!block) return;
   closeRoleMention();
   closeFlowVarPicker();
+  flowEditor.composerBlockId = null;
   const meta = FLOW_BLOCKS[block.type] || FLOW_BLOCKS.message;
   flowEditor.editBlockId = blockId;
   openModal({
     title: `Modifier · ${meta.label}`,
-    subtitle: meta.hint,
-    wide: true,
+    subtitle: 'Enregistre et ferme avec le bouton en haut à droite.',
+    fullscreen: true,
     hideFooter: true,
     autoFocus,
     body: `<div class="block-editor" data-edit-block="${block.id}">
-      <div class="be-top">
-        <span class="blk-ic tone-${meta.tone}">${icon(meta.icon)}</span>
-        <div><b>${meta.label}</b><p>${meta.hint}</p></div>
+      <div class="be-topbar">
+        <div class="be-name">
+          <label>Nom du bloc</label>
+          <input data-node="${block.id}" data-field="customName" value="${esc(block.customName || '')}" placeholder="${esc(meta.label)}">
+        </div>
+        <div class="be-topbar-actions">
+          <button type="button" class="btn btn-ghost btn-sm" data-action="flow-node-edit-close">Annuler</button>
+          <button type="button" class="btn btn-primary btn-sm" data-action="flow-node-edit-done">${icon('check')} Enregistrer et fermer</button>
+        </div>
       </div>
       <div class="be-layout">
         <div class="be-fields">${renderFlowVariables(block)}${renderNodeFields(block)}</div>
         <aside class="be-preview-col">
-          <div class="be-preview-head"><b>Aperçu</b><span>temps réel</span></div>
-          <div id="bePreview">${renderBlockPreview(block)}</div>
+          <div class="be-preview-head"><b>Aperçu Discord</b><span>temps réel</span></div>
+          <div id="bePreview">${renderDiscordPreview(block)}</div>
           <div class="be-tip">${icon('spark')} Les variables comme <code>{{user.name}}</code> sont remplacées à l’exécution.</div>
         </aside>
       </div>
-      <div class="be-actions">
-        <button type="button" class="btn btn-ghost" data-action="flow-node-edit-close">Fermer</button>
-        <button type="button" class="btn btn-primary" data-action="flow-node-edit-done">${icon('check')} Terminé</button>
+    </div>`,
+  });
+  requestAnimationFrame(decorateFlowVarFields);
+}
+
+function openContentComposer(blockId, { autoFocus = true } = {}) {
+  const block = flowNode(blockId);
+  if (!block) return;
+  closeRoleMention();
+  closeFlowVarPicker();
+  const meta = FLOW_BLOCKS[block.type] || FLOW_BLOCKS.message;
+  flowEditor.editBlockId = blockId;
+  flowEditor.composerBlockId = blockId;
+  openModal({
+    title: `Contenu · ${meta.label}`,
+    subtitle: 'Ajoute, modifie ou enlève les options, puis ferme avec la croix.',
+    fullscreen: true,
+    hideFooter: true,
+    autoFocus,
+    body: `<div class="be-composer" data-edit-block="${block.id}">
+      <div class="be-composer-bar">
+        <div class="be-composer-title">
+          <b>${meta.label}</b>
+          <p>Les changements sont visibles dans l’aperçu Discord à droite.</p>
+        </div>
+        <input class="input be-composer-name" data-node="${block.id}" data-field="customName" value="${esc(block.customName || '')}" placeholder="Nom du bloc (optionnel)">
+        <button type="button" class="btn btn-primary btn-sm" data-action="flow-composer-close" data-id="${block.id}">${icon('check')} Enregistrer</button>
+        <button type="button" class="icon-btn" data-action="flow-composer-close" data-id="${block.id}" title="Enregistrer et fermer" aria-label="Enregistrer et fermer">${icon('x')}</button>
+      </div>
+      <div class="be-composer-grid">
+        <div class="be-composer-fields">${renderFlowVariables(block)}${renderNodeFieldsDirect(block)}</div>
+        <aside class="be-composer-preview">
+          <div id="bePreview">${renderDiscordPreview(block)}</div>
+          <div class="be-tip">${icon('spark')} Aperçu très proche de Discord : message, embed, boutons, ticket et formulaire.</div>
+        </aside>
       </div>
     </div>`,
   });
@@ -1887,6 +1967,10 @@ function openBlockEditor(blockId, { autoFocus = true } = {}) {
 }
 
 function refreshBlockEditor(blockId) {
+  if (flowEditor.composerBlockId === blockId) {
+    openContentComposer(blockId, { autoFocus: false });
+    return;
+  }
   const body = document.querySelector('#modalRoot .modal-body');
   const backdrop = document.querySelector('#modalRoot .modal-backdrop');
   const scrollTop = body?.scrollTop || 0;
@@ -1944,7 +2028,7 @@ function renderNode(block, flow) {
       <span class="node-ic">${icon(meta.icon)}</span>
       <div class="node-heading">
         <div class="node-title-row">
-          <span class="node-title">${meta.label}</span>
+          <span class="node-title">${esc(block.customName || meta.label)}</span>
           ${isStart ? '<span class="node-badge">départ</span>' : ''}
         </div>
         <p class="node-desc">${esc(meta.hint)}</p>
@@ -2023,7 +2107,57 @@ function renderEmbedFields(block) {
   </div>`;
 }
 
+function renderTicketButtons(block) {
+  const buttons = Array.isArray(block.buttons) ? block.buttons : [];
+  const bindButton = (index, field) => `data-node="${block.id}" data-button="${index}" data-button-field="${field}"`;
+  return `<div class="button-editor-head">
+      <b>${buttons.length} bouton(s) · ${buttons.length} sortie(s)</b>
+      <span>Chaque bouton crée une sortie du bloc</span>
+    </div>
+    <div class="button-editor ticket-buttons">
+      ${buttons.map((button, index) => `<div class="button-editor-row ticket-btn-row">
+        <span class="variant-badge">B${index + 1}</span>
+        <input class="input" ${bindButton(index, 'label')} value="${esc(button.label || '')}" placeholder="Libellé">
+        <input class="input ticket-btn-emoji" ${bindButton(index, 'emoji')} value="${esc(button.emoji || '')}" placeholder="🙋">
+        <select class="select" ${bindButton(index, 'style')}>
+          <option value="primary" ${button.style === 'primary' ? 'selected' : ''}>Primaire</option>
+          <option value="secondary" ${button.style === 'secondary' ? 'selected' : ''}>Secondaire</option>
+          <option value="success" ${button.style === 'success' ? 'selected' : ''}>Succès</option>
+          <option value="danger" ${button.style === 'danger' ? 'selected' : ''}>Danger</option>
+        </select>
+        ${flowTargetSelect(bindButton(index, 'next'), block.id, button.next)}
+        <button class="mini-btn danger" data-action="flow-del-button" data-id="${block.id}" data-index="${index}" title="Supprimer">${icon('x')}</button>
+      </div>`).join('')}
+    </div>
+    <button class="link-btn" data-action="flow-add-button" data-id="${block.id}">${icon('plus')} Ajouter un bouton</button>
+    <p class="hint">Les boutons Réclamer et Fermer restent toujours disponibles. Chaque bouton ajouté ici devient une sortie du bloc, à relier à la suite du flux.</p>`;
+}
+
+const FLOW_COMPOSER_BLOCKS = new Set([
+  'message', 'embed', 'dm', 'button', 'random', 'modal', 'ticket', 'poll', 'select',
+  'reply', 'edit', 'forum', 'forumAction', 'ai', 'image', 'giveaway',
+]);
+
+function renderContentOptionRow(block) {
+  const rows = flowBlockRows(block).slice(0, 3)
+    .map(([label, value]) => `${label} : ${flowText(value, '—', 90)}`)
+    .join(' · ');
+  return `<div class="be-option-row">
+    <div class="be-option-main">
+      <span class="be-option-label">Contenu</span>
+      <span class="be-option-summary">${esc(rows || 'Aucun contenu pour le moment')}</span>
+    </div>
+    <button type="button" class="btn btn-ghost btn-sm" data-action="flow-open-composer" data-id="${block.id}">${icon('edit')} Modifier</button>
+  </div>
+  <p class="hint">Le contenu s’édite dans un écran plein format, avec un aperçu Discord en direct.</p>`;
+}
+
 function renderNodeFields(block) {
+  if (FLOW_COMPOSER_BLOCKS.has(block.type)) return renderContentOptionRow(block);
+  return renderNodeFieldsDirect(block);
+}
+
+function renderNodeFieldsDirect(block) {
   const bind = (name) => `data-node="${block.id}" data-field="${name}"`;
 
   switch (block.type) {
@@ -2727,6 +2861,7 @@ function renderNodeFieldsB(block) {
           ${nodeField('Préfixe du salon', `<input class="input" ${bind('namePrefix')} value="${esc(block.namePrefix || 'ticket')}" placeholder="ticket" maxlength="20">`, 'grow')}
           ${nodeField('Tickets max par membre', `<input class="input" type="number" min="1" max="10" ${bind('maxOpen')} value="${block.maxOpen || 1}">`, 'shrink')}
         </div>
+        ${renderTicketButtons(block)}
         <p class="hint">Le salon est privé : le membre, le bot et le rôle staff peuvent le voir. Le salon de logs reçoit les ouvertures et fermetures.</p>`
           : '<p class="hint">Cette action agit sur le ticket du salon actuel. Les boutons Réclamer et Fermer sont ajoutés automatiquement aux nouveaux tickets.</p>'}`;
     }
@@ -3073,7 +3208,22 @@ function renderOutput(output) {
     return `<div class="dc-effect">${icon('link')} ${label} ${esc(output.channel || output.invite || '')} · ${output.maxUses || '∞'} utilisation(s) · ${output.maxAge || '∞'} h${delivery}</div>`;
   }
   if (output.kind === 'ticket') {
-    return `<div class="dc-effect">${icon('ticket')} Ticket ${esc(output.action)}${output.reason ? ` · ${esc(output.reason)}` : ''}</div>`;
+    if (output.action !== 'open') {
+      return `<div class="dc-effect">${icon('ticket')} Ticket ${esc(output.action)}${output.reason ? ` · ${esc(output.reason)}` : ''}</div>`;
+    }
+    const ticketButtons = Array.isArray(output.buttons) ? output.buttons : [];
+    return `<div class="dc-msg">
+      <span class="dc-av">K</span>
+      <div class="dc-body">
+        <div class="dc-head"><b>KyllBot</b><span class="dc-bot">BOT</span><span class="dc-tag">ticket privé</span></div>
+        <p>${flowFormatDiscord(output.welcomeMessage || 'Ton ticket est ouvert. Décris ton problème, un membre du staff arrive.')}<br>Raison : <b>${esc(output.reason || 'Demande de support')}</b></p>
+        <div class="dc-btn-row">
+          <span class="dc-btn primary">🙋 Réclamer</span>
+          <span class="dc-btn danger">🔒 Fermer</span>
+          ${ticketButtons.map((button) => `<span class="dc-btn ${esc(button.style || 'primary')}">${button.emoji ? `${esc(button.emoji)} ` : ''}${esc(button.label || 'Bouton')}</span>`).join('')}
+        </div>
+      </div>
+    </div>`;
   }
   if (output.kind === 'stop') {
     return `<div class="dc-effect">${icon('x')} Flux arrêté · ${esc(output.reason || 'fin')}</div>`;
@@ -3408,7 +3558,7 @@ function onCanvasWheel(event) {
 /* actions                                                             */
 /* ------------------------------------------------------------------ */
 
-async function flowSave() {
+async function flowSave({ exit = false } = {}) {
   const flow = flowEditor.flow;
   try {
     const { flow: saved } = await api(`/api/bots/${flowEditor.botId}/flows/${flow.id}`, {
@@ -3428,6 +3578,10 @@ async function flowSave() {
     flowEditor.flow = flowClone(saved);
     flowEditor.dirty = false;
     toast('Flux enregistré.');
+    if (exit) {
+      location.hash = `#/bots/${flowEditor.botId}`;
+      return;
+    }
     render();
   } catch (error) {
     toast(error.message, 'error');
@@ -3460,7 +3614,7 @@ async function flowRun() {
   }
 }
 
-onAction('flow-save', () => flowSave());
+onAction('flow-save', () => flowSave({ exit: true }));
 onAction('flow-run', () => flowRun());
 
 onAction('flow-add-node', (el) => {
@@ -3559,13 +3713,20 @@ onAction('flow-node-start', (el) => {
 });
 
 onAction('flow-node-edit', (el) => openBlockEditor(el.dataset.id));
+onAction('flow-open-composer', (el) => openContentComposer(el.dataset.id));
+onAction('flow-composer-close', (el) => {
+  const blockId = el.dataset.id || flowEditor.composerBlockId;
+  flowEditor.composerBlockId = null;
+  if (blockId) openBlockEditor(blockId, { autoFocus: false });
+  toast('Contenu mis à jour.', 'success');
+});
 
 onAction('flow-insert-var', (el) => {
   const token = el.dataset.token || '';
   const usable = (field) => field && field.isConnected && !field.disabled && (field.tagName === 'TEXTAREA' || ['text', 'search', 'url', 'email', 'tel'].includes(field.type));
   const field = usable(flowLastField)
     ? flowLastField
-    : [...document.querySelectorAll('.block-editor textarea')].find(usable);
+    : [...document.querySelectorAll('.block-editor textarea, .be-composer textarea, .be-composer input.input')].find(usable);
   if (!field) {
     toast('Clique d’abord dans un champ texte, puis choisis une variable.', 'error');
     return;
@@ -3589,6 +3750,7 @@ onAction('flow-node-edit-close', () => {
   closeRoleMention();
   closeFlowVarPicker();
   flowEditor.editBlockId = null;
+  flowEditor.composerBlockId = null;
   closeModal();
   render();
 });
@@ -3597,6 +3759,7 @@ onAction('flow-node-edit-done', () => {
   closeRoleMention();
   closeFlowVarPicker();
   flowEditor.editBlockId = null;
+  flowEditor.composerBlockId = null;
   closeModal();
   render();
   toast('Bloc mis à jour.', 'success');
@@ -3761,7 +3924,11 @@ onAction('flow-form-required', (el) => {
 onAction('flow-add-button', (el) => {
   const block = flowNode(el.dataset.id);
   if (!block) return;
-  if (!Array.isArray(block.buttons) || !block.buttons.length) block.buttons = blockButtons(block);
+  if (block.type === 'ticket') {
+    if (!Array.isArray(block.buttons)) block.buttons = [];
+  } else if (!Array.isArray(block.buttons) || !block.buttons.length) {
+    block.buttons = blockButtons(block);
+  }
   if (block.buttons.length >= 5) return toast('5 boutons maximum par bloc.', 'error');
   block.buttons.push({ id: flowUid(), label: `Bouton ${block.buttons.length + 1}`, style: 'primary', emoji: '', disabled: false, url: '', target: '', next: null });
   flowEditor.dirty = true;
@@ -3775,8 +3942,12 @@ onAction('flow-add-button', (el) => {
 onAction('flow-del-button', (el) => {
   const block = flowNode(el.dataset.id);
   if (!block) return;
-  if (!Array.isArray(block.buttons) || !block.buttons.length) block.buttons = blockButtons(block);
-  if (block.buttons.length <= 1) return toast('Gardez au moins un bouton.', 'error');
+  if (block.type === 'ticket') {
+    if (!Array.isArray(block.buttons) || !block.buttons.length) return;
+  } else {
+    if (!Array.isArray(block.buttons) || !block.buttons.length) block.buttons = blockButtons(block);
+    if (block.buttons.length <= 1) return toast('Gardez au moins un bouton.', 'error');
+  }
   block.buttons.splice(Number(el.dataset.index), 1);
   flowEditor.dirty = true;
   if (flowEditor.editBlockId === block.id && document.getElementById('modalForm')) {
@@ -3990,7 +4161,7 @@ document.addEventListener('dblclick', (event) => {
 
 document.addEventListener('focusin', (event) => {
   const field = event.target;
-  if (!field.closest('.block-editor') || !field.matches('input, textarea')) return;
+  if (!field.closest('.block-editor, .be-composer') || !field.matches('input, textarea')) return;
   if (['number', 'color', 'range', 'file', 'button', 'checkbox', 'radio', 'hidden'].includes(field.type)) return;
   flowLastField = field;
 });

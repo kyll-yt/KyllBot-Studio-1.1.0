@@ -268,6 +268,7 @@ function normalizeBlock(block) {
     x: Math.round(num(block?.x, -20000, 20000, 0)),
     y: Math.round(num(block?.y, -20000, 20000, 0)),
     next: str(block?.next, 40) || null,
+    customName: str(block?.customName, 40),
   };
 
   switch (type) {
@@ -719,6 +720,7 @@ function normalizeBlock(block) {
         welcomeMessage: str(block?.welcomeMessage, 1000),
         maxOpen: num(block?.maxOpen, 1, 10, 1),
         namePrefix: str(block?.namePrefix, 20) || 'ticket',
+        buttons: (Array.isArray(block?.buttons) ? block.buttons : []).slice(0, MAX_BUTTONS).map(normalizeButton),
       };
     case 'level':
       return { ...base, amount: num(block?.amount, -10000, 10000, 10), variable: str(block?.variable, 40).replace(/[^\w.-]/g, '') || 'xp' };
@@ -2099,6 +2101,12 @@ export async function runFlow(flow, input = {}) {
         break;
       }
       case 'ticket': {
+        const buttons = (block.buttons || []).map((button) => ({
+          ...button,
+          label: interpolate(button.label, ctx, vars),
+          value: interpolate(button.value, ctx, vars),
+          target: interpolate(button.target, ctx, vars),
+        }));
         outputs.push({
           kind: 'ticket',
           action: block.action,
@@ -2109,8 +2117,12 @@ export async function runFlow(flow, input = {}) {
           welcomeMessage: interpolate(block.welcomeMessage, ctx, vars),
           maxOpen: block.maxOpen,
           namePrefix: block.namePrefix,
+          buttons,
+          flowId: flow.id,
+          blockId: block.id,
         });
-        entry.detail = `ticket ${block.action}${block.category ? ` · ${block.category}` : ''}`;
+        if (block.action === 'open' && buttons.length) next = null;
+        entry.detail = `ticket ${block.action}${block.category ? ` · ${block.category}` : ''}${buttons.length ? ` · ${buttons.length} bouton(s)` : ''}`;
         break;
       }
       case 'level': {

@@ -599,21 +599,48 @@ async function createTicketChannel({ bot, guild, member, user, config = {}, sour
   const welcome = String(
     config.welcomeMessage || 'Ton ticket est ouvert. Décris ton problème, un membre du staff arrive.',
   ).slice(0, 1000);
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`kfticket:claim:${ticketChannel.id}`)
-      .setLabel('Réclamer')
-      .setEmoji('🙋')
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId(`kfticket:close:${ticketChannel.id}`)
-      .setLabel('Fermer')
-      .setEmoji('🔒')
-      .setStyle(ButtonStyle.Danger),
+  const rows = [];
+  const customButtons = Array.isArray(config.buttons) ? config.buttons.slice(0, 5) : [];
+  if (customButtons.length && config.flowId && config.blockId) {
+    const customRow = new ActionRowBuilder();
+    customButtons.forEach((entry, index) => {
+      const button = new ButtonBuilder().setLabel(String(entry.label || `Bouton ${index + 1}`).slice(0, 80));
+      if (entry.emoji) button.setEmoji(entry.emoji);
+      if (entry.disabled) button.setDisabled(true);
+      if (entry.url) {
+        button.setStyle(ButtonStyle.Link).setURL(entry.url);
+      } else {
+        const style =
+          entry.style === 'success'
+            ? ButtonStyle.Success
+            : entry.style === 'danger'
+              ? ButtonStyle.Danger
+              : entry.style === 'secondary'
+                ? ButtonStyle.Secondary
+                : ButtonStyle.Primary;
+        button.setStyle(style).setCustomId(`kf:${config.flowId}:${config.blockId}:${index}`.slice(0, 100));
+      }
+      customRow.addComponents(button);
+    });
+    rows.push(customRow);
+  }
+  rows.push(
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`kfticket:claim:${ticketChannel.id}`)
+        .setLabel('Réclamer')
+        .setEmoji('🙋')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`kfticket:close:${ticketChannel.id}`)
+        .setLabel('Fermer')
+        .setEmoji('🔒')
+        .setStyle(ButtonStyle.Danger),
+    ),
   );
   await ticketChannel.send({
     content: `${owner ? `<@${owner.id}>` : ''} ${welcome}\nRaison : **${reason}**`,
-    components: [row],
+    components: rows,
     allowedMentions: { users: [owner.id] },
   }).catch(() => {});
 
@@ -2284,6 +2311,9 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
                 welcomeMessage: output.welcomeMessage,
                 maxOpen: output.maxOpen,
                 namePrefix: output.namePrefix,
+                buttons: output.buttons || [],
+                flowId: output.flowId || flow.id,
+                blockId: output.blockId || block.id,
               },
               source: 'flux',
             }).catch((error) => ({ ok: false, error: `Impossible de créer le ticket : ${error.message}` }));
@@ -2291,6 +2321,14 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
               lastChannel = created.channel;
               lastMessage = null;
               sent = true;
+              if (Array.isArray(output.buttons) && output.buttons.length) {
+                rememberPending(
+                  pendingButtons,
+                  pendingKey(output.flowId || flow.id, output.blockId || block.id, user?.id),
+                  { vars: result.variables },
+                  3600,
+                );
+              }
             } else if (interaction && !interaction.replied && !interaction.deferred) {
               await interaction.reply({ content: created.error, ephemeral: true }).catch(() => {});
               interactionUsed = true;
