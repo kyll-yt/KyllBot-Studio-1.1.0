@@ -252,8 +252,8 @@ function flowRoleSelect(bind, value) {
   return `<select class="select" ${bind}>${flowSelectOptions(flowDiscord().roles.map((role) => role.name), value, 'Choisir un rôle…')}</select>`;
 }
 
-function flowCategorySelect(bind, value) {
-  return `<select class="select" ${bind}>${flowSelectOptions(flowDiscord().categories, value, 'Choisir une catégorie…')}</select>`;
+function flowCategorySelect(bind, value, emptyLabel = 'Choisir une catégorie…') {
+  return `<select class="select" ${bind}>${flowSelectOptions(flowDiscord().categories, value, emptyLabel)}</select>`;
 }
 
 function flowTargetSelect(bind, blockId, selected) {
@@ -273,7 +273,7 @@ const flowEditor = {
   view: null,
   sideOpen: true,
   editBlockId: null,
-  autoEdit: false,
+  messageEditorBlockId: null,
 };
 
 let flowLastField = null;
@@ -627,6 +627,14 @@ function flowNewBlock(type, x = 120, y = 120) {
         welcomeMessage: 'Ton ticket est ouvert. Décris ton problème, un membre du staff arrive.',
         maxOpen: 1,
         namePrefix: 'ticket',
+        topicTemplate: 'Ticket de {user} — {reason}',
+        closeMode: 'delete',
+        closeDelay: 3,
+        archiveCategory: '',
+        transcript: false,
+        pingStaff: true,
+        claimButton: true,
+        closeButton: true,
         buttons: [],
       };
     case 'level':
@@ -783,7 +791,8 @@ function flowEnsureLoaded(botId, flowId) {
   }
   flowEditor.dirty = false;
   flowEditor.view = null;
-  flowEditor.autoEdit = true;
+  flowEditor.editBlockId = null;
+  flowEditor.messageEditorBlockId = null;
   flowEditor.sideOpen = typeof window === 'undefined' ? true : window.innerWidth > 1100;
   if (!flowEditor.flow.blocks.length) {
     const start = flowNewBlock('message', 220, 160);
@@ -795,6 +804,12 @@ function flowEnsureLoaded(botId, flowId) {
   }
   return true;
 }
+
+function flowCanvasStyle() {
+  const value = appearanceSettings().canvasStyle;
+  return ['dots', 'grid', 'aurora', 'plain'].includes(value) ? value : 'dots';
+}
+
 
 function viewFlowEditor(botId, flowId) {
   const bot = state.ws.bots.find((entry) => entry.id === botId);
@@ -814,16 +829,10 @@ function viewFlowEditor(botId, flowId) {
 
   requestAnimationFrame(() => {
     initFlowCanvas();
-    if (flowEditor.autoEdit) {
-      flowEditor.autoEdit = false;
-      const startId = flow.start;
-      if (startId) setTimeout(() => openBlockEditor(startId), 90);
-    }
   });
 
   return `<div class="flow-shell">
   <div class="flow-topbar">
-  <a class="back-link" href="#/bots/${esc(bot.id)}">${icon('arrowLeft')} Retour</a>
   <div class="flow-head">
     <div class="fh-id">
       <span class="fl-ic lg">${icon(trigger.icon)}</span>
@@ -849,16 +858,8 @@ function viewFlowEditor(botId, flowId) {
         </div>
         <button class="tool-btn" data-action="flow-fit" title="Recentrer">${icon('grid')} Recentrer</button>
         <button class="tool-btn" data-action="flow-auto" title="Ranger les blocs">${icon('flow')} Ranger</button>
-        <select class="select canvas-bg-select" id="flowCanvasBg" title="Fond du canvas" aria-label="Fond du canvas">
-          <option value="dots" ${(flow.canvasStyle || 'dots') === 'dots' ? 'selected' : ''}>Fond : points</option>
-          <option value="grid" ${flow.canvasStyle === 'grid' ? 'selected' : ''}>Fond : grille</option>
-          <option value="aurora" ${flow.canvasStyle === 'aurora' ? 'selected' : ''}>Fond : aurore</option>
-          <option value="plain" ${flow.canvasStyle === 'plain' ? 'selected' : ''}>Fond : uni</option>
-        </select>
-        <span class="toolbar-spacer"></span>
-        <button class="tool-btn" data-action="flow-add-menu">${icon('plus')} Ajouter un bloc</button>
       </div>
-      <div class="canvas-viewport" id="flowViewport" data-canvas="${esc(flow.canvasStyle || 'dots')}">
+      <div class="canvas-viewport" id="flowViewport" data-canvas="${esc(flowCanvasStyle())}">
         <div class="canvas-world" id="flowWorld" style="transform: translate(${view.x}px, ${view.y}px) scale(${view.zoom})">
           <svg class="canvas-edges" id="flowEdges" aria-hidden="true"></svg>
           ${flow.blocks.map((block) => renderNode(block, flow)).join('')}
@@ -882,6 +883,16 @@ function viewFlowEditor(botId, flowId) {
     </section>
     <aside class="flow-side" id="flowSide">
       <button class="btn btn-ghost btn-sm flow-drawer-close" data-action="flow-toggle-side">${icon('x')} Fermer</button>
+      <details class="flow-guide" open>
+        <summary>${icon('spark')} Guide rapide</summary>
+        <ol>
+          <li>Règle le déclencheur : commande, arrivée, réaction…</li>
+          <li>Ajoute un bloc depuis la palette ci-dessous.</li>
+          <li>Clique sur un bloc pour le modifier.</li>
+          <li>Relie les points de sortie pour enchaîner les blocs.</li>
+          <li>Enregistre, puis active le flux.</li>
+        </ol>
+      </details>
       ${renderPalette()}
       ${renderTriggerCard(flow)}
       ${renderVariablesCard(flow)}
@@ -1323,6 +1334,8 @@ function flowBlockRows(block) {
               ['Rôle staff', block.staffRole],
               ['Logs', block.logChannel],
               ['Tickets max', `${block.maxOpen || 1} par membre`],
+              ['Fermeture', `${block.closeMode || 'delete'}${Number(block.closeDelay) ? ` · ${block.closeDelay} s` : ''}`],
+              ['Options', [block.pingStaff !== false ? 'ping staff' : '', block.transcript ? 'transcript' : '', block.claimButton !== false ? 'réclamer' : '', block.closeButton !== false ? 'fermer' : ''].filter(Boolean).join(' · ') || 'standard'],
             ]
           : []),
       ]);
@@ -1345,186 +1358,6 @@ function flowBlockRows(block) {
     default:
       return [];
   }
-}
-
-function previewOutput(block) {
-  const channel = block.channel || '#général';
-  switch (block.type) {
-    case 'message':
-      return { kind: 'message', channel, text: block.text || 'Votre message…', buttons: Array.isArray(block.buttons) ? block.buttons : [], ephemeral: block.ephemeral, reply: block.reply, tts: block.tts, silent: block.silent, suppressEmbeds: block.suppressEmbeds };
-    case 'dm':
-      return { kind: 'dm', to: block.target || 'membre déclencheur', text: block.text || 'Votre message privé…', embed: block.embed };
-    case 'invite':
-      return {
-        kind: 'invite',
-        action: block.action === 'view' ? 'view' : 'create',
-        channel: block.channel,
-        invite: block.invite,
-        maxUses: block.maxUses,
-        maxAge: block.maxAge,
-        delivery: block.delivery,
-        message: block.message,
-      };
-    case 'reply':
-      return { kind: 'message', channel, text: block.text || 'Votre réponse…', reply: true, ping: block.ping, ephemeral: block.ephemeral };
-    case 'embed':
-      return {
-        kind: 'embed',
-        channel,
-        ephemeral: block.ephemeral,
-        silent: block.silent,
-        embed: {
-          title: block.title,
-          url: block.url,
-          description: block.description || 'Description de l’embed…',
-          color: block.color,
-          footer: block.footer,
-          author: block.author,
-          authorIcon: block.authorIcon,
-          image: block.image,
-          thumbnail: block.thumbnail,
-          footerIcon: block.footerIcon,
-          timestamp: block.timestamp,
-          fields: block.fields || [],
-        },
-      };
-    case 'random': {
-      const variant = block.variants?.[0]?.text || 'Première variante…';
-      if (block.embed) {
-        return {
-          kind: 'embed',
-          channel,
-          ephemeral: block.ephemeral,
-          silent: block.silent,
-          embed: {
-            title: block.title,
-            url: block.url,
-            description: block.description || variant,
-            color: block.color,
-            footer: block.footer,
-            author: block.author,
-            authorIcon: block.authorIcon,
-            image: block.image,
-            thumbnail: block.thumbnail,
-            footerIcon: block.footerIcon,
-            timestamp: block.timestamp,
-            fields: block.fields || [],
-          },
-          variant: 'aperçu',
-        };
-      }
-      return { kind: 'message', channel, text: variant, ephemeral: block.ephemeral, silent: block.silent, variant: 'aperçu' };
-    }
-    case 'button':
-      return { kind: 'buttons', buttons: blockButtons(block) };
-    case 'poll':
-      return { kind: 'poll', question: block.question || 'Votre question…', options: flowOptions(block.options), duration: block.duration, multiple: block.multiple };
-    case 'select':
-      return { kind: 'select', placeholder: block.placeholder || 'Choisissez…', options: flowOptions(block.options), min: block.min, max: block.max };
-    case 'giveaway':
-      return { kind: 'giveaway', prize: block.prize || 'Lot à gagner', duration: block.duration, winners: block.winners, emoji: block.emoji };
-    case 'modal':
-      return {
-        kind: 'modal',
-        title: block.title || 'Formulaire',
-        fields: normalizeModalFields(block).map((field) => {
-          const options = ['select', 'multi'].includes(field.type) ? ` : ${modalFieldOptionList(field.options).join(' / ')}` : '';
-          return `${field.label} (${MODAL_FIELD_TYPES[field.type].shortLabel}${options})`;
-        }),
-      };
-    case 'await':
-      return { kind: 'await', interaction: block.kind || 'button', timeout: block.timeout || 60 };
-    case 'ticket':
-      return {
-        kind: 'ticket',
-        action: block.action || 'open',
-        reason: block.reason || '',
-        category: block.category || '',
-        staffRole: block.staffRole || '',
-        logChannel: block.logChannel || '',
-        welcomeMessage: block.welcomeMessage || '',
-        maxOpen: block.maxOpen || 1,
-        namePrefix: block.namePrefix || 'ticket',
-        buttons: Array.isArray(block.buttons) ? block.buttons : [],
-      };
-    case 'captcha':
-      return { kind: 'captcha', user: 'Membre', mode: block.kind || 'button', timeout: block.timeout || 120 };
-    case 'thread':
-      return { kind: 'thread', name: block.name || 'discussion', private: block.private };
-    case 'forum':
-      return { kind: 'forum', title: block.title || 'Nouveau post', tags: block.tags || '' };
-    case 'ai':
-      return { kind: 'ai', model: block.model || 'gpt-4o-mini', provider: block.provider || 'auto', text: block.prompt || 'Invite de l’IA…', simulated: true };
-    case 'image':
-      return { kind: 'image', url: block.url, alt: block.alt };
-    case 'timer':
-      return { kind: 'timer', action: 'countdown', duration: block.duration || 5, unit: block.unit || 'minutes', wait: block.wait };
-    case 'chrono': {
-      const action = block.action === 'stop' ? 'stop' : block.action === 'service' ? 'service' : 'start';
-      return {
-        kind: 'chrono',
-        action,
-        variable: block.variable || 'chrono_start',
-        text: action === 'stop' ? '⏱️ Temps écoulé : …' : action === 'service' ? '⏱️ Service en cours : …' : '⏱️ Chronomètre démarré.',
-      };
-    }
-    case 'serviceStart':
-      return { kind: 'serviceStart', text: block.startText || '▶️ Service démarré pour {{member}}.' };
-    case 'serviceStop':
-      return { kind: 'serviceStop', text: block.stopText || '⏹️ Service terminé : {{duration}} ajoutées.' };
-    case 'servicePenalty':
-      return { kind: 'servicePenalty', title: block.title || 'Pénalité de service', text: 'Demande le membre et la durée de la pénalité.' };
-    case 'serviceLeaderboard':
-      return { kind: 'serviceLeaderboard', title: block.title || 'Classement du service', top: block.top || 10 };
-    case 'serviceOnline':
-      return { kind: 'serviceOnline', title: block.title || '🟢 Chrono en ligne', interval: Number(block.interval) === 30 ? 30 : 60, maxEntries: block.maxEntries || 25 };
-    case 'serviceConfig':
-      return { kind: 'serviceConfig', period: block.period || 'week', resetDay: block.resetDay || 1, resetHour: block.resetHour || 0, timezone: block.timezone || 'Europe/Paris' };
-    case 'serviceReset':
-      return { kind: 'serviceReset', text: block.message || 'Compteurs du service réinitialisés.' };
-    case 'forumAction':
-      return { kind: 'forumAction', action: block.action || 'message', post: block.post || 'post actuel', content: block.content || '' };
-    case 'forumDelete':
-      return { kind: 'forumDelete', post: block.post || 'post actuel', message: block.message || 'dernier' };
-    case 'music':
-      return { kind: 'music', action: block.action || 'play', mode: block.mode || 'voice', url: block.url || '', title: block.title || '' };
-    case 'automationRun':
-      return { kind: 'automationRun', automationType: block.automationType || 'autoMod' };
-    case 'accountCheck':
-      return { kind: 'accountCheck', minAgeDays: block.minAgeDays ?? 7, requireAvatar: block.requireAvatar, blockBots: block.blockBots, failAction: block.failAction || 'stop' };
-    case 'channel':
-      return { kind: 'channel', name: block.name, channelKind: block.kind, category: block.category, topic: block.topic, nsfw: block.nsfw, slowmode: block.slowmode };
-    default:
-      return null;
-  }
-}
-
-const FLOW_PREVIEW_KINDS = new Set([
-  'message', 'embed', 'dm', 'invite', 'poll', 'select', 'giveaway', 'modal',
-  'ticket', 'captcha', 'thread', 'forum', 'ai', 'image', 'music', 'buttons',
-]);
-
-function blockHasDiscordPreview(block) {
-  const output = previewOutput(block);
-  return Boolean(output && FLOW_PREVIEW_KINDS.has(output.kind));
-}
-
-function renderDiscordPreview(block) {
-  const output = previewOutput(block);
-  const channel = block.channel || (block.type === 'ticket' ? 'ticket' : 'général');
-  const content = output
-    ? renderOutput(output)
-    : `<div class="dc-effect">${icon('layers')} Ce bloc n’envoie pas de message Discord.</div>`;
-  return `<div class="dc-preview-window">
-    <div class="dc-preview-top"><span class="dc-hash">#</span>${esc(String(channel).replace(/^#/, ''))}<span class="dc-preview-spacer"></span><span class="dc-preview-icons">⌕ ⋯</span></div>
-    <div class="dc-preview-chat">${content}</div>
-    <div class="dc-preview-composer">Message dans #${esc(String(channel).replace(/^#/, ''))}</div>
-  </div>`;
-}
-
-function updateBlockPreview(block) {
-  const target = document.getElementById('bePreview');
-  if (target) target.innerHTML = renderDiscordPreview(block);
 }
 
 function flowVariableGroups(block) {
@@ -1884,8 +1717,8 @@ function openBlockEditor(blockId, { autoFocus = true } = {}) {
   closeRoleMention();
   closeFlowVarPicker();
   const meta = FLOW_BLOCKS[block.type] || FLOW_BLOCKS.message;
-  const hasPreview = blockHasDiscordPreview(block);
   flowEditor.editBlockId = blockId;
+  flowEditor.messageEditorBlockId = null;
   openModal({
     title: `Modifier · ${meta.label}`,
     subtitle: 'Enregistre et ferme avec le bouton en haut à droite.',
@@ -1903,20 +1736,71 @@ function openBlockEditor(blockId, { autoFocus = true } = {}) {
           <button type="button" class="btn btn-primary btn-sm" data-action="flow-node-edit-done">${icon('check')} Enregistrer et fermer</button>
         </div>
       </div>
-      <div class="be-layout${hasPreview ? '' : ' no-preview'}">
+      <div class="be-layout no-preview">
         <div class="be-fields">${renderFlowVariables(block)}${renderNodeFields(block)}</div>
-        ${hasPreview ? `<aside class="be-preview-col">
-          <div class="be-preview-head"><b>Aperçu Discord</b><span>temps réel</span></div>
-          <div id="bePreview">${renderDiscordPreview(block)}</div>
-          <div class="be-tip">${icon('spark')} Les variables comme <code>{{user.name}}</code> sont remplacées à l’exécution.</div>
-        </aside>` : ''}
       </div>
     </div>`,
   });
   requestAnimationFrame(decorateFlowVarFields);
 }
 
+function openMessageEditor(blockId, { autoFocus = true } = {}) {
+  const block = flowNode(blockId);
+  if (!block) return;
+  closeRoleMention();
+  closeFlowVarPicker();
+  flowEditor.messageEditorBlockId = blockId;
+  openModal({
+    title: `Message · ${block.customName || 'Message'}`,
+    subtitle: 'Personnalise le texte, les variantes et les boutons. Les réglages du bloc restent dans sa configuration.',
+    fullscreen: true,
+    hideFooter: true,
+    autoFocus,
+    body: `<div class="block-editor message-editor" data-edit-block="${block.id}">
+      <div class="be-topbar">
+        <div class="be-name">
+          <label>Contenu envoyé</label>
+          <b>${esc(messageSummary(block))}</b>
+        </div>
+        <div class="be-topbar-actions">
+          <button type="button" class="btn btn-ghost btn-sm" data-action="flow-message-editor-close">Fermer</button>
+          <button type="button" class="btn btn-primary btn-sm" data-action="flow-message-editor-done">${icon('check')} Terminé</button>
+        </div>
+      </div>
+      <div class="be-fields">${renderFlowVariables(block)}${renderMessageContent(block)}</div>
+    </div>`,
+  });
+  requestAnimationFrame(decorateFlowVarFields);
+  const root = document.getElementById('modalRoot');
+  const close = () => {
+    if (flowEditor.messageEditorBlockId === blockId) closeMessageEditor();
+  };
+  root.querySelectorAll('[data-close]').forEach((button) => button.addEventListener('click', close));
+  const backdrop = root.querySelector('.modal-backdrop');
+  backdrop?.addEventListener('mousedown', (event) => {
+    if (event.target === backdrop) close();
+  });
+}
+
+function closeMessageEditor({ notify = false } = {}) {
+  const blockId = flowEditor.messageEditorBlockId;
+  if (!blockId) {
+    closeModal();
+    return;
+  }
+  flowEditor.messageEditorBlockId = null;
+  closeRoleMention();
+  closeFlowVarPicker();
+  closeModal();
+  openBlockEditor(blockId, { autoFocus: false });
+  if (notify) toast('Message mis à jour.', 'success');
+}
+
 function refreshBlockEditor(blockId) {
+  if (flowEditor.messageEditorBlockId === blockId) {
+    openMessageEditor(blockId, { autoFocus: false });
+    return;
+  }
   const body = document.querySelector('#modalRoot .modal-body');
   const backdrop = document.querySelector('#modalRoot .modal-backdrop');
   const scrollTop = body?.scrollTop || 0;
@@ -2118,6 +2002,50 @@ function renderMessageButtons(block) {
   </div>`;
 }
 
+function messageSummary(block) {
+  const variants = Array.isArray(block.variants) ? block.variants : [];
+  const buttons = Array.isArray(block.buttons) ? block.buttons : [];
+  const text = block.variantMode
+    ? `${variants.length} variante(s) aléatoire(s)`
+    : flowText(block.text, 'Aucun texte', 90);
+  return `${text}${buttons.length ? ` · ${buttons.length} bouton(s)` : ''}`;
+}
+
+function renderMessageContent(block) {
+  const bind = (name) => `data-node="${block.id}" data-field="${name}"`;
+  const variants = Array.isArray(block.variants) ? block.variants : (block.variants = []);
+  const total = variants.reduce((sum, variant) => sum + (Number(variant.weight) || 1), 0);
+  return `${block.variantMode
+    ? `<p class="hint">Le texte est tiré au hasard parmi les variantes ci-dessous. Le poids règle la probabilité.</p>
+      <div class="variant-editor-head">
+        <b>${variants.length} variante(s)</b>
+        <span>Total ${total} points</span>
+      </div>
+      <div class="variants">${variants
+        .map((variant, index) => {
+          const percent = total ? Math.round(((Number(variant.weight) || 1) / total) * 100) : 0;
+          return `<div class="variant-row">
+            <span class="variant-badge">V${index + 1}</span>
+            <div class="variant-main">
+              <textarea class="textarea" rows="2" data-node="${block.id}" data-variant="${index}" data-variant-field="text" placeholder="Texte de la variante">${esc(variant.text)}</textarea>
+              <div class="variant-meta">
+                <label>Poids <input class="input weight" type="number" min="1" max="100" data-node="${block.id}" data-variant="${index}" data-variant-field="weight" value="${variant.weight}"></label>
+                <span class="variant-percent">${percent} %</span>
+              </div>
+            </div>
+            <button class="mini-btn danger" data-action="flow-del-variant" data-id="${block.id}" data-index="${index}" title="Supprimer">${icon('x')}</button>
+          </div>`;
+        })
+        .join('')}</div>
+      <div class="variant-actions">
+        <button class="link-btn" data-action="flow-add-variant" data-id="${block.id}">${icon('plus')} Ajouter une variante</button>
+        <button class="link-btn" data-action="flow-variant-bank" data-id="${block.id}">${icon('shuffle')} Banque (48)</button>
+        <button class="link-btn" data-action="flow-balance-variants" data-id="${block.id}">${icon('chart')} Répartir équitablement</button>
+      </div>`
+    : nodeField('Message', `<textarea class="textarea" rows="6" ${bind('text')} placeholder="Bienvenue {{user.mention}} !">${esc(block.text)}</textarea>`)}
+    ${renderMessageButtons(block)}`;
+}
+
 function renderNodeFields(block) {
   return renderNodeFieldsDirect(block);
 }
@@ -2127,8 +2055,6 @@ function renderNodeFieldsDirect(block) {
 
   switch (block.type) {
     case 'message': {
-      const variants = Array.isArray(block.variants) ? block.variants : (block.variants = []);
-      const total = variants.reduce((sum, variant) => sum + (Number(variant.weight) || 1), 0);
       return `<div class="fld-row">
           ${nodeField('Salon', flowChannelSelect(bind('channel'), block.channel), 'grow')}
         </div>
@@ -2138,42 +2064,20 @@ function renderNodeFieldsDirect(block) {
           ${nodeField('Variantes aléatoires', `<button class="switch ${block.variantMode ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="variantMode"></button>`, 'shrink')}
           ${nodeField('Supprimer après', `<input class="input" type="number" min="0" max="300" ${bind('deleteAfter')} value="${Number(block.deleteAfter) || 0}" placeholder="0">`, 'shrink')}
         </div>
-        <p class="hint">Éphémère = seul le membre qui déclenche voit le message. Message privé = envoi en DM. Laisse les deux désactivés pour un message public. Au-delà de 2000 caractères, le bot envoie automatiquement la suite dans plusieurs messages.</p>
-        ${block.variantMode
-          ? `<p class="hint">Le texte est tiré au hasard parmi les variantes ci-dessous. Le poids règle la probabilité.</p>
-            <div class="variant-editor-head">
-              <b>${variants.length} variante(s)</b>
-              <span>Total ${total} points</span>
-            </div>
-            <div class="variants">${variants
-              .map((variant, index) => {
-                const percent = total ? Math.round(((Number(variant.weight) || 1) / total) * 100) : 0;
-                return `<div class="variant-row">
-                  <span class="variant-badge">V${index + 1}</span>
-                  <div class="variant-main">
-                    <textarea class="textarea" rows="2" data-node="${block.id}" data-variant="${index}" data-variant-field="text" placeholder="Texte de la variante">${esc(variant.text)}</textarea>
-                    <div class="variant-meta">
-                      <label>Poids <input class="input weight" type="number" min="1" max="100" data-node="${block.id}" data-variant="${index}" data-variant-field="weight" value="${variant.weight}"></label>
-                      <span class="variant-percent">${percent} %</span>
-                    </div>
-                  </div>
-                  <button class="mini-btn danger" data-action="flow-del-variant" data-id="${block.id}" data-index="${index}" title="Supprimer">${icon('x')}</button>
-                </div>`;
-              })
-              .join('')}</div>
-            <div class="variant-actions">
-              <button class="link-btn" data-action="flow-add-variant" data-id="${block.id}">${icon('plus')} Ajouter une variante</button>
-              <button class="link-btn" data-action="flow-variant-bank" data-id="${block.id}">${icon('shuffle')} Banque (48)</button>
-              <button class="link-btn" data-action="flow-balance-variants" data-id="${block.id}">${icon('chart')} Répartir équitablement</button>
-            </div>`
-          : nodeField('Message', `<textarea class="textarea" rows="3" ${bind('text')} placeholder="Bienvenue {{user.mention}} !">${esc(block.text)}</textarea>`)}
+        <p class="hint">Éphémère = seul le membre qui déclenche voit le message. Message privé = envoi en DM. Laisse les deux désactivés pour un message public.</p>
+        <div class="be-content-card">
+          <div class="be-content-main">
+            <span class="be-content-kicker">Contenu envoyé</span>
+            <b>${esc(messageSummary(block))}</b>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" data-action="flow-open-message-editor" data-id="${block.id}">${icon('edit')} Modifier le message</button>
+        </div>
         <div class="fld-row">
           ${nodeField('Répondre au message', `<button class="switch ${block.reply ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="reply"></button>`, 'shrink')}
           ${nodeField('Vocal', `<button class="switch ${block.tts ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="tts"></button>`, 'shrink')}
           ${nodeField('Silencieux', `<button class="switch ${block.silent ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="silent"></button>`, 'shrink')}
           ${nodeField('Masquer les embeds', `<button class="switch ${block.suppressEmbeds ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="suppressEmbeds"></button>`, 'shrink')}
-        </div>
-        ${renderMessageButtons(block)}`;
+        </div>`;
     }
     case 'embed':
       return `<div class="fld-row">
@@ -2810,13 +2714,14 @@ function renderNodeFieldsB(block) {
     }
     case 'ticket': {
       const isOpen = !block.action || block.action === 'open';
+      const closeMode = block.closeMode || 'delete';
       return `<div class="fld-row">
           ${nodeField('Action', `<select class="select" ${bind('action')}>
-            <option value="open" ${block.action === 'open' ? 'selected' : ''}>Ouvrir</option>
-            <option value="claim" ${block.action === 'claim' ? 'selected' : ''}>Réclamer</option>
-            <option value="close" ${block.action === 'close' ? 'selected' : ''}>Fermer</option>
+            <option value="open" ${block.action === 'open' ? 'selected' : ''}>Ouvrir un ticket</option>
+            <option value="claim" ${block.action === 'claim' ? 'selected' : ''}>Réclamer le ticket</option>
+            <option value="close" ${block.action === 'close' ? 'selected' : ''}>Fermer le ticket</option>
           </select>`, 'shrink')}
-          ${nodeField('Raison', `<input class="input" ${bind('reason')} value="${esc(block.reason || '')}" placeholder="Demande de support">`, 'grow')}
+          ${nodeField('Raison / sujet', `<input class="input" ${bind('reason')} value="${esc(block.reason || '')}" placeholder="Demande de support">`, 'grow')}
         </div>
         ${isOpen
           ? `${nodeField('Catégorie du ticket', flowCategorySelect(bind('category'), block.category))}
@@ -2824,14 +2729,31 @@ function renderNodeFieldsB(block) {
           ${nodeField('Rôle du staff', flowRoleSelect(bind('staffRole'), block.staffRole), 'grow')}
           ${nodeField('Salon des logs', flowChannelSelect(bind('logChannel'), block.logChannel, { emptyLabel: 'Aucun journal' }), 'grow')}
         </div>
-        ${nodeField('Message dans le ticket', `<textarea class="textarea" rows="2" ${bind('welcomeMessage')} placeholder="Ton ticket est ouvert, le staff arrive.">${esc(block.welcomeMessage || '')}</textarea>`)}
+        ${nodeField('Message d’accueil', `<textarea class="textarea" rows="3" ${bind('welcomeMessage')} placeholder="Ton ticket est ouvert, le staff arrive.">${esc(block.welcomeMessage || '')}</textarea>`)}
         <div class="fld-row">
           ${nodeField('Préfixe du salon', `<input class="input" ${bind('namePrefix')} value="${esc(block.namePrefix || 'ticket')}" placeholder="ticket" maxlength="20">`, 'grow')}
           ${nodeField('Tickets max par membre', `<input class="input" type="number" min="1" max="10" ${bind('maxOpen')} value="${block.maxOpen || 1}">`, 'shrink')}
         </div>
+        ${nodeField('Modèle du sujet', `<input class="input" ${bind('topicTemplate')} value="${esc(block.topicTemplate || 'Ticket de {user} — {reason}')}" placeholder="Ticket de {user} — {reason}">`)}
+        <p class="hint">Variables du sujet : <code>{user}</code>, <code>{reason}</code>, <code>{id}</code>.</p>
+        <div class="fld-row">
+          ${nodeField('Fermeture', `<select class="select" ${bind('closeMode')}>
+            <option value="delete" ${closeMode === 'delete' ? 'selected' : ''}>Supprimer le salon</option>
+            <option value="archive" ${closeMode === 'archive' ? 'selected' : ''}>Archiver le salon</option>
+            <option value="keep" ${closeMode === 'keep' ? 'selected' : ''}>Garder le salon</option>
+          </select>`, 'grow')}
+          ${nodeField('Délai (secondes)', `<input class="input" type="number" min="0" max="300" ${bind('closeDelay')} value="${Number(block.closeDelay) || 0}">`, 'shrink')}
+        </div>
+        ${closeMode === 'archive' ? nodeField('Catégorie d’archive', flowCategorySelect(bind('archiveCategory'), block.archiveCategory, 'Aucune catégorie')) : ''}
+        <div class="fld-row">
+          ${nodeField('Prévenir le staff', `<button class="switch ${block.pingStaff !== false ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="pingStaff"></button>`, 'shrink')}
+          ${nodeField('Transcript dans les logs', `<button class="switch ${block.transcript ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="transcript"></button>`, 'shrink')}
+          ${nodeField('Bouton Réclamer', `<button class="switch ${block.claimButton !== false ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="claimButton"></button>`, 'shrink')}
+          ${nodeField('Bouton Fermer', `<button class="switch ${block.closeButton !== false ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="closeButton"></button>`, 'shrink')}
+        </div>
         ${renderTicketButtons(block)}
-        <p class="hint">Le salon est privé : le membre, le bot et le rôle staff peuvent le voir. Le salon de logs reçoit les ouvertures et fermetures.</p>`
-          : '<p class="hint">Cette action agit sur le ticket du salon actuel. Les boutons Réclamer et Fermer sont ajoutés automatiquement aux nouveaux tickets.</p>'}`;
+        <p class="hint">Le salon est privé : le membre, le bot et le rôle staff peuvent le voir. Le salon de logs reçoit les ouvertures, fermetures et transcripts.</p>`
+          : '<p class="hint">Cette action agit sur le ticket du salon actuel. La fermeture utilise le mode et le délai configurés à l’ouverture du ticket.</p>'}`;
     }
     case 'level':
       return `<div class="fld-row">
@@ -2927,235 +2849,6 @@ function renderConditionFields(block) {
         .join('')}
       <button class="link-btn" data-action="flow-add-rule" data-id="${block.id}">${icon('plus')} Règle</button>
     </div>`;
-}
-
-function renderDiscordButtons(buttons) {
-  if (!Array.isArray(buttons) || !buttons.length) return '';
-  return `<div class="dc-btn-row">
-    ${buttons.slice(0, 5).map((button) => `<span class="dc-btn ${esc(button.style || 'primary')}${button.disabled ? ' disabled' : ''}">${button.emoji ? `${esc(button.emoji)} ` : ''}${esc(button.label || 'Bouton')}</span>`).join('')}
-  </div>`;
-}
-
-function renderOutput(output) {
-  if (output.kind === 'message') {
-    return `<div class="dc-msg">
-      <span class="dc-av">K</span>
-      <div class="dc-body">
-        <div class="dc-head"><b>KyllBot</b><span class="dc-bot">BOT</span><span class="dc-time">${esc(output.channel)}</span>${output.reply ? '<span class="dc-tag">réponse</span>' : ''}${output.ping ? '<span class="dc-tag">mention</span>' : ''}${output.ephemeral ? '<span class="dc-tag">éphémère</span>' : ''}${output.tts ? '<span class="dc-tag">vocal</span>' : ''}${output.silent ? '<span class="dc-tag">silencieux</span>' : ''}${output.suppressEmbeds ? '<span class="dc-tag">sans embeds</span>' : ''}</div>
-        <p>${flowFormatDiscord(output.text)}</p>
-        ${renderDiscordButtons(output.buttons)}
-      </div>
-    </div>`;
-  }
-  if (output.kind === 'embed') {
-    return `<div class="dc-embed" style="border-left-color:${esc(output.embed.color)}">
-      ${output.embed.author ? `<span class="dc-embed-author">${output.embed.authorIcon ? `<img src="${esc(output.embed.authorIcon)}" alt="">` : ''}${esc(output.embed.author)}</span>` : ''}
-      <div class="dc-embed-main">
-        <div class="dc-embed-text">
-          ${output.embed.title ? `<b>${esc(output.embed.title)}</b>` : ''}
-          ${output.embed.description ? `<p>${flowFormatDiscord(output.embed.description)}</p>` : ''}
-          ${
-            Array.isArray(output.embed.fields) && output.embed.fields.length
-              ? `<div class="dc-embed-fields">${output.embed.fields
-                  .map(
-                    (field) => `<div class="dc-embed-field${field.inline ? ' inline' : ''}"><b>${esc(field.name)}</b><span>${flowFormatDiscord(field.value)}</span></div>`,
-                  )
-                  .join('')}</div>`
-              : ''
-          }
-          ${output.embed.footer ? `<span class="dc-footer">${output.embed.footerIcon ? `<img src="${esc(output.embed.footerIcon)}" alt="">` : ''}${esc(output.embed.footer)}</span>` : ''}
-          ${output.embed.timestamp ? '<span class="dc-footer">Aujourd’hui</span>' : ''}
-        </div>
-        ${output.embed.thumbnail ? `<img class="dc-embed-thumb" src="${esc(output.embed.thumbnail)}" alt="">` : ''}
-      </div>
-      ${output.embed.image ? `<img class="dc-embed-image" src="${esc(output.embed.image)}" alt="">` : ''}
-    </div>`;
-  }
-  if (output.kind === 'button' || output.kind === 'buttons') {
-    const buttons = output.kind === 'buttons' ? output.buttons || [] : [output];
-    return `<div class="dc-msg">
-      <span class="dc-av">K</span>
-      <div class="dc-body">
-        <div class="dc-head"><b>KyllBot</b><span class="dc-bot">BOT</span><span class="dc-tag">${buttons.length} bouton(s)</span></div>
-        <p style="color:var(--muted-2);font-size:11px">composants interactifs${buttons.some((button) => button.target) ? ' · flux liés' : ''}</p>
-        <div class="dc-btn-row">
-          ${buttons.map((button) => `<span class="dc-btn ${esc(button.style || 'primary')}${button.disabled ? ' disabled' : ''}">${button.emoji ? `${esc(button.emoji)} ` : ''}${esc(button.label || 'Bouton')}</span>`).join('')}
-        </div>
-        ${buttons.filter((button) => button.url).map((button) => `<span class="dc-footer">${esc(button.url)}</span>`).join('')}
-      </div>
-    </div>`;
-  }
-  if (output.kind === 'dm') {
-    return `<div class="dc-effect">${icon('mail')} <span><b>Message privé à ${esc(output.to)}</b> — ${esc(output.text)}</span></div>`;
-  }
-  if (output.kind === 'role') {
-    const duration = output.temporary ? `${output.duration} ${output.durationUnit || 'minutes'}` : 'permanent';
-    return `<div class="dc-effect">${icon('shield')} ${output.action === 'remove' ? 'Retire' : 'Ajoute'} le rôle <b>${esc(output.role)}</b> à ${esc(output.user)} · ${esc(duration)}${output.reason ? ` · ${esc(output.reason)}` : ''}</div>`;
-  }
-  if (output.kind === 'var') {
-    return `<div class="dc-effect">${icon('variable')} <b>${esc(output.name)}</b> = ${esc(output.value)}</div>`;
-  }
-  if (output.kind === 'channel') {
-    return `<div class="dc-effect">${icon('hashtag')} Salon créé <b>#${esc(output.name)}</b>${output.category ? ` · ${esc(output.category)}` : ''}${output.nsfw ? ' · NSFW' : ''}${output.slowmode ? ` · mode lent ${output.slowmode} s` : ''}${output.topic ? `<span class="dc-footer">${esc(output.topic)}</span>` : ''}</div>`;
-  }
-  if (output.kind === 'pin') {
-    return `<div class="dc-effect">${icon('pin')} ${output.unpin ? 'Message désépinglé' : 'Message épinglé'}</div>`;
-  }
-  if (output.kind === 'delete') {
-    return `<div class="dc-effect">${icon('trash')} ${output.count} message(s) supprimé(s)</div>`;
-  }
-  if (output.kind === 'cooldown') {
-    return `<div class="dc-effect">${icon('shield')} Anti-spam ${output.seconds} s par ${output.scope === 'channel' ? 'salon' : 'membre'}</div>`;
-  }
-  if (output.kind === 'typing') {
-    return `<div class="dc-effect">${icon('keyboard')} KyllBot est en train d’écrire… (${output.seconds} s)</div>`;
-  }
-  if (output.kind === 'webhook') {
-    return `<div class="dc-effect">${icon('plug')} ${esc(output.method)} ${esc(output.url || '—')} → ${output.status} <span class="dc-sim">simulé</span></div>`;
-  }
-  if (output.kind === 'wait') {
-    return `<div class="dc-effect">${icon('clock')} Pause de ${output.seconds} s</div>`;
-  }
-  if (output.kind === 'timer') {
-    return `<div class="dc-effect">${icon('clock')} Compte à rebours de <b>${esc(output.duration)} ${esc(output.unit === 'hours' ? 'h' : output.unit === 'seconds' ? 's' : 'min')}</b>${output.wait ? ' · attend la fin' : ''}</div>`;
-  }
-  if (output.kind === 'chrono') {
-    if (output.action === 'service') return `<div class="dc-effect">${icon('clock')} Chrono du service actuel</div>`;
-    return output.action === 'stop'
-      ? `<div class="dc-effect">${icon('clock')} Chronomètre arrêté · <b>${esc(output.variable)}</b></div>`
-      : `<div class="dc-effect">${icon('clock')} Chronomètre démarré · <b>${esc(output.variable)}</b></div>`;
-  }
-  if (output.kind === 'serviceStart') {
-    return `<div class="dc-effect">${icon('play')} Démarre le service de <b>ce membre</b> · ${esc(output.text || '')}</div>`;
-  }
-  if (output.kind === 'serviceStop') {
-    return `<div class="dc-effect">${icon('stop')} Arrête le service et ajoute le temps écoulé · ${esc(output.text || '')}</div>`;
-  }
-  if (output.kind === 'servicePenalty') {
-    return `<div class="dc-effect">${icon('alert')} Formulaire de pénalité · <b>${esc(output.title || 'Pénalité de service')}</b></div>`;
-  }
-  if (output.kind === 'serviceLeaderboard') {
-    return `<div class="dc-effect">${icon('award')} Classement du service · top <b>${esc(output.top || 10)}</b></div>`;
-  }
-  if (output.kind === 'serviceOnline') {
-    return `<div class="dc-effect">${icon('clock')} Chrono en ligne · actualisé toutes les <b>${esc(Number(output.interval) === 30 ? '30 s' : '60 s')}</b></div>`;
-  }
-  if (output.kind === 'serviceConfig') {
-    const days = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
-    return `<div class="dc-effect">${icon('gear')} Période : <b>${output.period === 'month' ? '1 mois' : '1 semaine'}</b> · reset ${esc(days[(output.resetDay || 1) - 1])} à ${esc(output.resetHour || 0)} h · ${esc(output.timezone || 'Europe/Paris')}</div>`;
-  }
-  if (output.kind === 'serviceReset') {
-    return `<div class="dc-effect">${icon('trash')} Réinitialise les compteurs du service</div>`;
-  }
-  if (output.kind === 'forumAction') {
-    return `<div class="dc-effect">${icon('message')} ${output.action === 'close' ? 'Ferme le post forum' : 'Message dans le post forum'} <b>${esc(output.post)}</b>${output.content ? ` — ${esc(output.content)}` : ''}</div>`;
-  }
-  if (output.kind === 'forumDelete') {
-    return `<div class="dc-effect">${icon('trash')} Supprime <b>${esc(output.message)}</b> dans le post forum <b>${esc(output.post)}</b></div>`;
-  }
-  if (output.kind === 'music') {
-    if (output.action === 'stop') return `<div class="dc-effect">${icon('music')} Musique arrêtée</div>`;
-    return `<div class="dc-effect">${icon('music')} Musique ${output.mode === 'personal' ? 'privée' : 'vocale'} · <b>${esc(output.title || output.url || 'sans source')}</b></div>`;
-  }
-  if (output.kind === 'automationRun') {
-    return `<div class="dc-effect">${icon('zap')} Déclenche l’automatisation <b>${esc(output.automationType || 'autoMod')}</b></div>`;
-  }
-  if (output.kind === 'accountCheck') {
-    return `<div class="dc-effect">${icon('shield')} Vérifie l’âge du compte, l’avatar et les bots${output.failAction === 'stop' ? ' · arrête si suspect' : ''}</div>`;
-  }
-  if (output.kind === 'react') {
-    return `<div class="dc-effect">${icon('smile')} Réaction ${esc(output.emoji)}</div>`;
-  }
-  if (output.kind === 'edit') {
-    return `<div class="dc-effect">${icon('edit')} Message « ${esc(output.ref)} » modifié${output.embed ? ' · embed' : ''}</div>`;
-  }
-  if (output.kind === 'thread') {
-    return `<div class="dc-effect">${icon('message')} Fil <b>#${esc(output.name)}</b> créé${output.private ? ' · privé' : ''}</div>`;
-  }
-  if (output.kind === 'forum') {
-    return `<div class="dc-effect">${icon('message')} Post forum <b>${esc(output.title)}</b>${output.tags ? ` · ${esc(output.tags)}` : ''}</div>`;
-  }
-  if (output.kind === 'ai') {
-    const mode = output.provider === 'local' ? 'réponses intégrées' : output.provider === 'openai' ? 'API serveur' : 'sans clé';
-    return `<div class="dc-ai">
-      <div class="dc-ai-head">${icon('spark')} <b>Réponse IA</b><span>${esc(output.model)}</span><span class="dc-sim">${esc(mode)}</span></div>
-      <p>${esc(output.text)}</p>
-    </div>`;
-  }
-  if (output.kind === 'image') {
-    return `<div class="dc-image">${output.url ? `<img src="${esc(output.url)}" alt="${esc(output.alt)}">` : `<span class="dc-image-empty">${icon('file')} Aucune URL d’image</span>`}</div>`;
-  }
-  if (output.kind === 'poll') {
-    return `<div class="dc-poll">
-      <b>${esc(output.question)}</b>
-      <div class="dc-poll-options">${output.options.map((option, index) => `<span>${['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'][index] || '•'} ${esc(option)}</span>`).join('')}</div>
-      <span class="dc-poll-meta">${output.duration} h · ${output.multiple ? 'choix multiple' : 'choix unique'}</span>
-    </div>`;
-  }
-  if (output.kind === 'select') {
-    return `<div class="dc-effect">${icon('cursor')} Menu « ${esc(output.placeholder)} » · ${output.options.map((option) => esc(option)).join(' / ')}</div>`;
-  }
-  if (output.kind === 'modal') {
-    return `<div class="dc-effect">${icon('template')} Formulaire « ${esc(output.title)} » · ${output.fields.map((field) => esc(field)).join(', ')}</div>`;
-  }
-  if (output.kind === 'giveaway') {
-    return `<div class="dc-effect">${icon('award')} Giveaway <b>${esc(output.prize)}</b> · ${output.winners} gagnant(s) · ${output.duration} h · ${esc(output.emoji)}</div>`;
-  }
-  if (output.kind === 'await') {
-    return `<div class="dc-effect">${icon('clock')} Attente d’une interaction : ${esc(output.interaction)} (${output.timeout} s)</div>`;
-  }
-  if (output.kind === 'timeout') {
-    return `<div class="dc-effect">${icon('clock')} ${esc(output.user)} exclu ${output.duration} min · ${esc(output.reason || 'sans raison')}</div>`;
-  }
-  if (output.kind === 'kick') {
-    return `<div class="dc-effect">${icon('userMinus')} ${esc(output.user)} expulsé · ${esc(output.reason || 'sans raison')}</div>`;
-  }
-  if (output.kind === 'ban') {
-    return `<div class="dc-effect">${icon('shield')} ${esc(output.user)} banni · ${esc(output.reason || 'sans raison')}</div>`;
-  }
-  if (output.kind === 'nickname') {
-    return `<div class="dc-effect">${icon('edit')} Pseudo de ${esc(output.user)} → <b>${esc(output.nickname)}</b></div>`;
-  }
-  if (output.kind === 'move') {
-    return `<div class="dc-effect">${icon('video')} ${esc(output.user)} déplacé vers ${esc(output.channel)}</div>`;
-  }
-  if (output.kind === 'invite') {
-    const delivery = output.delivery === 'dm' ? ' · message privé' : output.delivery === 'none' ? '' : ' · dans le salon';
-    const label = output.action === 'view' ? 'Voir le lien' : 'Créer une invitation';
-    return `<div class="dc-effect">${icon('link')} ${label} ${esc(output.channel || output.invite || '')} · ${output.maxUses || '∞'} utilisation(s) · ${output.maxAge || '∞'} h${delivery}</div>`;
-  }
-  if (output.kind === 'ticket') {
-    if (output.action !== 'open') {
-      return `<div class="dc-effect">${icon('ticket')} Ticket ${esc(output.action)}${output.reason ? ` · ${esc(output.reason)}` : ''}</div>`;
-    }
-    const ticketButtons = Array.isArray(output.buttons) ? output.buttons : [];
-    return `<div class="dc-msg">
-      <span class="dc-av">K</span>
-      <div class="dc-body">
-        <div class="dc-head"><b>KyllBot</b><span class="dc-bot">BOT</span><span class="dc-tag">ticket privé</span></div>
-        <p>${flowFormatDiscord(output.welcomeMessage || 'Ton ticket est ouvert. Décris ton problème, un membre du staff arrive.')}<br>Raison : <b>${esc(output.reason || 'Demande de support')}</b></p>
-        <div class="dc-btn-row">
-          <span class="dc-btn primary">🙋 Réclamer</span>
-          <span class="dc-btn danger">🔒 Fermer</span>
-          ${ticketButtons.map((button) => `<span class="dc-btn ${esc(button.style || 'primary')}">${button.emoji ? `${esc(button.emoji)} ` : ''}${esc(button.label || 'Bouton')}</span>`).join('')}
-        </div>
-      </div>
-    </div>`;
-  }
-  if (output.kind === 'stop') {
-    return `<div class="dc-effect">${icon('x')} Flux arrêté · ${esc(output.reason || 'fin')}</div>`;
-  }
-  if (output.kind === 'captcha') {
-    return `<div class="dc-effect">${icon('shield')} Vérification ${esc(output.mode)} demandée à ${esc(output.user)} (${output.timeout} s)</div>`;
-  }
-  return `<div class="dc-effect">${icon('terminal')} ${esc(output.text)}</div>`;
-}
-
-function flowFormatDiscord(text) {
-  return esc(text || '')
-    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/&lt;@([^&]+)&gt;/g, '<span class="dc-mention">@$1</span>');
 }
 
 /* ------------------------------------------------------------------ */
@@ -3291,18 +2984,12 @@ function initFlowCanvas() {
   const world = document.getElementById('flowWorld');
   if (!viewport || !world) return;
 
-  if (!flowEditor.view) focusFlowView();
+  if (!flowEditor.view) fitFlowView();
   applyFlowView();
   drawFlowEdges();
 
   viewport.addEventListener('pointerdown', onCanvasDown);
   viewport.addEventListener('wheel', onCanvasWheel, { passive: false });
-  document.getElementById('flowCanvasBg')?.addEventListener('change', (event) => {
-    if (!flowEditor.flow) return;
-    flowEditor.flow.canvasStyle = event.target.value;
-    viewport.dataset.canvas = event.target.value;
-    flowEditor.dirty = true;
-  });
   window.removeEventListener('resize', onCanvasResize);
   window.addEventListener('resize', onCanvasResize);
 }
@@ -3604,6 +3291,10 @@ onAction('flow-node-start', (el) => {
 
 onAction('flow-node-edit', (el) => openBlockEditor(el.dataset.id));
 
+onAction('flow-open-message-editor', (el) => openMessageEditor(el.dataset.id));
+onAction('flow-message-editor-close', () => closeMessageEditor());
+onAction('flow-message-editor-done', () => closeMessageEditor({ notify: true }));
+
 onAction('flow-insert-var', (el) => {
   const token = el.dataset.token || '';
   const usable = (field) => field && field.isConnected && !field.disabled && (field.tagName === 'TEXTAREA' || ['text', 'search', 'url', 'email', 'tel'].includes(field.type));
@@ -3633,6 +3324,7 @@ onAction('flow-node-edit-close', () => {
   closeRoleMention();
   closeFlowVarPicker();
   flowEditor.editBlockId = null;
+  flowEditor.messageEditorBlockId = null;
   closeModal();
   render();
 });
@@ -3641,6 +3333,7 @@ onAction('flow-node-edit-done', () => {
   closeRoleMention();
   closeFlowVarPicker();
   flowEditor.editBlockId = null;
+  flowEditor.messageEditorBlockId = null;
   closeModal();
   render();
   toast('Bloc mis à jour.', 'success');
@@ -3958,16 +3651,12 @@ onAction('new-flow', (el) => {
   const botId = el.dataset.id;
   const bot = state.ws.bots.find((entry) => entry.id === botId);
   const server = activeBotServer(bot);
-  if (!server) {
-    toast('Choisis d’abord un serveur Discord dans le sélecteur du bot, puis crée le flux.', 'error');
-    return;
-  }
-  const serverName = server?.guildName || server?.name || 'Aucun serveur';
+  const serverName = server?.guildName || server?.name || 'Aucun serveur pour l’instant';
   openModal({
     title: 'Nouveau flux',
     subtitle: 'Partez d’un modèle ou d’une page blanche.',
     submitLabel: 'Créer le flux',
-    body: `<div class="field"><label>Serveur du flux</label><input class="input" value="${esc(serverName)}" disabled><div class="hint">Le flux sera créé uniquement sur ce serveur.</div></div>
+    body: `<div class="field"><label>Serveur du flux</label><input class="input" value="${esc(serverName)}" disabled><div class="hint">${server ? 'Le flux sera créé uniquement sur ce serveur.' : 'Tu peux créer le flux maintenant : il sera activé dès que tu connecteras un serveur Discord au bot.'}</div></div>
       <div class="field"><label for="nfName">Nom du flux</label><input class="input" id="nfName" name="name" value="Nouveau flux" required></div>
       <div class="field"><label>Modèle</label>
         <div class="template-pick">
@@ -4079,6 +3768,7 @@ document.addEventListener('keydown', (event) => {
     }
   }
   if (event.key === 'Escape' && flowVarPicker) closeFlowVarPicker();
+  if (event.key === 'Escape' && flowEditor.messageEditorBlockId) closeMessageEditor();
 });
 
 document.addEventListener('input', (event) => {
@@ -4131,7 +3821,6 @@ document.addEventListener('input', (event) => {
   }
   flowEditor.dirty = true;
   if (el.dataset.buttonField === 'next' || el.dataset.variantField === 'next') requestAnimationFrame(drawFlowEdges);
-  if (flowEditor.editBlockId === block.id) updateBlockPreview(block);
   updateRoleMention(el);
 });
 
@@ -4189,12 +3878,11 @@ document.addEventListener('change', (event) => {
   else if (el.dataset.field === 'seconds' || el.dataset.field === 'count') block[el.dataset.field] = Number(el.value) || 1;
   else if (el.dataset.field) block[el.dataset.field] = el.value;
   flowEditor.dirty = true;
-  if (el.dataset.field === 'action' || el.dataset.field === 'mode' || el.dataset.field === 'delivery') {
+  if (['action', 'mode', 'delivery', 'closeMode'].includes(el.dataset.field)) {
     refreshBlockEditor(block.id);
     return;
   }
   if (el.dataset.buttonField === 'next' || el.dataset.variantField === 'next') requestAnimationFrame(drawFlowEdges);
-  if (flowEditor.editBlockId === block.id) updateBlockPreview(block);
 });
 
 onAction('flow-toggle-side', () => {

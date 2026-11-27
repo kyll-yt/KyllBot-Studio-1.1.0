@@ -311,6 +311,24 @@ function viewSettings() {
         </div>
       </div>
 
+      <div class="panel">
+        <div class="panel-head"><h3>Éditeur de flux</h3></div>
+        <div class="panel-body">
+          <form data-form="flow-canvas">
+            <div class="field"><label for="wCanvas">Fond du canevas</label>
+              <select class="select" id="wCanvas" name="canvasStyle">
+                <option value="dots" ${appearanceSettings().canvasStyle === 'dots' ? 'selected' : ''}>Points</option>
+                <option value="grid" ${appearanceSettings().canvasStyle === 'grid' ? 'selected' : ''}>Grille</option>
+                <option value="aurora" ${appearanceSettings().canvasStyle === 'aurora' ? 'selected' : ''}>Aurore</option>
+                <option value="plain" ${appearanceSettings().canvasStyle === 'plain' ? 'selected' : ''}>Uni</option>
+              </select>
+              <div class="hint">Ce fond s’applique à tous les éditeurs de flux du studio.</div>
+            </div>
+            <button class="btn btn-primary" type="submit">Enregistrer</button>
+          </form>
+        </div>
+      </div>
+
       <div class="panel style-panel">
         <div class="panel-head"><h3>Style du site</h3><span class="pill violet">${esc(APPEARANCE_THEMES[appearanceSettings().theme]?.label || 'Classique')}</span></div>
         <div class="panel-body">
@@ -432,6 +450,14 @@ onForm('branding', async (form, formData) => {
   await api('/api/settings', { method: 'PATCH', body: JSON.stringify({ branding: { accent: formData.get('accent') } }) });
   await refresh();
   toast('Apparence mise à jour.');
+});
+
+onForm('flow-canvas', async (form, formData) => {
+  const appearance = { ...appearanceSettings(), canvasStyle: formData.get('canvasStyle') };
+  await api('/api/settings', { method: 'PATCH', body: JSON.stringify({ appearance }) });
+  state.ws.settings.appearance = appearance;
+  toast('Fond de l’éditeur enregistré.');
+  render();
 });
 
 onForm('bot-settings', async (form, formData) => {

@@ -384,6 +384,7 @@ function appearanceSettings() {
   const saved = state.ws?.settings?.appearance || {};
   return {
     theme: APPEARANCE_THEMES[saved.theme] ? saved.theme : 'classic',
+    canvasStyle: ['dots', 'grid', 'aurora', 'plain'].includes(saved.canvasStyle) ? saved.canvasStyle : 'dots',
     ...Object.fromEntries(Object.keys(APPEARANCE_TOGGLES).map((key) => [key, Boolean(saved[key])])),
   };
 }

@@ -99,14 +99,17 @@ const PID_FILE = process.env.PID_FILE || path.join(os.tmpdir(), 'kyllbot-app.pid
 
 const APPEARANCE_THEMES = new Set(['classic', 'neon', 'ocean', 'sunset', 'forest', 'mono', 'candy']);
 const APPEARANCE_TOGGLES = ['neon', 'glass', 'animations', 'compact', 'rounded', 'grid', 'glowText', 'reducedMotion'];
+const CANVAS_STYLES = new Set(['dots', 'grid', 'aurora', 'plain']);
 
 function sanitizeAppearance(input, previous = {}) {
   const next = {
     theme: APPEARANCE_THEMES.has(previous.theme) ? previous.theme : 'classic',
+    canvasStyle: CANVAS_STYLES.has(previous.canvasStyle) ? previous.canvasStyle : 'dots',
     ...Object.fromEntries(APPEARANCE_TOGGLES.map((key) => [key, Boolean(previous[key])])),
   };
   if (!input || typeof input !== 'object' || Array.isArray(input)) return next;
   if (APPEARANCE_THEMES.has(input.theme)) next.theme = input.theme;
+  if (CANVAS_STYLES.has(input.canvasStyle)) next.canvasStyle = input.canvasStyle;
   for (const key of APPEARANCE_TOGGLES) {
     if (input[key] !== undefined) next[key] = Boolean(input[key]);
   }
@@ -235,9 +238,9 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 const str = (value, max = 200) => String(value ?? '').trim().slice(0, max);
 const describeFlowTrigger = (trigger) => describeTrigger(trigger);
 
-const SCHEMA_VERSION = 3;
-const FAKE_EMAIL = /@example\.com$/i;
-const FAKE_NAME = /Emma Petit|Lucas Moreau|Sarah Benali|Hugo Lefèvre|Inès Garnier|Nathan Roy|Léa Martin|Noah Bernard/;
+const SCHEMA_VERSION = 4;
+const FAKE_EMAIL = /(?:^demo@|^demo[-+]|@example\.(?:com|org|net)$)/i;
+const FAKE_NAME = /Emma Petit|Lucas Moreau|Sarah Benali|Hugo Lefèvre|Inès Garnier|Nathan Roy|Léa Martin|Noah Bernard|Alex Démo|Apprenant\s+[A-Z]|Étudiant\s+[A-Z]|^(?:test|demo|démo)\b/i;
 const TEST_ACTIVITY =
   /test API|Bot de test|Formation de test|Inconnu|a traité [\d\s]+ commandes|certificats ont été générés|panneau de tickets a été désactivé|Le module « Prévenir » a été ajouté/i;
 const ACTIVITY_EVENTS = new Set(['command.run', 'flow.run', 'learner.active', 'learner.created']);
@@ -338,7 +341,7 @@ function migrateWorkspace(ws) {
       }
     }
   }
-  if (previousSchema < 3) {
+  if (previousSchema < 4) {
     const learners = (ws.learners || []).filter((learner) => !FAKE_EMAIL.test(learner.email) && !FAKE_NAME.test(learner.name || ''));
     if (learners.length !== (ws.learners || []).length) {
       ws.learners = learners;

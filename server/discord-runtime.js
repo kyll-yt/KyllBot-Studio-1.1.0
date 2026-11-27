@@ -503,7 +503,22 @@ function memberHasAnyRole(member, refs) {
 }
 
 function ticketOwnerId(topic) {
-  return String(topic || '').match(/\((\d{17,20})\)/)?.[1] || '';
+  return String(topic || '').match(/(?:\(|· )(\d{17,20})/)?.[1] || '';
+}
+
+async function sendTicketTranscript({ guild, bot, channel, meta = {}, closedBy = '' }) {
+  const logChannel = resolveChannel(guild, ticketLogChannel(bot, meta));
+  if (!logChannel?.send) return;
+  const messages = await channel.messages?.fetch?.({ limit: 100 }).catch(() => null);
+  if (!messages) return;
+  const lines = [...messages.values()]
+    .reverse()
+    .map((message) => `${message.author?.tag || message.author?.username || 'Inconnu'} : ${message.content || '[embed ou pièce jointe]'}`)
+    .join('\n');
+  const body = `📄 Transcript · #${channel.name}\nFermé par ${closedBy || 'inconnu'}\n\n${lines}`;
+  for (let index = 0; index < body.length; index += 1900) {
+    await logChannel.send({ content: body.slice(index, index + 1900) }).catch(() => {});
+  }
 }
 
 function ticketLogChannel(bot, meta = {}) {
@@ -544,6 +559,13 @@ async function createTicketChannel({ bot, guild, member, user, config = {}, sour
     .replace(/-+/g, '-')
     .slice(0, 40);
   const reason = String(config.reason || 'Demande de support').slice(0, 300);
+  const ownerLabel = owner.tag || owner.username || 'membre';
+  const topicBase = String(config.topicTemplate || 'Ticket de {user} — {reason}')
+    .replace(/\{user\}/g, ownerLabel)
+    .replace(/\{reason\}/g, reason)
+    .replace(/\{id\}/g, `(${owner.id})`)
+    .slice(0, 1000);
+  const topic = topicBase.includes(owner.id) ? topicBase : `${topicBase} (${owner.id})`;
 
   const overwrites = [
     { id: guild.roles.everyone.id, deny: [PermissionsBitField.Flags.ViewChannel] },
@@ -584,7 +606,7 @@ async function createTicketChannel({ bot, guild, member, user, config = {}, sour
     name: `${prefix}-${safeName || 'membre'}`.slice(0, 100),
     type: ChannelType.GuildText,
     parent: parent?.id || undefined,
-    topic: `Ticket de ${owner.tag || owner.username || 'membre'} (${owner.id}) — ${reason}`.slice(0, 1024),
+    topic: topic.slice(0, 1024),
     permissionOverwrites: overwrites.filter((entry) => entry.id),
   });
 
@@ -592,6 +614,10 @@ async function createTicketChannel({ bot, guild, member, user, config = {}, sour
     ownerId: owner.id,
     staffRole: config.staffRole || '',
     logChannel: config.logChannel || '',
+    closeMode: config.closeMode || 'delete',
+    closeDelay: Number(config.closeDelay) || 3,
+    archiveCategory: config.archiveCategory || '',
+    transcript: Boolean(config.transcript),
     automationId: config.automationId || '',
     source,
   });
@@ -624,24 +650,31 @@ async function createTicketChannel({ bot, guild, member, user, config = {}, sour
     });
     rows.push(customRow);
   }
-  rows.push(
-    new ActionRowBuilder().addComponents(
+  const actionButtons = [];
+  if (config.claimButton !== false) {
+    actionButtons.push(
       new ButtonBuilder()
         .setCustomId(`kfticket:claim:${ticketChannel.id}`)
         .setLabel('Réclamer')
         .setEmoji('🙋')
         .setStyle(ButtonStyle.Primary),
+    );
+  }
+  if (config.closeButton !== false) {
+    actionButtons.push(
       new ButtonBuilder()
         .setCustomId(`kfticket:close:${ticketChannel.id}`)
         .setLabel('Fermer')
         .setEmoji('🔒')
         .setStyle(ButtonStyle.Danger),
-    ),
-  );
+    );
+  }
+  if (actionButtons.length) rows.push(new ActionRowBuilder().addComponents(...actionButtons));
+  const staffMention = config.pingStaff !== false && staffRole ? `<@&${staffRole.id}> ` : '';
   await ticketChannel.send({
-    content: `${owner ? `<@${owner.id}>` : ''} ${welcome}\nRaison : **${reason}**`,
+    content: `${owner ? `<@${owner.id}>` : ''} ${staffMention}${welcome}\nRaison : **${reason}**`,
     components: rows,
-    allowedMentions: { users: [owner.id] },
+    allowedMentions: { users: [owner.id], roles: staffRole && config.pingStaff !== false ? [staffRole.id] : [] },
   }).catch(() => {});
 
   await sendLog(
@@ -736,20 +769,36 @@ async function handleTicketButton(bot, interaction, guild, member) {
       await interaction.reply({ content: 'Seul le staff ou l’auteur du ticket peut le fermer.', ephemeral: true }).catch(() => {});
       return;
     }
-    await interaction.reply({ content: 'Ticket fermé. Suppression dans 3 secondes…', ephemeral: true }).catch(() => {});
+    const closeMode = ['delete', 'archive', 'keep'].includes(meta.closeMode) ? meta.closeMode : 'delete';
+    const closeDelay = Math.max(0, Math.min(300, Number(meta.closeDelay) || 0));
+    const closedBy = interaction.user.tag || interaction.user.username;
+    await interaction.reply({
+      content: closeMode === 'delete' ? `Ticket fermé. Suppression dans ${closeDelay} seconde(s)…` : 'Ticket fermé.',
+      ephemeral: true,
+    }).catch(() => {});
     await channel.send({ content: `🔒 Ticket fermé par <@${interaction.user.id}>.` }).catch(() => {});
+    if (meta.transcript) await sendTicketTranscript({ guild, bot, channel, meta, closedBy });
     await sendLog(
       guild,
       bot,
-      `🔒 Ticket fermé par ${interaction.user.tag || interaction.user.username} · #${channel.name}`,
+      `🔒 Ticket fermé par ${closedBy} · #${channel.name} · mode ${closeMode}`,
       ticketLogChannel(bot, meta),
     );
     ticketMeta.delete(channel.id);
-    const closing = channel;
-    const timer = setTimeout(() => {
-      if (closing?.delete) closing.delete('Ticket fermé — KyllBot Studio').catch(() => {});
-    }, 3000);
-    timer.unref?.();
+    if (closeMode === 'delete') {
+      const closing = channel;
+      const timer = setTimeout(() => {
+        if (closing?.delete) closing.delete('Ticket fermé — KyllBot Studio').catch(() => {});
+      }, closeDelay * 1000);
+      timer.unref?.();
+      return;
+    }
+    await channel.setTopic(`Ticket fermé par ${closedBy} · ${channel.name}`.slice(0, 1024)).catch(() => {});
+    if (closeMode === 'archive') {
+      const archive = resolveCategory(guild, meta.archiveCategory);
+      if (archive) await channel.setParent(archive.id, { lockPermissions: false }).catch(() => {});
+      await channel.setName(`closed-${channel.name}`.slice(0, 100)).catch(() => {});
+    }
   }
 }
 

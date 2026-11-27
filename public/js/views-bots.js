@@ -1507,21 +1507,27 @@ function newBotModal() {
     submitLabel: 'Créer le bot',
     body: `
       <div class="field"><label for="nbName">Nom du bot</label><input class="input" id="nbName" name="name" placeholder="KyllBot Communauté" required></div>
+      <div class="token-callout">
+        <b>${icon('key')} Token Discord</b>
+        <p>Le token relie ton bot à Discord. Sans token, tu peux préparer le bot mais il ne sera pas en ligne.</p>
+        <a href="https://discord.com/developers/applications" target="_blank" rel="noopener">Ouvrir le portail développeur Discord</a>
+        <ol>
+          <li>Crée une application, puis ouvre l’onglet <b>Bot</b>.</li>
+          <li>Clique sur <b>Reset Token</b> et copie le token.</li>
+          <li>Colle-le ci-dessous. Ne le partage jamais.</li>
+        </ol>
+      </div>
+      <div class="field">
+        <label for="nbToken">Token du bot Discord <span class="muted-small">(optionnel)</span></label>
+        <input class="input" id="nbToken" name="token" type="password" placeholder="Collez le token depuis le portail développeur Discord" autocomplete="off">
+        <div class="hint">Le token est chiffré (AES-256-GCM) et n’est jamais réaffiché. Tu pourras le remplacer dans Paramètres → Connexion Discord.</div>
+      </div>
       <div class="field"><label for="nbDesc">Description</label><textarea class="textarea" id="nbDesc" name="description" placeholder="Ce que fait votre bot, en une phrase."></textarea></div>
       <div class="form-row">
         <div class="field"><label for="nbPrefix">Préfixe</label><input class="input" id="nbPrefix" name="prefix" value="!" maxlength="4"></div>
         <div class="field"><label for="nbColor">Couleur</label><input class="input" id="nbColor" name="color" type="color" value="#7c5cff"></div>
       </div>
       <div class="field"><label for="nbTags">Étiquettes</label><input class="input" id="nbTags" name="tags" placeholder="Communauté, Modération"></div>
-      <div class="field">
-        <label for="nbToken">Token du bot Discord <span class="muted-small">(optionnel)</span></label>
-        <input class="input" id="nbToken" name="token" type="password" placeholder="Collez le token depuis le portail développeur Discord" autocomplete="off">
-        <div class="hint">Le token n’est jamais réaffiché : seul un indice (4 derniers caractères) est conservé. Vous pourrez le remplacer dans Paramètres → Connexion Discord.</div>
-        <details class="token-help">
-          <summary>Où trouver mon token ?</summary>
-          <p>Portail développeur Discord → votre application → onglet Bot → Reset Token. Ne partagez jamais ce token.</p>
-        </details>
-      </div>
     `,
     onSubmit: async (formData) => {
       await api('/api/bots', {
@@ -1648,6 +1654,70 @@ const COMMAND_PRESETS = [
     description: 'Partage le lien d’invitation du serveur',
     response: 'Rejoins-nous sur **{server}** !',
     embed: { title: '🔗 Invitation', description: 'Partage ce lien avec tes amis.', color: '#fbbf24', footer: 'KyllBot Studio' },
+  },
+  {
+    key: 'say',
+    label: 'Dire',
+    name: 'dire',
+    description: 'Fait parler le bot dans le salon',
+    response: '📣 **{user}** : {message}',
+    embed: { title: '', description: '', color: '#7c5cff', footer: 'KyllBot Studio' },
+  },
+  {
+    key: 'serverinfo',
+    label: 'Infos serveur',
+    name: 'serveur',
+    description: 'Affiche les informations du serveur',
+    response: '',
+    embed: { title: '🏠 {server}', description: 'Membres, salons et rôles du serveur.', color: '#22d3ee', footer: 'KyllBot Studio' },
+  },
+  {
+    key: 'userinfo',
+    label: 'Infos membre',
+    name: 'profil',
+    description: 'Affiche le profil d’un membre',
+    response: '**{user}** · Niveau **{level}** · **{xp} XP**',
+    embed: { title: '👤 Profil', description: 'Pseudo, rôle et progression du membre.', color: '#a3e635', footer: 'KyllBot Studio' },
+  },
+  {
+    key: 'avatar',
+    label: 'Avatar',
+    name: 'avatar',
+    description: 'Affiche l’avatar d’un membre',
+    response: '',
+    embed: { title: '🖼️ Avatar', description: 'Avatar de {user}', color: '#7c5cff', footer: 'KyllBot Studio' },
+  },
+  {
+    key: 'suggest',
+    label: 'Suggestion',
+    name: 'suggestion',
+    description: 'Ouvre une suggestion communautaire',
+    response: '',
+    embed: { title: '💡 Suggestion', description: 'Décris ton idée. Les membres voteront avec ✅ ou ❌.', color: '#fbbf24', footer: 'Communauté' },
+  },
+  {
+    key: 'report',
+    label: 'Signaler',
+    name: 'signaler',
+    description: 'Signale un membre au staff',
+    response: 'Merci, ton signalement a été transmis au staff.',
+    embed: { title: '🚨 Signalement', description: 'Décris le problème et mentionne le membre concerné.', color: '#f87171', footer: 'Staff' },
+  },
+  {
+    key: '8ball',
+    label: 'Boule 8',
+    name: '8ball',
+    description: 'Répond à une question au hasard',
+    response: '🎱 Ma réponse : **Oui, absolument !**',
+    embed: { title: '', description: '', color: '#7c5cff', footer: 'KyllBot Studio' },
+  },
+  {
+    key: 'coinflip',
+    label: 'Pile ou face',
+    name: 'pileouface',
+    description: 'Lance une pièce',
+    response: '🪙 **Pile !**',
+    embed: { title: '', description: '', color: '#fbbf24', footer: 'KyllBot Studio' },
   },
 ];
 
@@ -2279,35 +2349,42 @@ onAction('toggle-command', async (el) => {
   await refresh();
 });
 
-onAction('new-automation', (el) => {
-  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
-  if (!bot) return;
+function openAutomationModal(bot, preset = null) {
   const server = activeBotServer(bot);
+  if (!server) {
+    toast('Choisis d’abord un serveur Discord.', 'error');
+    return;
+  }
   const serverName = server?.guildName || server?.name || 'Aucun serveur';
+  const initialType = preset?.type || AUTOMATION_TYPES[0].type;
+  const initialLabel = preset?.label || AUTOMATION_TYPES.find((entry) => entry.type === initialType)?.label || 'Automatisation';
   const datalists = `
     <datalist id="channelSuggestions">${(bot.discord?.channels?.length ? bot.discord.channels.filter((channel) => channel.type !== 'voice').map((channel) => `#${channel.name}`) : CHANNEL_SUGGESTIONS).map((item) => `<option value="${esc(item)}"></option>`).join('')}</datalist>
     <datalist id="categorySuggestions">${(bot.discord?.categories?.length ? bot.discord.categories : CATEGORY_SUGGESTIONS).map((item) => `<option value="${esc(item)}"></option>`).join('')}</datalist>
     <datalist id="roleSuggestions">${(bot.discord?.roles || FLOW_ROLES_FALLBACK.map((name) => ({ name }))).map((role) => `<option value="${esc(role.name)}"></option>`).join('')}</datalist>`;
   const form = openModal({
-    title: 'Ajouter une automatisation',
-    subtitle: 'Choisissez le type, le salon ou la catégorie, puis activez-la.',
-    submitLabel: 'Ajouter l’automatisation',
+    title: preset ? `Configurer « ${preset.label} »` : 'Ajouter une automatisation',
+    subtitle: preset
+      ? 'Choisis le salon, la catégorie et les options avant d’activer ce modèle.'
+      : 'Choisissez le type, le salon ou la catégorie, puis activez-la.',
+    submitLabel: preset ? 'Activer l’automatisation' : 'Ajouter l’automatisation',
     body: `
       <div class="field"><label>Serveur de l’automatisation</label><input class="input" value="${esc(serverName)}" disabled><div class="hint">Elle sera active uniquement sur ce serveur.</div></div>
       <div class="field"><label for="autoType">Type d’automatisation</label>
-        <select class="select" id="autoType" name="type">
-          ${AUTOMATION_TYPES.map((entry) => `<option value="${esc(entry.type)}">${esc(entry.label)}</option>`).join('')}
+        <select class="select" id="autoType" name="type" ${preset ? 'disabled' : ''}>
+          ${AUTOMATION_TYPES.map((entry) => `<option value="${esc(entry.type)}" ${entry.type === initialType ? 'selected' : ''}>${esc(entry.label)}</option>`).join('')}
         </select>
+        ${preset ? `<input type="hidden" name="type" value="${esc(initialType)}">` : ''}
       </div>
       <div class="field"><label for="autoLabel">Nom</label>
-        <input class="input" id="autoLabel" name="label" value="${esc(AUTOMATION_TYPES[0].label)}" maxlength="80">
+        <input class="input" id="autoLabel" name="label" value="${esc(initialLabel)}" maxlength="80">
       </div>
       <div id="autoFields"></div>
       ${datalists}
       <p class="hint">Le salon et la catégorie sont utilisés dès que le bot est connecté avec son token.</p>
     `,
     onSubmit: async (formData) => {
-      const type = String(formData.get('type') || 'welcome');
+      const type = String(formData.get('type') || initialType);
       const config = {};
       for (const field of automationFields(type)) {
         const raw = formData.get(field.key);
@@ -2316,12 +2393,15 @@ onAction('new-automation', (el) => {
         else if (field.type === 'roles') config[field.key] = roleList(formData.getAll(field.key));
         else config[field.key] = String(raw || '').trim();
       }
-      await api(`/api/bots/${bot.id}/automations`, {
+      const { automation } = await api(`/api/bots/${bot.id}/automations`, {
         method: 'POST',
         body: JSON.stringify({ type, label: formData.get('label'), config, serverId: server?.id || '' }),
       });
+      if (type === 'ticketPanel' && automation?.id) {
+        await api(`/api/bots/${bot.id}/automations/${automation.id}/run`, { method: 'POST' }).catch(() => {});
+      }
       await refresh();
-      toast('Automatisation ajoutée.');
+      toast(preset ? `« ${formData.get('label')} » activée.` : 'Automatisation ajoutée.', 'success');
     },
   });
   const typeSelect = form.querySelector('#autoType');
@@ -2329,18 +2409,24 @@ onAction('new-automation', (el) => {
   const labelInput = form.querySelector('#autoLabel');
   const renderFields = () => {
     const type = typeSelect.value;
-    const preset = AUTOMATION_TYPES.find((entry) => entry.type === type);
-    if (labelInput && preset) labelInput.value = preset.label;
+    const typePreset = AUTOMATION_TYPES.find((entry) => entry.type === type);
+    if (!preset && labelInput && typePreset) labelInput.value = typePreset.label;
     if (fieldsHost) {
-      fieldsHost.innerHTML = automationFields(type).map((field) => automationFieldControl(field, '', bot.discord || {})).join('');
+      const config = preset && preset.type === type ? preset.config || {} : {};
+      fieldsHost.innerHTML = automationFields(type).map((field) => automationFieldControl(field, config[field.key], bot.discord || {})).join('');
       bindAutomationPickers(fieldsHost);
     }
   };
   typeSelect?.addEventListener('change', renderFields);
   renderFields();
+}
+
+onAction('new-automation', (el) => {
+  const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
+  if (bot) openAutomationModal(bot);
 });
 
-onAction('add-automation-preset', async (el) => {
+onAction('add-automation-preset', (el) => {
   const bot = state.ws.bots.find((entry) => entry.id === el.dataset.id);
   const preset = AUTOMATION_PRESETS.find((entry) => entry.id === el.dataset.preset);
   if (!bot || !preset) return;
@@ -2356,27 +2442,7 @@ onAction('add-automation-preset', async (el) => {
     toast('Cette automatisation est déjà installée sur ce serveur.', 'info');
     return;
   }
-  el.disabled = true;
-  try {
-    const created = await api(`/api/bots/${bot.id}/automations`, {
-      method: 'POST',
-      body: JSON.stringify({
-        type: preset.type,
-        label: preset.label,
-        config: preset.config,
-        serverId: server.id,
-        enabled: true,
-      }),
-    });
-    if (preset.type === 'ticketPanel' && created?.automation?.id) {
-      await api(`/api/bots/${bot.id}/automations/${created.automation.id}/run`, { method: 'POST' }).catch(() => {});
-    }
-    await refresh();
-    toast(`« ${preset.label} » activée sur ${server.guildName || server.name}.`, 'success');
-  } catch (error) {
-    toast(error.message, 'error');
-    el.disabled = false;
-  }
+  openAutomationModal(bot, preset);
 });
 
 onAction('delete-automation', (el) => {

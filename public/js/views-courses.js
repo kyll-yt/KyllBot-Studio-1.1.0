@@ -17,6 +17,7 @@ function courseHelpPanel() {
       <div>
         <h3>À quoi sert le côté Formation ?</h3>
         <p>Un parcours mesurable pour votre communauté : modules, leçons, quiz, progression réelle et certificats.</p>
+        <p style="margin-top:6px">En clair : tu prépares les leçons, tes membres les suivent depuis Discord, et tu vois qui a terminé. Le bot peut envoyer les rappels et attribuer un rôle à la fin.</p>
         <p style="margin-top:6px;font-size:11.5px;color:var(--muted-2)">Exemples concrets : accueil des nouveaux membres, formation des modérateurs, certification de clients ou de bénévoles.</p>
       </div>
       <button class="btn btn-ghost btn-sm" data-action="course-help">En savoir plus</button>

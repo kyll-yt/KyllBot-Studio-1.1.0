@@ -507,7 +507,7 @@ onAction('invite-member', () => {
     submitLabel: 'Vérifier et inviter',
     body: `
       <div class="form-row">
-        <div class="field"><label for="imName">Nom</label><input class="input" id="imName" name="name" placeholder="Léa Martin"></div>
+        <div class="field"><label for="imName">Nom</label><input class="input" id="imName" name="name" placeholder="Nom du membre"></div>
         <div class="field"><label for="imEmail">Email</label><input class="input" id="imEmail" name="email" type="email" placeholder="lea@exemple.com" required></div>
       </div>
       <div class="field"><label for="imRole">Rôle</label>

@@ -135,7 +135,7 @@ export function seedWorkspace(user, { includeBots = true } = {}) {
     },
   ] : [];
 
-  const courses = [
+  const courses = includeBots ? [
     {
       id: c1,
       title: 'Créer son premier bot Discord',
@@ -239,23 +239,25 @@ export function seedWorkspace(user, { includeBots = true } = {}) {
         { id: newId(), question: 'Le principe du moindre privilège consiste à…', options: ['Donner admin à tous', 'Limiter les droits au strict nécessaire', 'Désactiver les logs', 'Bannir les nouveaux'], answer: 1, points: 1 },
       ],
     },
-  ];
+  ] : [];
 
   // Aucune personne fictive : apprenants et équipe démarrent vides.
   const learners = [];
   const team = [];
 
-  const apiKeys = [
-    {
-      id: newId(),
-      label: 'Intégration site vitrine',
-      prefix: 'kyll_live_',
-      hint: 'a91f',
-      createdAt: iso(11),
-      lastUsed: iso(0, 5),
-      scopes: ['bots:read', 'courses:read'],
-    },
-  ];
+  const apiKeys = includeBots
+    ? [
+        {
+          id: newId(),
+          label: 'Intégration site vitrine',
+          prefix: 'kyll_live_',
+          hint: 'a91f',
+          createdAt: iso(11),
+          lastUsed: iso(0, 5),
+          scopes: ['bots:read', 'courses:read'],
+        },
+      ]
+    : [];
 
   const activity = [
     ...bots.map((bot) => ({ id: newId(), type: 'bot', message: `Le bot « ${bot.name} » a été créé`, at: bot.createdAt })),
@@ -283,13 +285,13 @@ export function seedWorkspace(user, { includeBots = true } = {}) {
     addons: defaultAddons(),
     purchases: [],
     invoices: [],
-    schemaVersion: 2,
+    schemaVersion: 4,
     settings: {
       timezone: 'Europe/Paris',
       language: 'fr',
       notifications: { email: true, product: true, weekly: true },
       branding: { accent: '#6d5efc', darkMode: true },
-      appearance: { theme: 'classic', neon: false, glass: false, animations: true, compact: false, rounded: false, grid: false, glowText: false, reducedMotion: false },
+      appearance: { theme: 'classic', canvasStyle: 'dots', neon: false, glass: false, animations: true, compact: false, rounded: false, grid: false, glowText: false, reducedMotion: false },
     },
     createdAt: new Date().toISOString(),
   };
