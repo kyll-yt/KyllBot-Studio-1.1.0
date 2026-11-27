@@ -328,8 +328,23 @@ function flowOutputPairs(block) {
       { branch: 'else', target: block.elseId || null, tone: 'alt', label: 'faux' },
     ];
   }
-  if (block.type === 'button' || (block.type === 'message' && Array.isArray(block.buttons) && block.buttons.length) || (block.type === 'ticket' && (!block.action || block.action === 'open'))) {
-    if (block.type !== 'ticket' && (!Array.isArray(block.buttons) || !block.buttons.length)) {
+  if (block.type === 'ticket') {
+    const base = {
+      branch: 'next',
+      target: block.next || null,
+      tone: 'ok',
+      label: (block.action || 'open') === 'open' ? 'après ouverture' : 'après l’action',
+    };
+    if ((block.action || 'open') !== 'open') return [base];
+    return [base, ...ensureFlowButtons(block).map((button, index) => ({
+      branch: `button:${button.id}`,
+      target: button.next || null,
+      tone: 'ok',
+      label: `${button.emoji ? `${button.emoji} ` : ''}${button.label || `Bouton ${index + 1}`}`,
+    }))];
+  }
+  if (block.type === 'button' || (block.type === 'message' && Array.isArray(block.buttons) && block.buttons.length)) {
+    if (!Array.isArray(block.buttons) || !block.buttons.length) {
       block.buttons = blockButtons(block);
     }
     const buttons = ensureFlowButtons(block);
@@ -350,14 +365,6 @@ function flowOutputPairs(block) {
       tone: 'ok',
       label: `V${index + 1} · ${Math.round(((Number(variant.weight) || 1) / total) * 100)} %`,
     }));
-  }
-  if (block.type === 'ticket') {
-    return [{
-      branch: 'next',
-      target: block.next || null,
-      tone: 'ok',
-      label: (block.action || 'open') === 'open' ? 'après ouverture' : 'après l’action',
-    }];
   }
   return [{ branch: 'next', target: block.next || null, tone: 'ok', label: '' }];
 }
@@ -1353,7 +1360,7 @@ function flowBlockRows(block) {
               ['Rôle staff', block.staffRole],
               ['Logs', block.logChannel],
               ['Tickets max', `${block.maxOpen || 1} par membre`],
-              ['Boutons / sorties', buttons.length ? `${buttons.length} bouton(s) · ${buttons.length} sortie(s)` : 'aucun bouton · 1 sortie automatique'],
+              ['Boutons / sorties', buttons.length ? `${buttons.length} bouton(s) · ${buttons.length + 1} sortie(s) (base + boutons)` : 'aucun bouton · 1 sortie de base'],
               ['Fermeture', `${block.closeMode || 'delete'}${Number(block.closeDelay) ? ` · ${block.closeDelay} s` : ''}`],
               ['Options', [block.pingStaff !== false ? 'ping staff' : '', block.transcript ? 'transcript' : '', block.claimButton !== false ? 'réclamer' : '', block.closeButton !== false ? 'fermer' : ''].filter(Boolean).join(' · ') || 'standard'],
             ]
@@ -1869,7 +1876,7 @@ function renderNode(block, flow) {
   const summary = renderBlockSummary(block);
   const outputClass = `node-outs${pairs.length > 1 ? ' multi' : ''}${block.type === 'condition' ? ' two' : ''}`;
   const outputs = `<div class="${outputClass}">
-        ${pairs.map((pair) => `<button class="port out ${pair.branch === 'then' ? 'then' : pair.branch === 'else' ? 'else' : ''}" data-node="${block.id}" data-branch="${esc(pair.branch)}" title="Glissez vers un bloc"><i></i>${pair.label ? `<span>${esc(pair.label)}</span>` : ''}</button>`).join('')}
+        ${pairs.map((pair) => `<button class="port out ${pair.branch === 'then' ? 'then' : pair.branch === 'else' ? 'else' : ''}" data-node="${block.id}" data-branch="${esc(pair.branch)}" title="${pair.label ? `${esc(pair.label)} — ` : ''}Glissez vers un bloc"><i></i>${pair.label ? `<span>${esc(pair.label)}</span>` : ''}</button>`).join('')}
       </div>`;
 
   return `<div class="node tone-${meta.tone}${isStart ? ' is-start' : ''}" data-node="${block.id}" data-type="${block.type}" style="left:${block.x}px;top:${block.y}px">
@@ -1960,11 +1967,11 @@ function renderEmbedFields(block) {
 
 function renderTicketButtons(block) {
   const buttons = ensureFlowButtons(block);
-  const outputs = buttons.length || 1;
+  const outputs = buttons.length + 1;
   const bindButton = (index, field) => `data-node="${block.id}" data-button="${index}" data-button-field="${field}"`;
   return `<div class="button-editor-head">
       <b>${buttons.length} bouton(s) · ${outputs} sortie(s)</b>
-      <span>${buttons.length ? 'Chaque bouton crée une sortie du bloc' : 'Sans bouton : une sortie « après ouverture »'}</span>
+      <span>${buttons.length ? '1 sortie de base + 1 sortie par bouton' : 'Une seule sortie de base'}</span>
     </div>
     <div class="button-editor ticket-buttons">
       ${buttons.map((button, index) => `<div class="button-editor-row ticket-btn-row">
@@ -1982,7 +1989,7 @@ function renderTicketButtons(block) {
       </div>`).join('')}
     </div>
     <button class="link-btn" data-action="flow-add-button" data-id="${block.id}" ${buttons.length >= 5 ? 'disabled' : ''}>${icon('plus')} Ajouter un bouton / une sortie</button>
-    <p class="hint">Les boutons Réclamer et Fermer restent toujours disponibles. Chaque bouton ajouté ici devient une sortie du bloc : relie-la à la suite du flux.</p>`;
+    <p class="hint">La sortie de base « après ouverture » reste toujours présente. Chaque bouton ajouté crée une sortie en plus, à relier à la suite du flux. Les boutons Réclamer et Fermer restent toujours disponibles.</p>`;
 }
 
 function renderMessageButtons(block) {

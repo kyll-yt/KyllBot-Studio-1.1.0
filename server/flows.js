@@ -2148,7 +2148,6 @@ export async function runFlow(flow, input = {}) {
           flowId: flow.id,
           blockId: block.id,
         });
-        if (block.action === 'open' && buttons.length) next = null;
         entry.detail = `ticket ${block.action}${block.category ? ` · ${block.category}` : ''}${buttons.length ? ` · ${buttons.length} bouton(s)` : ''}`;
         break;
       }

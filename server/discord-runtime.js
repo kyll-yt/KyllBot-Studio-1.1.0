@@ -3273,7 +3273,7 @@ async function handleInteraction(botId, interaction) {
           (entry) => entry.id === button.target || String(entry.name || '').toLowerCase() === String(button.target).toLowerCase(),
         )
       : null;
-    const nextBlock = button.next || block.next;
+    const nextBlock = button.next || (block.type === 'ticket' ? null : block.next);
     if (!targetFlow && !nextBlock) {
       await interaction.reply({ content: 'Ce bouton n’a pas encore d’action configurée.', ephemeral: true });
       return;
