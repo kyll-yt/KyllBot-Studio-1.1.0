@@ -1770,6 +1770,20 @@ function openBlockEditor(blockId, { autoFocus = true } = {}) {
     </div>`,
   });
   requestAnimationFrame(decorateFlowVarFields);
+  const root = document.getElementById('modalRoot');
+  const close = () => {
+    if (flowEditor.editBlockId !== blockId) return;
+    closeRoleMention();
+    closeFlowVarPicker();
+    flowEditor.editBlockId = null;
+    flowEditor.messageEditorBlockId = null;
+    render();
+  };
+  root.querySelectorAll('[data-close]').forEach((button) => button.addEventListener('click', close));
+  const backdrop = root.querySelector('.modal-backdrop');
+  backdrop?.addEventListener('mousedown', (event) => {
+    if (event.target === backdrop) close();
+  });
 }
 
 function openMessageEditor(blockId, { autoFocus = true } = {}) {
@@ -1888,6 +1902,7 @@ function renderNode(block, flow) {
         <div class="node-title-row">
           <span class="node-title">${esc(block.customName || meta.label)}</span>
           ${isStart ? '<span class="node-badge">départ</span>' : ''}
+          ${block.type === 'ticket' ? `<span class="node-badge">${pairs.length} sortie${pairs.length > 1 ? 's' : ''}</span>` : ''}
         </div>
         <p class="node-desc">${esc(meta.hint)}</p>
       </div>
@@ -2782,7 +2797,7 @@ function renderNodeFieldsB(block) {
           ${nodeField('Bouton Fermer', `<button class="switch ${block.closeButton !== false ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="closeButton"></button>`, 'shrink')}
         </div>
         <p class="hint">Le salon est privé : le membre, le bot et le rôle staff peuvent le voir. Le salon de logs reçoit les ouvertures, fermetures et transcripts.</p>`
-          : '<p class="hint">Cette action agit sur le ticket du salon actuel. La fermeture utilise le mode et le délai configurés à l’ouverture du ticket.</p>'}`;
+          : '<p class="hint">Cette action agit sur le ticket du salon actuel. La fermeture utilise le mode et le délai configurés à l’ouverture du ticket. Les boutons personnalisés et leurs sorties sont disponibles avec l’action « Ouvrir un ticket ».</p>'}`;
     }
     case 'level':
       return `<div class="fld-row">
