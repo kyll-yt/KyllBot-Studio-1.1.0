@@ -1328,7 +1328,9 @@ function resolveOperand(value, ctx, vars) {
 }
 
 function normalizeRoleName(value) {
-  const normalized = String(value || '')
+  const input = String(value || '').trim();
+  if (!input) return '';
+  const normalized = input
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
@@ -1338,8 +1340,10 @@ function normalizeRoleName(value) {
     .replace(/\s*-\s*/g, '-')
     .replace(/-+/g, '-')
     .replace(/[\s\u00a0]+/g, ' ')
-    .trim();
-  return /^-+$/.test(normalized) ? '-' : normalized;
+    .trim()
+    .replace(/^[\p{P}\p{S}\s]+/u, '')
+    .replace(/[\p{P}\p{S}\s]+$/u, '');
+  return normalized || '#separateur';
 }
 
 function evaluateRule(rule, ctx, vars) {
