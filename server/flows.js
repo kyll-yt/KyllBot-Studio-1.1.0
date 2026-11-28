@@ -1327,6 +1327,21 @@ function resolveOperand(value, ctx, vars) {
   return single ? resolvePath(single[1], ctx, vars) : interpolate(raw, ctx, vars);
 }
 
+function normalizeRoleName(value) {
+  const normalized = String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[\u200b-\u200d\u2060\ufeff]/g, '')
+    .replace(/^@+/, '')
+    .replace(/[–—―‒﹣－─━]/g, '-')
+    .replace(/\s*-\s*/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/[\s\u00a0]+/g, ' ')
+    .trim();
+  return /^-+$/.test(normalized) ? '-' : normalized;
+}
+
 function evaluateRule(rule, ctx, vars) {
   const left = resolveOperand(rule.left, ctx, vars);
   const right = resolveOperand(rule.right, ctx, vars);
@@ -1334,20 +1349,25 @@ function evaluateRule(rule, ctx, vars) {
   const b = String(right).toLowerCase();
   const numA = Number(a.replace(',', '.'));
   const numB = Number(b.replace(',', '.'));
+  const isRoleList = String(rule.left || '').trim() === '{{user.roles}}';
+  const wantedRole = normalizeRoleName(right);
+  const hasRole = Boolean(wantedRole) && ctx.user.roles.some(
+    (role) => role.toLowerCase() === b || normalizeRoleName(role) === wantedRole,
+  );
 
   let pass = false;
   switch (rule.op) {
-    case 'eq': pass = a === b; break;
-    case 'neq': pass = a !== b; break;
-    case 'contains': pass = a.includes(b); break;
-    case 'notContains': pass = !a.includes(b); break;
+    case 'eq': pass = isRoleList ? hasRole : a === b; break;
+    case 'neq': pass = isRoleList ? !hasRole : a !== b; break;
+    case 'contains': pass = isRoleList ? a.includes(b) || hasRole : a.includes(b); break;
+    case 'notContains': pass = isRoleList ? !(a.includes(b) || hasRole) : !a.includes(b); break;
     case 'startsWith': pass = a.startsWith(b); break;
     case 'endsWith': pass = a.endsWith(b); break;
     case 'gt': pass = Number.isFinite(numA) && Number.isFinite(numB) && numA > numB; break;
     case 'lt': pass = Number.isFinite(numA) && Number.isFinite(numB) && numA < numB; break;
     case 'gte': pass = Number.isFinite(numA) && Number.isFinite(numB) && numA >= numB; break;
     case 'lte': pass = Number.isFinite(numA) && Number.isFinite(numB) && numA <= numB; break;
-    case 'hasRole': pass = ctx.user.roles.some((role) => role.toLowerCase() === b); break;
+    case 'hasRole': pass = hasRole; break;
     case 'chance': pass = Math.random() * 100 < (Number.isFinite(numB) ? numB : 50); break;
     default: pass = false;
   }
@@ -1372,7 +1392,7 @@ export async function runFlow(flow, input = {}) {
       name: str(input.user?.name, 40) || 'Alex',
       id: str(input.user?.id, 40),
       mention: str(input.user?.mention, 60),
-      roles: Array.isArray(input.user?.roles) ? input.user.roles.map((role) => str(role, 40)).filter(Boolean) : ['Membre'],
+      roles: Array.isArray(input.user?.roles) ? input.user.roles.map((role) => str(role, 100)).filter(Boolean) : ['Membre'],
       createdTimestamp: Number(input.user?.createdTimestamp) || 0,
       bot: Boolean(input.user?.bot),
       hasAvatar: Boolean(input.user?.hasAvatar),

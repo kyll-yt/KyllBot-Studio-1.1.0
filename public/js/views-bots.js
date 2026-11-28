@@ -667,7 +667,7 @@ function automationFieldControl(field, value, discord = {}) {
           ${options.map((role) => `<label class="check-row"><input type="checkbox" name="${esc(field.key)}" value="${esc(role)}" ${selected.includes(role) ? 'checked' : ''}> <span>${esc(role)}</span></label>`).join('')}
         </div>
         <div class="form-row">
-          <input class="input" data-role-custom list="${esc(field.list || '')}" placeholder="Ajouter un autre rôle…">
+          <input class="input" data-role-custom list="${esc(field.list || '')}" placeholder="Nom, ID ou @mention du rôle…">
           <button type="button" class="btn btn-ghost btn-sm" data-role-add>${icon('plus')} Ajouter</button>
         </div>
       </div>

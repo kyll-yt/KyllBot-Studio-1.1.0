@@ -479,25 +479,58 @@ function resolveCategory(guild, ref) {
   return guild.channels.cache.find((channel) => channel.type === ChannelType.GuildCategory && channel.name?.toLowerCase() === lower) || null;
 }
 
+function normalizeRoleName(value) {
+  const normalized = String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[\u200b-\u200d\u2060\ufeff]/g, '')
+    .replace(/^@+/, '')
+    .replace(/[–—―‒﹣－─━]/g, '-')
+    .replace(/\s*-\s*/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/[\s\u00a0]+/g, ' ')
+    .trim();
+  return /^-+$/.test(normalized) ? '-' : normalized;
+}
+
 function resolveRole(guild, ref) {
   if (!guild) return null;
   const raw = String(ref || '').trim().replace(/^@/, '');
   if (!raw || raw.toLowerCase() === 'everyone') return null;
+  const mention = raw.match(/^<@&(\d{17,20})>$/);
+  if (mention) return guild.roles.cache.get(mention[1]) || null;
   if (/^\d{17,20}$/.test(raw)) return guild.roles.cache.get(raw) || null;
   const lower = raw.toLowerCase();
-  return guild.roles.cache.find((role) => role.name?.toLowerCase() === lower && !role.managed) || null;
+  const exact = guild.roles.cache.find((role) => role.name?.toLowerCase() === lower && !role.managed);
+  if (exact) return exact;
+  const normalized = normalizeRoleName(raw);
+  if (!normalized) return null;
+  return guild.roles.cache.find(
+    (role) => !role.managed && normalizeRoleName(role.name) === normalized,
+  ) || null;
 }
 
 function memberHasAnyRole(member, refs) {
   const list = Array.isArray(refs) ? refs : String(refs || '').split(',');
-  const wanted = new Set(
-    list
-      .map((role) => String(role || '').trim().replace(/^@/, '').toLowerCase())
-      .filter((role) => role && role !== 'everyone'),
-  );
+  const wanted = new Set();
+  const wantedNormalized = new Set();
+  for (const entry of list) {
+    const raw = String(entry || '').trim().replace(/^@/, '');
+    if (!raw || raw.toLowerCase() === 'everyone') continue;
+    const mention = raw.match(/^<@&(\d{17,20})>$/);
+    if (mention) wanted.add(mention[1]);
+    wanted.add(raw);
+    wanted.add(raw.toLowerCase());
+    const normalized = normalizeRoleName(raw);
+    if (normalized) wantedNormalized.add(normalized);
+  }
   if (!wanted.size) return false;
   for (const role of member?.roles?.cache?.values?.() || []) {
-    if (wanted.has(role.id) || wanted.has(String(role.name || '').toLowerCase())) return true;
+    const name = String(role.name || '');
+    if (wanted.has(role.id) || wanted.has(name) || wanted.has(name.toLowerCase())) return true;
+    const normalized = normalizeRoleName(name);
+    if (normalized && wantedNormalized.has(normalized)) return true;
   }
   return false;
 }
@@ -1429,6 +1462,7 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
         }
         case 'role': {
           const role = resolveRole(guild, output.role);
+          if (!role) log(runtime, 'warn', `Rôle introuvable : « ${output.role || '—'} » (${flow.name || flow.id}).`);
           if (role && member) {
             if (output.action === 'remove') await member.roles.remove(role, 'KyllBot Studio');
             else await member.roles.add(role, 'KyllBot Studio');
