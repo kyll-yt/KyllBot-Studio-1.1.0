@@ -21,6 +21,8 @@ const SUPABASE_KEY = firstEnv(
 );
 const TABLE = (firstEnv('SUPABASE_STATE_TABLE', 'supabaseStateTable') || 'kyll_state').replace(/^public\./i, '');
 const STATE_ID = firstEnv('SUPABASE_STATE_ID', 'supabaseStateId') || 'default';
+const LOAD_TIMEOUT_MS = Number(process.env.SUPABASE_LOAD_TIMEOUT_MS || 10000);
+const SAVE_TIMEOUT_MS = Number(process.env.SUPABASE_SAVE_TIMEOUT_MS || 30000);
 
 function jwtRole(key) {
   if (!key) return 'missing';
@@ -124,7 +126,7 @@ export async function loadRemoteRecord() {
     `${SUPABASE_URL}/rest/v1/${TABLE}?id=eq.${encodeURIComponent(STATE_ID)}&select=data,updated_at`,
     {
       headers: headers(),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(LOAD_TIMEOUT_MS),
     },
   );
 
@@ -169,7 +171,7 @@ export async function saveRemoteState(data, expectedUpdatedAt = null, expectExis
           Prefer: 'return=representation',
         }),
         body: JSON.stringify({ data: packed, updated_at: updatedAt }),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(SAVE_TIMEOUT_MS),
       },
     );
   } else {
@@ -180,7 +182,7 @@ export async function saveRemoteState(data, expectedUpdatedAt = null, expectExis
         Prefer: 'resolution=ignore-duplicates,return=representation',
       }),
       body: JSON.stringify([{ id: STATE_ID, data: packed, updated_at: updatedAt }]),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(SAVE_TIMEOUT_MS),
     });
   }
 

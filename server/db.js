@@ -148,13 +148,13 @@ export let storageError = null;
 if (!remoteStoreEnabled && remoteStoreInfo.configError) storageError = remoteStoreInfo.configError;
 
 async function loadRemoteWithRetry() {
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
       return await loadRemoteRecord();
     } catch (error) {
-      if (attempt === 3) throw error;
-      console.warn(`[db] Supabase tentative ${attempt}/3 échouée : ${error.message}`);
-      await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+      if (attempt === 2) throw error;
+      console.warn(`[db] Supabase tentative ${attempt}/2 échouée : ${error.message}`);
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   }
   return { state: null, updatedAt: null, exists: false };
@@ -286,7 +286,7 @@ if (remoteStoreEnabled && !remoteWritesEnabled) {
     } catch (error) {
       storageError = error.message;
     }
-  }, 30000);
+  }, 10000);
   retry.unref?.();
 }
 

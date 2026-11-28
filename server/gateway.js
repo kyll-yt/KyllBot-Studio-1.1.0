@@ -13,7 +13,7 @@ const APP_ENTRY = path.join(ROOT, 'server/index.js');
 const PID_FILE = process.env.PID_FILE || path.join(os.tmpdir(), `kyllbot-app-${APP_PORT}.pid`);
 const DOWN_PAGE = path.join(ROOT, 'public/server-down.html');
 const APP_URL = `http://127.0.0.1:${APP_PORT}`;
-const START_TIMEOUT_MS = Number(process.env.APP_START_TIMEOUT_MS || 30000);
+const START_TIMEOUT_MS = Number(process.env.APP_START_TIMEOUT_MS || 120000);
 const RESTART_COOLDOWN_MS = 5000;
 const AUTOSTART = process.env.APP_AUTOSTART !== '0';
 
@@ -30,6 +30,8 @@ let stopping = false;
 let shuttingDown = false;
 let restartTimer = null;
 let restartDelay = 1000;
+let appSpawnedAt = 0;
+let appReadyOnce = false;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -85,6 +87,7 @@ function spawnApp() {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   appChild = child;
+  appSpawnedAt = Date.now();
   child.stdout.on('data', (chunk) => process.stdout.write(chunk));
   child.stderr.on('data', (chunk) => process.stderr.write(chunk));
   child.on('error', (error) => {
@@ -95,6 +98,7 @@ function spawnApp() {
   });
   child.on('exit', (code, signal) => {
     if (appChild === child) appChild = null;
+    appReadyOnce = false;
     lastExit = { code, signal, at: new Date().toISOString() };
     log(`application arrêtée (code ${code ?? 'null'}, signal ${signal ?? 'aucun'}).`);
     scheduleRestart();
@@ -104,6 +108,7 @@ function spawnApp() {
 
 async function ensureApp() {
   if (await isAppUp()) {
+    appReadyOnce = true;
     restartDelay = 1000;
     return true;
   }
@@ -115,6 +120,7 @@ async function ensureApp() {
     const deadline = Date.now() + START_TIMEOUT_MS;
     while (Date.now() < deadline) {
       if (await isAppUp()) {
+        appReadyOnce = true;
         restartDelay = 1000;
         log(`application prête sur le port ${APP_PORT}.`);
         return true;
@@ -338,6 +344,19 @@ async function handleRestart(req, res) {
 async function handleRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
+  if (url.pathname === '/healthz') {
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+    });
+    res.end(JSON.stringify({
+      ok: true,
+      gateway: 'up',
+      app: appChild && appChild.exitCode === null ? 'starting-or-up' : 'down',
+    }));
+    return;
+  }
+
   if (url.pathname === '/__gateway/health') {
     const up = await isAppUp(500);
     res.writeHead(200, {
@@ -400,6 +419,9 @@ setInterval(async () => {
   if (!AUTOSTART || shuttingDown || stopping || startPromise || healthCheckRunning) return;
   healthCheckRunning = true;
   try {
+    if (!appReadyOnce && Date.now() - appSpawnedAt < START_TIMEOUT_MS) {
+      return;
+    }
     if (!(await isAppUp(1500))) {
       log('application ne répond plus, redémarrage automatique…');
       await stopApp();
