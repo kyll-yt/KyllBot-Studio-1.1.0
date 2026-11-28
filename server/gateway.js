@@ -383,9 +383,10 @@ async function handleRequest(req, res) {
     return;
   }
 
-  if (!(await ensureApp())) {
+  if (!(await isAppUp(500))) {
+    ensureApp().catch((error) => log(`démarrage en arrière-plan impossible : ${error.message}`));
     if (isApiRequest(req)) sendApiDown(res);
-    else if (wantsHtml(req)) sendDownPage(res);
+    else if (wantsHtml(req)) sendDownPage(res, 200);
     else {
       res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end('Site/application déconnecté.');
