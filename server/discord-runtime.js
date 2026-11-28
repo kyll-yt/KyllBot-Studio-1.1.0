@@ -515,6 +515,16 @@ function resolveRole(guild, ref) {
   ) || null;
 }
 
+function resolveRoleList(guild, refs) {
+  const list = Array.isArray(refs) ? refs : String(refs || '').split(',');
+  const roles = new Map();
+  for (const ref of list) {
+    const role = resolveRole(guild, ref);
+    if (role) roles.set(role.id, role);
+  }
+  return [...roles.values()];
+}
+
 function memberHasAnyRole(member, refs) {
   const list = Array.isArray(refs) ? refs : String(refs || '').split(',');
   const wanted = new Set();
@@ -583,7 +593,13 @@ async function createTicketChannel({ bot, guild, member, user, config = {}, sour
   }
 
   const parent = resolveCategory(guild, config.category);
-  const staffRole = resolveRole(guild, config.staffRole);
+  const staffRoles = resolveRoleList(guild, Array.isArray(config.staffRoles) ? config.staffRoles : config.staffRole);
+  const deniedRoles = resolveRoleList(guild, config.deniedRoles);
+  const deniedIds = new Set(deniedRoles.map((role) => role.id));
+  if (member && deniedIds.size && memberHasAnyRole(member, [...deniedIds])) {
+    return { ok: false, error: 'Tu n’es pas autorisé à ouvrir un ticket.' };
+  }
+  const activeStaffRoles = staffRoles.filter((role) => !deniedIds.has(role.id));
   const prefix = String(config.namePrefix || 'ticket')
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, '-')
@@ -625,7 +641,7 @@ async function createTicketChannel({ bot, guild, member, user, config = {}, sour
       ],
     },
   ];
-  if (staffRole) {
+  for (const staffRole of activeStaffRoles) {
     overwrites.push({
       id: staffRole.id,
       allow: [
@@ -649,7 +665,9 @@ async function createTicketChannel({ bot, guild, member, user, config = {}, sour
 
   ticketMeta.set(ticketChannel.id, {
     ownerId: owner.id,
-    staffRole: config.staffRole || '',
+    staffRole: config.staffRole || activeStaffRoles[0]?.id || '',
+    staffRoles: activeStaffRoles.map((role) => role.id).join(','),
+    deniedRoles: [...deniedIds].join(','),
     logChannel: config.logChannel || '',
     closeMode: config.closeMode || 'delete',
     closeDelay: Number(config.closeDelay) || 3,
@@ -707,11 +725,12 @@ async function createTicketChannel({ bot, guild, member, user, config = {}, sour
     );
   }
   if (actionButtons.length) rows.push(new ActionRowBuilder().addComponents(...actionButtons));
-  const staffMention = config.pingStaff !== false && staffRole ? `<@&${staffRole.id}> ` : '';
+  const mentionRoles = config.pingStaff !== false ? activeStaffRoles : [];
+  const staffMention = mentionRoles.length ? `${mentionRoles.map((role) => `<@&${role.id}>`).join(' ')} ` : '';
   await ticketChannel.send({
     content: `${owner ? `<@${owner.id}>` : ''} ${staffMention}${welcome}\nRaison : **${reason}**`,
     components: rows,
-    allowedMentions: { users: [owner.id], roles: staffRole && config.pingStaff !== false ? [staffRole.id] : [] },
+    allowedMentions: { users: [owner.id], roles: mentionRoles.map((role) => role.id) },
   }).catch(() => {});
 
   await sendLog(
@@ -781,9 +800,14 @@ async function handleTicketButton(bot, interaction, guild, member) {
   }
   const meta = ticketMeta.get(channel.id) || {};
   const ownerId = meta.ownerId || ticketOwnerId(channel.topic);
+  const denied = memberHasAnyRole(member, String(meta.deniedRoles || '').split(','));
+  if (denied) {
+    await interaction.reply({ content: 'Tu n’es pas autorisé à gérer ce ticket.', ephemeral: true }).catch(() => {});
+    return;
+  }
   const isStaff =
     Boolean(member?.permissions?.has?.(PermissionsBitField.Flags.ManageChannels)) ||
-    memberHasAnyRole(member, String(meta.staffRole || '').split(',')) ||
+    memberHasAnyRole(member, String(meta.staffRoles || meta.staffRole || '').split(',')) ||
     Boolean(member && channel.permissionsFor?.(member)?.has?.(PermissionsBitField.Flags.ManageChannels));
 
   if (action === 'claim') {
@@ -2434,6 +2458,8 @@ async function executeFlow({ bot, ws, flow, guild, member, channel, message, int
                 category: output.category,
                 reason: output.reason,
                 staffRole: output.staffRole,
+                staffRoles: output.staffRoles,
+                deniedRoles: output.deniedRoles,
                 logChannel: output.logChannel,
                 welcomeMessage: output.welcomeMessage,
                 maxOpen: output.maxOpen,

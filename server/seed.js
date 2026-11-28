@@ -64,7 +64,8 @@ export function seedWorkspace(user, { includeBots = true } = {}) {
         automation('ticketPanel', 'Panneau de tickets', false, {
           channel: '#support',
           category: 'Support',
-          staffRole: 'Support',
+          staffRoles: ['Support'],
+          deniedRoles: [],
           logChannel: '#logs',
           panelTitle: '🎫 Support',
           panelMessage: 'Besoin d’aide ? Clique sur le bouton pour ouvrir un ticket privé avec le staff.',

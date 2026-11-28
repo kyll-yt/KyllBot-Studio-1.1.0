@@ -222,7 +222,7 @@ const AUTOMATION_DESCRIPTIONS = {
   welcome: 'Envoie un message personnalisé à chaque nouveau membre.',
   autorole: 'Attribue automatiquement un ou plusieurs rôles à l’arrivée.',
   levels: 'Gagne de l’XP en discutant et débloque des rôles.',
-  ticketPanel: 'Panneau de tickets avec bouton, rôle staff, logs et limite par membre.',
+  ticketPanel: 'Panneau de tickets avec bouton, plusieurs rôles autorisés et non autorisés, logs et limite par membre.',
   moderation: 'Filtre les messages et applique les sanctions.',
   antiSpam: 'Détecte et bloque les messages répétitifs.',
   autoMod: 'Filtre les contenus indésirables, avec rôles exemptés et blocage des MP au bot.',
@@ -266,11 +266,16 @@ const AUTOMATION_FIELDS = {
     { key: 'channel', label: 'Salon du panneau', placeholder: '#support', list: 'channelSuggestions' },
     { key: 'category', label: 'Catégorie des tickets', placeholder: 'Support', list: 'categorySuggestions' },
     {
-      key: 'staffRole',
-      label: 'Rôle du staff',
-      placeholder: 'Support',
-      list: 'roleSuggestions',
-      hint: 'Ce rôle voit tous les tickets, peut les réclamer et les fermer.',
+      key: 'staffRoles',
+      label: 'Rôles autorisés (staff)',
+      type: 'roles',
+      hint: 'Ces rôles voient tous les tickets, peuvent les réclamer et les fermer. Tu peux en cocher plusieurs.',
+    },
+    {
+      key: 'deniedRoles',
+      label: 'Rôles non autorisés',
+      type: 'roles',
+      hint: 'Ces rôles ne peuvent pas ouvrir ni gérer un ticket. Tu peux en cocher plusieurs.',
     },
     {
       key: 'logChannel',
@@ -511,13 +516,14 @@ const AUTOMATION_PRESETS = [
     id: 'tickets-support',
     type: 'ticketPanel',
     label: 'Panneau de tickets',
-    description: 'Un panneau avec bouton, catégorie, rôle staff, logs et limite de tickets par membre.',
+    description: 'Un panneau avec bouton, catégorie, plusieurs rôles staff, rôles non autorisés, logs et limite de tickets par membre.',
     icon: 'ticket',
     tone: 'violet',
     config: {
       channel: '#support',
       category: 'Support',
-      staffRole: 'Support',
+      staffRoles: ['Support'],
+      deniedRoles: [],
       logChannel: '#logs',
       panelTitle: '🎫 Support',
       panelMessage: 'Besoin d’aide ? Clique sur le bouton pour ouvrir un ticket privé avec le staff.',
@@ -2525,7 +2531,11 @@ onAction('config-automation', (el) => {
       </div>
       ${fields.map((field) => automationFieldControl(
         field,
-        field.type === 'roles' && field.key === 'roles' ? config.roles ?? config.role : config[field.key],
+        field.type === 'roles' && field.key === 'roles'
+          ? config.roles ?? config.role
+          : field.type === 'roles' && field.key === 'staffRoles'
+            ? config.staffRoles ?? config.staffRole
+            : config[field.key],
         bot.discord || {},
       )).join('')}
       <datalist id="channelSuggestions">${(bot.discord?.channels?.length ? bot.discord.channels.filter((channel) => channel.type !== 'voice').map((channel) => `#${channel.name}`) : CHANNEL_SUGGESTIONS).map((item) => `<option value="${esc(item)}"></option>`).join('')}</datalist>

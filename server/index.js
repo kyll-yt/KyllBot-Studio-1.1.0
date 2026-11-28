@@ -299,7 +299,10 @@ function migrateWorkspace(ws) {
             automation.config?.channelId,
             automation.config?.category,
             automation.config?.role,
+            automation.config?.staffRole,
             ...(Array.isArray(automation.config?.roles) ? automation.config.roles : []),
+            ...(Array.isArray(automation.config?.staffRoles) ? automation.config.staffRoles : []),
+            ...(Array.isArray(automation.config?.deniedRoles) ? automation.config.deniedRoles : []),
           ]) ||
           fallbackServerId;
         changed = true;
@@ -568,6 +571,8 @@ const AUTOMATION_CONFIG_KEYS = new Set([
   'roles',
   'exemptRoles',
   'staffRole',
+  'staffRoles',
+  'deniedRoles',
   'panelTitle',
   'panelMessage',
   'buttonLabel',
@@ -620,6 +625,7 @@ function sanitizeAutomationConfig(input, previous = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return next;
   let hasRoles = false;
   let hasLegacyRole = false;
+  let hasStaffRoles = false;
   for (const [key, value] of Object.entries(input)) {
     if (!AUTOMATION_CONFIG_KEYS.has(key)) continue;
     if (typeof value === 'boolean') next[key] = value;
@@ -628,13 +634,15 @@ function sanitizeAutomationConfig(input, previous = {}) {
       const maxLength = ['panelMessage', 'welcomeMessage'].includes(key) ? 1000 : key === 'dmReply' ? 500 : 200;
       next[key] = str(value, maxLength);
       if (key === 'role') hasLegacyRole = true;
-    } else if ((key === 'roles' || key === 'exemptRoles') && Array.isArray(value)) {
+    } else if (['roles', 'exemptRoles', 'staffRoles', 'deniedRoles'].includes(key) && Array.isArray(value)) {
       if (key === 'roles') hasRoles = true;
+      if (key === 'staffRoles') hasStaffRoles = true;
       next[key] = [...new Set(value.map((role) => str(role, 100)).filter(Boolean))].slice(0, 25);
     }
   }
   if (hasRoles) delete next.role;
   else if (hasLegacyRole) delete next.roles;
+  if (hasStaffRoles) delete next.staffRole;
   return next;
 }
 

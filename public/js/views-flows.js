@@ -230,6 +230,40 @@ function flowDiscord() {
   };
 }
 
+function flowRoleList(value) {
+  const entries = Array.isArray(value) ? value : String(value || '').split(',');
+  return [...new Set(
+    entries
+      .map((entry) => String(entry || '').trim().replace(/^@/, ''))
+      .filter(Boolean),
+  )];
+}
+
+function flowRoleMultiPicker(block, key, label, hint) {
+  const selected = flowRoleList(block[key] ?? (key === 'staffRoles' ? block.staffRole : ''));
+  const names = flowDiscord().roles.map((role) => role.name);
+  const options = [...new Set([...names, ...selected].filter(Boolean))];
+  return `<div class="field"><label>${esc(label)}</label>
+    <div class="role-picker" data-flow-role-picker data-node="${esc(block.id)}" data-role-field="${esc(key)}">
+      <div class="role-picker-list">
+        ${options.length
+          ? options.map((name) => `<label class="check-row"><input type="checkbox" data-flow-role-toggle data-node="${esc(block.id)}" data-role-field="${esc(key)}" value="${esc(name)}" ${selected.includes(name) ? 'checked' : ''}> <span>${esc(name)}</span></label>`).join('')
+          : '<p class="hint">Aucun rôle synchronisé pour le moment.</p>'}
+      </div>
+      <div class="form-row">
+        <input class="input" data-flow-role-custom data-node="${esc(block.id)}" data-role-field="${esc(key)}" placeholder="Nom, ID ou @mention du rôle…">
+        <button type="button" class="btn btn-ghost btn-sm" data-action="flow-role-multi-add" data-node="${esc(block.id)}" data-role-field="${esc(key)}">${icon('plus')} Ajouter</button>
+      </div>
+    </div>
+    <div class="hint">${esc(hint || 'Coche plusieurs rôles ou ajoute-en un nouveau.')}</div>
+  </div>`;
+}
+
+function setFlowRoles(block, key, list) {
+  block[key] = flowRoleList(list);
+  if (key === 'staffRoles') block.staffRole = block[key][0] || '';
+}
+
 function flowSelectOptions(values, selected, emptyLabel = '') {
   const value = String(selected || '');
   const list = [...new Set(values.map((entry) => String(entry)).filter(Boolean))];
@@ -660,7 +694,8 @@ function flowNewBlock(type, x = 120, y = 120) {
         action: 'open',
         category: '',
         reason: 'Demande de support',
-        staffRole: 'Support',
+        staffRoles: ['Support'],
+        deniedRoles: [],
         logChannel: '#logs',
         welcomeMessage: 'Ton ticket est ouvert. Décris ton problème, un membre du staff arrive.',
         maxOpen: 1,
@@ -1373,7 +1408,8 @@ function flowBlockRows(block) {
         ...((block.action || 'open') === 'open'
           ? [
               ['Catégorie', block.category],
-              ['Rôle staff', block.staffRole],
+              ['Rôles autorisés', flowRoleList(Array.isArray(block.staffRoles) && block.staffRoles.length ? block.staffRoles : block.staffRole).join(', ') || 'aucun'],
+              ['Rôles non autorisés', flowRoleList(block.deniedRoles).join(', ') || 'aucun'],
               ['Logs', block.logChannel],
               ['Tickets max', `${block.maxOpen || 1} par membre`],
               ['Boutons / sorties', buttons.length ? `${buttons.length} bouton(s) · ${buttons.length + 1} sortie(s) (base + boutons)` : 'aucun bouton · 1 sortie de base'],
@@ -2810,8 +2846,9 @@ function renderNodeFieldsB(block) {
         ${isOpen
           ? `${renderTicketButtons(block)}
         ${nodeField('Catégorie du ticket', flowCategorySelect(bind('category'), block.category))}
+        ${flowRoleMultiPicker(block, 'staffRoles', 'Rôles autorisés (staff)', 'Ces rôles voient tous les tickets, peuvent les réclamer et les fermer. Coche-en autant que nécessaire.')}
+        ${flowRoleMultiPicker(block, 'deniedRoles', 'Rôles non autorisés', 'Ces rôles ne peuvent ni ouvrir ni gérer un ticket. Coche-en autant que nécessaire.')}
         <div class="fld-row">
-          ${nodeField('Rôle du staff', flowRoleSelect(bind('staffRole'), block.staffRole), 'grow')}
           ${nodeField('Salon des logs', flowChannelSelect(bind('logChannel'), block.logChannel, { emptyLabel: 'Aucun journal' }), 'grow')}
         </div>
         ${nodeField('Message d’accueil', `<textarea class="textarea" rows="3" ${bind('welcomeMessage')} placeholder="Ton ticket est ouvert, le staff arrive.">${esc(block.welcomeMessage || '')}</textarea>`)}
@@ -2836,7 +2873,7 @@ function renderNodeFieldsB(block) {
           ${nodeField('Bouton Réclamer', `<button class="switch ${block.claimButton !== false ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="claimButton"></button>`, 'shrink')}
           ${nodeField('Bouton Fermer', `<button class="switch ${block.closeButton !== false ? 'on' : ''}" data-action="flow-node-toggle" data-id="${block.id}" data-field="closeButton"></button>`, 'shrink')}
         </div>
-        <p class="hint">Le salon est privé : le membre, le bot et le rôle staff peuvent le voir. Le salon de logs reçoit les ouvertures, fermetures et transcripts.</p>`
+        <p class="hint">Le salon est privé : le membre, le bot et tous les rôles autorisés peuvent le voir. Les rôles non autorisés ne peuvent ni ouvrir ni gérer un ticket. Le salon de logs reçoit les ouvertures, fermetures et transcripts.</p>`
           : '<p class="hint">Cette action agit sur le ticket du salon actuel. La fermeture utilise le mode et le délai configurés à l’ouverture du ticket. Les boutons personnalisés et leurs sorties sont disponibles avec l’action « Ouvrir un ticket ».</p>'}`;
     }
     case 'level':
@@ -3409,6 +3446,20 @@ onAction('flow-role-mention-pick', (el) => pickRoleMention(Number(el.dataset.ind
 
 onAction('flow-field-vars-close', () => closeFlowVarPicker());
 
+onAction('flow-role-multi-add', (el) => {
+  const block = flowNode(el.dataset.node);
+  const picker = el.closest('[data-flow-role-picker]');
+  const input = picker?.querySelector('[data-flow-role-custom]');
+  const value = String(input?.value || '').trim().replace(/^@/, '');
+  if (!block || !value) return;
+  const key = el.dataset.roleField;
+  const list = flowRoleList(block[key] ?? (key === 'staffRoles' ? block.staffRole : ''));
+  if (!list.some((entry) => entry.toLowerCase() === value.toLowerCase())) list.push(value);
+  setFlowRoles(block, key, list);
+  flowEditor.dirty = true;
+  refreshBlockEditor(block.id);
+});
+
 onAction('flow-node-edit-close', () => {
   closeRoleMention();
   closeFlowVarPicker();
@@ -3839,6 +3890,11 @@ document.addEventListener('scroll', (event) => {
 }, true);
 
 document.addEventListener('keydown', (event) => {
+  if (event.target.matches?.('[data-flow-role-custom]') && event.key === 'Enter') {
+    event.preventDefault();
+    event.target.closest('[data-flow-role-picker]')?.querySelector('[data-action="flow-role-multi-add"]')?.click();
+    return;
+  }
   if (roleMentionPop && event.target === roleMentionTarget) {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
@@ -3880,6 +3936,7 @@ document.addEventListener('input', (event) => {
     flowEditor.dirty = true;
     return;
   }
+  if (el.matches('[data-flow-role-custom]')) return;
 
   const block = flowNode(el.dataset.node);
   if (!block) return;
@@ -3938,6 +3995,17 @@ document.addEventListener('change', (event) => {
 
   const block = flowNode(el.dataset.node);
   if (!block) return;
+  if (el.dataset.flowRoleToggle !== undefined) {
+    const key = el.dataset.roleField;
+    const list = flowRoleList(block[key] ?? (key === 'staffRoles' ? block.staffRole : ''));
+    const value = String(el.value || '').trim();
+    const next = el.checked
+      ? [...list, value].filter(Boolean)
+      : list.filter((entry) => entry.toLowerCase() !== value.toLowerCase());
+    setFlowRoles(block, key, next);
+    flowEditor.dirty = true;
+    return;
+  }
   if (el.dataset.formIndex !== undefined) {
     const fields = normalizeModalFields(block);
     const field = fields[Number(el.dataset.formIndex)];

@@ -713,13 +713,25 @@ function normalizeBlock(block) {
         message: str(block?.message, 500) || 'Invitation : {{invite}}',
         variable: str(block?.variable, 40).replace(/[^\w.-]/g, '') || 'invite',
       };
-    case 'ticket':
+    case 'ticket': {
+      const hasStaffRoles = Array.isArray(block?.staffRoles);
+      const legacyStaffRole = hasStaffRoles ? '' : str(block?.staffRole, 60);
+      const staffRoles = (hasStaffRoles ? block.staffRoles : legacyStaffRole ? [legacyStaffRole] : [])
+        .map((role) => str(role, 100))
+        .filter(Boolean)
+        .slice(0, 25);
+      const deniedRoles = (Array.isArray(block?.deniedRoles) ? block.deniedRoles : [])
+        .map((role) => str(role, 100))
+        .filter(Boolean)
+        .slice(0, 25);
       return {
         ...base,
         action: ['open', 'claim', 'close'].includes(block?.action) ? block.action : 'open',
         category: str(block?.category, 60),
         reason: str(block?.reason, 200),
-        staffRole: str(block?.staffRole, 60),
+        staffRole: legacyStaffRole || staffRoles[0] || '',
+        staffRoles,
+        deniedRoles,
         logChannel: str(block?.logChannel, 60),
         welcomeMessage: str(block?.welcomeMessage, 1000),
         maxOpen: num(block?.maxOpen, 1, 10, 1),
@@ -734,6 +746,7 @@ function normalizeBlock(block) {
         closeButton: block?.closeButton !== false,
         buttons: (Array.isArray(block?.buttons) ? block.buttons : []).slice(0, MAX_BUTTONS).map(normalizeButton),
       };
+    }
     case 'level':
       return { ...base, amount: num(block?.amount, -10000, 10000, 10), variable: str(block?.variable, 40).replace(/[^\w.-]/g, '') || 'xp' };
     case 'randomNumber':
@@ -1083,7 +1096,8 @@ export function flowTemplate(template, botName = 'KyllBot') {
           action: 'open',
           category: 'Support',
           reason: 'Demande de support',
-          staffRole: 'Support',
+          staffRoles: ['Support'],
+          deniedRoles: [],
           logChannel: '#logs',
           welcomeMessage: 'Ton ticket est ouvert. Décris ton problème, un membre du staff arrive.',
           maxOpen: 1,
@@ -2165,6 +2179,8 @@ export async function runFlow(flow, input = {}) {
           category: block.category,
           reason: interpolate(block.reason, ctx, vars),
           staffRole: block.staffRole,
+          staffRoles: block.staffRoles,
+          deniedRoles: block.deniedRoles,
           logChannel: block.logChannel,
           welcomeMessage: interpolate(block.welcomeMessage, ctx, vars),
           maxOpen: block.maxOpen,
